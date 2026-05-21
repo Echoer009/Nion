@@ -1,0 +1,11 @@
+[package]
+name = "uniffi-bindgen-cli"
+version = "0.1.0"
+edition = "2021"
+
+[[bin]]
+name = "uniffi-bindgen"
+path = "main.rs"
+
+[dependencies]
+uniffi = { version = "0.31", features = ["cli"] }

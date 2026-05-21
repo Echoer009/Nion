@@ -1,0 +1,7 @@
+[target.aarch64-linux-android]
+linker = "/home/echonion/android-sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android26-clang"
+rustflags = ["-C", "link-arg=-L/home/echonion/android-sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/aarch64-linux-android/26"]
+
+[target.x86_64-linux-android]
+linker = "/home/echonion/android-sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android26-clang"
+rustflags = ["-C", "link-arg=-L/home/echonion/android-sdk/ndk/27.0.12077973/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/x86_64-linux-android/26"]

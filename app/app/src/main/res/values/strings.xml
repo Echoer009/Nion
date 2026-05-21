@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">Nion</string>
+    <style name="Theme.Nion" parent="android:Theme.Material.Light.NoActionBar" />
+</resources>
