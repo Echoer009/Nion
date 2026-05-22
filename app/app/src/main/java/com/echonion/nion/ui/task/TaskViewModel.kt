@@ -1,7 +1,6 @@
 package com.echonion.nion.ui.task
 
 import android.app.Application
-import android.util.Log
 import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
@@ -49,8 +48,6 @@ data class FlatTaskItem(
     val isGroupFirst: Boolean,
     val isGroupLast: Boolean,
 )
-
-private const val TAG = "TaskViewModel"
 
 class TaskViewModel(private val core: NionCore, private val onError: (String) -> Unit) : ViewModel() {
 
@@ -125,7 +122,6 @@ class TaskViewModel(private val core: NionCore, private val onError: (String) ->
     }
 
     init {
-        Log.d(TAG, "TaskViewModel init, starting refresh()")
         refresh()
     }
 
@@ -257,6 +253,23 @@ class TaskViewModel(private val core: NionCore, private val onError: (String) ->
         }
     }
 
+    fun moveAndReorderTasks(taskId: String, newParentId: String?, siblingIds: List<String>) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    core.updateTaskParent(taskId, newParentId)
+                    if (siblingIds.size > 1) {
+                        core.reorderTasks(siblingIds)
+                    }
+                }
+                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId) }
+                scheduleRefreshCounts()
+            } catch (e: Exception) {
+                onError("移动任务失败: ${e.message}")
+            }
+        }
+    }
+
     fun moveTask(taskId: String, newParentId: String?) {
         viewModelScope.launch {
             try {
@@ -275,6 +288,7 @@ class TaskViewModel(private val core: NionCore, private val onError: (String) ->
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { core.reorderTasks(orderedIds) }
+                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId) }
             } catch (e: Exception) {
                 onError("排序失败: ${e.message}")
             }

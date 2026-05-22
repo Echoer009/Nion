@@ -53,14 +53,6 @@ data class ChatMessage(
     val timestamp: String,
 )
 
-private val sampleMessages = listOf(
-    ChatMessage("1", "嗨！我是 Nion，你的 AI 伙伴。今天过得怎么样？", false, "10:00"),
-    ChatMessage("2", "嘿 Nion！还不错，就是想让自己更有条理一些。", true, "10:01"),
-    ChatMessage("3", "太好了！我注意到你还有几个待办任务，要我帮你安排优先级吗？", false, "10:01"),
-    ChatMessage("4", "好呀，那就麻烦你了！", true, "10:02"),
-    ChatMessage("5", "我们先把高优先级的任务搞定吧。明天有高数课，今晚要不要复习一下？别忘了适当休息，试试番茄钟也许能帮你更好地集中注意力。", false, "10:02"),
-)
-
 @Composable
 fun CompanionSidebar(
     onSidebarDrag: (Float) -> Unit,
@@ -68,7 +60,7 @@ fun CompanionSidebar(
     isVisible: Boolean = false,
     modifier: Modifier = Modifier,
 ) {
-    var messages by remember { mutableStateOf(sampleMessages) }
+    var messages by remember { mutableStateOf<List<ChatMessage>>(emptyList()) }
     var inputText by remember { mutableStateOf("") }
     val listState = rememberLazyListState()
 
@@ -107,6 +99,20 @@ fun CompanionSidebar(
                 verticalArrangement = Arrangement.spacedBy(16.dp),
             ) {
                 item { Spacer(modifier = Modifier.height(4.dp)) }
+                if (messages.isEmpty()) {
+                    item {
+                        Column(
+                            modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                        ) {
+                            Text(
+                                "和 Nion 说点什么吧",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            )
+                        }
+                    }
+                }
                 items(messages, key = { it.id }) { message ->
                     AnimatedVisibility(
                         visible = true,

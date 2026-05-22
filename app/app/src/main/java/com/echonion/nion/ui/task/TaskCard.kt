@@ -7,7 +7,6 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -36,8 +35,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,6 +54,7 @@ fun FlatTaskRow(
     onToggleDone: (TaskItem) -> Unit,
     onClick: (TaskItem) -> Unit,
     isSelected: Boolean,
+    isGroupSelected: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val task = item.task
@@ -63,22 +69,16 @@ fun FlatTaskRow(
         label = "cardColor",
     )
 
-    val contentAlpha by animateFloatAsState(
-        targetValue = if (task.isDone) 0.5f else 1f,
-        animationSpec = tween(300),
-        label = "contentAlpha",
-    )
-
     if (item.depth == 0) {
         MainTaskRow(
             task = task,
             cardColor = cardColor,
-            contentAlpha = contentAlpha,
             priorityColor = priorityColor,
             isGroupLast = item.isGroupLast,
             onToggleDone = onToggleDone,
             onClick = onClick,
             isSelected = isSelected,
+            isGroupSelected = isGroupSelected,
             modifier = modifier,
         )
     } else {
@@ -89,28 +89,66 @@ fun FlatTaskRow(
             onToggleDone = onToggleDone,
             onClick = onClick,
             isSelected = isSelected,
+            isGroupSelected = isGroupSelected,
             modifier = modifier,
         )
     }
+}
+
+private fun Modifier.groupBorder(
+    isGroupFirst: Boolean,
+    isGroupLast: Boolean,
+    color: Color,
+    widthPx: Float,
+): Modifier = this.drawWithContent {
+    drawContent()
+    val w = widthPx
+    val half = w / 2
+    val r = 12f * this@drawWithContent.density
+    val sw = this@drawWithContent.size.width
+    val sh = this@drawWithContent.size.height
+    if (isGroupFirst && isGroupLast) {
+        drawRoundRect(color, style = Stroke(w), cornerRadius = CornerRadius(r))
+        return@drawWithContent
+    }
+    val path = Path()
+    if (isGroupFirst) {
+        path.moveTo(half, sh)
+        path.lineTo(half, r)
+        path.quadraticBezierTo(half, half, r, half)
+        path.lineTo(sw - r, half)
+        path.quadraticBezierTo(sw - half, half, sw - half, r)
+        path.lineTo(sw - half, sh)
+    } else if (isGroupLast) {
+        path.moveTo(half, 0f)
+        path.lineTo(half, sh - r)
+        path.quadraticBezierTo(half, sh - half, r, sh - half)
+        path.lineTo(sw - r, sh - half)
+        path.quadraticBezierTo(sw - half, sh - half, sw - half, sh - r)
+        path.lineTo(sw - half, 0f)
+    } else {
+        path.moveTo(half, 0f)
+        path.lineTo(half, sh)
+        path.moveTo(sw - half, 0f)
+        path.lineTo(sw - half, sh)
+    }
+    drawPath(path, color, style = Stroke(w))
 }
 
 @Composable
 private fun MainTaskRow(
     task: TaskItem,
     cardColor: Color,
-    contentAlpha: Float,
     priorityColor: Color,
     isGroupLast: Boolean,
     onToggleDone: (TaskItem) -> Unit,
     onClick: (TaskItem) -> Unit,
     isSelected: Boolean,
+    isGroupSelected: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val shape = if (isGroupLast) MaterialTheme.shapes.medium
         else RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 0.dp, bottomEnd = 0.dp)
-
-    val borderShape = if (isGroupLast) RoundedCornerShape(16.dp)
-        else RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp, bottomStart = 0.dp, bottomEnd = 0.dp)
 
     val checkScale = remember { Animatable(1f) }
     LaunchedEffect(task.isDone) {
@@ -126,11 +164,20 @@ private fun MainTaskRow(
         label = "checkBg",
     )
 
+    val borderColor = MaterialTheme.colorScheme.primary
+    val borderWidth = with(androidx.compose.ui.platform.LocalDensity.current) { 2.dp.toPx() }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .then(
+                when {
+                    isGroupSelected -> Modifier.groupBorder(true, isGroupLast, borderColor, borderWidth)
+                    isSelected -> Modifier.border(BorderStroke(2.dp, borderColor), shape)
+                    else -> Modifier
+                }
+            )
             .background(cardColor, shape)
-            .then(if (isSelected) Modifier.border(BorderStroke(2.dp, MaterialTheme.colorScheme.primary), borderShape) else Modifier)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -191,6 +238,7 @@ private fun SubTaskRow(
     onToggleDone: (TaskItem) -> Unit,
     onClick: (TaskItem) -> Unit,
     isSelected: Boolean,
+    isGroupSelected: Boolean,
     modifier: Modifier = Modifier,
 ) {
     val task = item.task
@@ -203,16 +251,20 @@ private fun SubTaskRow(
     else
         RoundedCornerShape(0.dp)
 
-    val borderShape = if (item.isGroupLast)
-        RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp)
-    else
-        RoundedCornerShape(0.dp)
+    val borderColor = MaterialTheme.colorScheme.primary
+    val borderWidth = with(androidx.compose.ui.platform.LocalDensity.current) { 2.dp.toPx() }
 
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .then(
+                when {
+                    isGroupSelected -> Modifier.groupBorder(false, item.isGroupLast, borderColor, borderWidth)
+                    isSelected -> Modifier.border(BorderStroke(2.dp, borderColor), shape)
+                    else -> Modifier
+                }
+            )
             .background(cardColor, shape)
-            .then(if (isSelected) Modifier.border(BorderStroke(2.dp, MaterialTheme.colorScheme.primary), borderShape) else Modifier)
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

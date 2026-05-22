@@ -1,7 +1,19 @@
 package com.echonion.nion.ui.schedule
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -54,6 +66,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import kotlin.math.ceil
 
 data class ScheduleEvent(
     val id: String,
@@ -64,28 +77,86 @@ data class ScheduleEvent(
     val dayOfWeek: DayOfWeek,
 )
 
-val sampleEvents = listOf(
-    ScheduleEvent("1", "高数", "08:00 - 09:40", "A301", Color(0xFFD84315), DayOfWeek.MONDAY),
-    ScheduleEvent("2", "英语", "10:00 - 11:40", "B205", Color(0xFFF4511E), DayOfWeek.MONDAY),
-    ScheduleEvent("3", "数据结构", "14:00 - 15:40", "C102", Color(0xFFFF8A65), DayOfWeek.TUESDAY),
-    ScheduleEvent("4", "体育", "16:00 - 17:40", "操场", Color(0xFFBF360C), DayOfWeek.WEDNESDAY),
-    ScheduleEvent("5", "线代", "08:00 - 09:40", "A201", Color(0xFFFFAB40), DayOfWeek.THURSDAY),
-    ScheduleEvent("6", "Python", "10:00 - 11:40", "机房", Color(0xFFFFCC80), DayOfWeek.FRIDAY),
-)
-
 val dayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun ScheduleScreen(
     onOpenCompanion: () -> Unit = {},
 ) {
     var yearMonth by remember { mutableStateOf(YearMonth.now()) }
     var selectedDay by remember { mutableStateOf(LocalDate.now().dayOfWeek) }
+    var showCalendarPicker by remember { mutableStateOf(false) }
     val today = LocalDate.now()
-    val selectedEvents = sampleEvents.filter { it.dayOfWeek == selectedDay }
+    val selectedEvents = emptyList<ScheduleEvent>()
     val dayLabel = dayLabels[selectedDay.value - 1]
 
+    SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
+        AnimatedContent(
+            targetState = showCalendarPicker,
+            transitionSpec = {
+                if (targetState) {
+                    (fadeIn(tween(300, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(180, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                } else {
+                    (fadeIn(tween(250, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(400, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                }
+            },
+            label = "calendar",
+        ) { showingCalendar ->
+            if (showingCalendar) {
+                CalendarPickerOverlay(
+                    initialYearMonth = yearMonth,
+                    today = today,
+                    onDismiss = { showCalendarPicker = false },
+                        onSelect = { ym, day ->
+                            yearMonth = ym
+                            selectedDay = day
+                            showCalendarPicker = false
+                        },
+                        sharedBoundsModifier = Modifier.sharedBounds(
+                            sharedContentState = rememberSharedContentState("calendar_bounds"),
+                            animatedVisibilityScope = this@AnimatedContent,
+                        ),
+                )
+            } else {
+                ScheduleContent(
+                    yearMonth = yearMonth,
+                    selectedDay = selectedDay,
+                    dayLabel = dayLabel,
+                    today = today,
+                    selectedEvents = selectedEvents,
+                    onYearMonthChange = { yearMonth = it },
+                    onSelectedDayChange = { selectedDay = it },
+                    onOpenCalendar = { showCalendarPicker = true },
+                        onOpenCompanion = onOpenCompanion,
+                        sharedBoundsModifier = Modifier.sharedBounds(
+                            sharedContentState = rememberSharedContentState("calendar_bounds"),
+                            animatedVisibilityScope = this@AnimatedContent,
+                        ),
+                )
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ScheduleContent(
+    yearMonth: YearMonth,
+    selectedDay: DayOfWeek,
+    dayLabel: String,
+    today: LocalDate,
+    selectedEvents: List<ScheduleEvent>,
+    onYearMonthChange: (YearMonth) -> Unit,
+    onSelectedDayChange: (DayOfWeek) -> Unit,
+    onOpenCalendar: () -> Unit,
+    onOpenCompanion: () -> Unit,
+    sharedBoundsModifier: Modifier,
+) {
     Scaffold(
         contentWindowInsets = WindowInsets.statusBars,
         topBar = {
@@ -98,7 +169,7 @@ fun ScheduleScreen(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            "周${dayLabel} · ${selectedEvents.size}节课",
+                            "周${dayLabel}",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -127,22 +198,24 @@ fun ScheduleScreen(
             item {
                 MonthHeader(
                     yearMonth = yearMonth,
-                    onPrev = { yearMonth = yearMonth.minusMonths(1) },
-                    onNext = { yearMonth = yearMonth.plusMonths(1) },
+                    onPrev = { onYearMonthChange(yearMonth.minusMonths(1)) },
+                    onNext = { onYearMonthChange(yearMonth.plusMonths(1)) },
+                    onClick = onOpenCalendar,
+                    modifier = sharedBoundsModifier,
                 )
             }
 
             item {
                 WeekDaySelector(
                     selectedDay = selectedDay,
-                    onSelect = { selectedDay = it },
+                    onSelect = onSelectedDayChange,
                     today = today,
                 )
             }
 
             item {
                 Text(
-                    "今日课程",
+                    "日程安排",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                     color = MaterialTheme.colorScheme.onSurface,
@@ -159,7 +232,7 @@ fun ScheduleScreen(
                     ) {
                         Column(horizontalAlignment = Alignment.CenterHorizontally) {
                             Text(
-                                "今天没有课",
+                                "暂无日程",
                                 style = MaterialTheme.typography.titleMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -183,15 +256,48 @@ fun ScheduleScreen(
     }
 }
 
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun CalendarPickerOverlay(
+    initialYearMonth: YearMonth,
+    today: LocalDate,
+    onDismiss: () -> Unit,
+    onSelect: (YearMonth, DayOfWeek) -> Unit,
+    sharedBoundsModifier: Modifier,
+) {
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black.copy(alpha = 0.4f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        CalendarPickerDialog(
+            initialYearMonth = initialYearMonth,
+            today = today,
+            onDismiss = onDismiss,
+            onSelect = onSelect,
+            modifier = sharedBoundsModifier,
+        )
+    }
+}
+
 @Composable
 private fun MonthHeader(
     yearMonth: YearMonth,
     onPrev: () -> Unit,
     onNext: () -> Unit,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val formatter = DateTimeFormatter.ofPattern("yyyy年 M月", Locale.CHINESE)
     Surface(
-        shape = MaterialTheme.shapes.large,
+        modifier = modifier,
+        shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
     ) {
         Row(
@@ -204,11 +310,24 @@ private fun MonthHeader(
             IconButton(onClick = onPrev) {
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "上月")
             }
-            Text(
-                yearMonth.format(formatter),
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.SemiBold,
-            )
+            Row(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onClick,
+                    )
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                Text(
+                    yearMonth.format(formatter),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+            }
             IconButton(onClick = onNext) {
                 Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下月")
             }
@@ -339,6 +458,150 @@ private fun EventCard(event: ScheduleEvent) {
                             )
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun CalendarPickerDialog(
+    initialYearMonth: YearMonth,
+    today: LocalDate,
+    onDismiss: () -> Unit,
+    onSelect: (YearMonth, DayOfWeek) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    var yearMonth by remember { mutableStateOf(initialYearMonth) }
+
+    Surface(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(horizontal = 24.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 6.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { yearMonth = yearMonth.minusMonths(1) }) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "上月")
+                }
+                Text(
+                    yearMonth.format(DateTimeFormatter.ofPattern("yyyy年 M月", Locale.CHINESE)),
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                IconButton(onClick = { yearMonth = yearMonth.plusMonths(1) }) {
+                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下月")
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Row(modifier = Modifier.fillMaxWidth()) {
+                dayLabels.forEach { label ->
+                    Box(
+                        modifier = Modifier.weight(1f),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Text(
+                            label,
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.SemiBold,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            val firstDay = yearMonth.atDay(1)
+            val daysInMonth = yearMonth.lengthOfMonth()
+            val startDow = firstDay.dayOfWeek.value - 1
+            val totalCells = startDow + daysInMonth
+            val rows = ceil(totalCells / 7.0).toInt()
+
+            for (row in 0 until rows) {
+                Row(modifier = Modifier.fillMaxWidth()) {
+                    for (col in 0..6) {
+                        val cellIndex = row * 7 + col
+                        val day = cellIndex - startDow + 1
+                        val isValid = day in 1..daysInMonth
+                        val date = if (isValid) yearMonth.atDay(day) else null
+                        val isToday = date == today
+
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(2.dp)
+                                .size(40.dp)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        isToday -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                        else -> Color.Transparent
+                                    }
+                                )
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    enabled = isValid,
+                                    onClick = {
+                                        if (date != null) {
+                                            onSelect(yearMonth, date.dayOfWeek)
+                                        }
+                                    },
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            if (isValid) {
+                                Text(
+                                    day.toString(),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                                    color = when {
+                                        isToday -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onSelect(initialYearMonth, today.dayOfWeek) },
+                    ),
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerHighest,
+            ) {
+                Box(
+                    modifier = Modifier.padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "回到今天",
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontWeight = FontWeight.SemiBold,
+                    )
                 }
             }
         }
