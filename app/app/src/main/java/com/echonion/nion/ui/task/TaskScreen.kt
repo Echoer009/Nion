@@ -1,10 +1,8 @@
 package com.echonion.nion.ui.task
 
-
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
-
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -46,12 +44,12 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -162,19 +160,6 @@ fun TaskScreen(
     }
 }
 
-/**
- * 任务列表组件
- * 分为"待办"和"已完成"两个区域，使用 LazyColumn + reorderable 实现拖拽排序
- *
- * 拖拽逻辑：
- * - onMove 时移动列表中的元素位置
- * - onDragStopped 时，如果 wasMoved=true 则持久化排序；如果 wasMoved=false 则触发多选
- *
- * 性能优化要点：
- * - snapshotFlow + distinctUntilChanged 监听 todoTasks 变化，仅在列表内容实际改变时同步
- * - LazyColumn items 使用 key + contentType 减少不必要的重组
- * - onToggleDone 用 remember 提升到 LazyColumn 外层，避免每个 item 都创建新 lambda
- */
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun TaskList(
@@ -183,31 +168,30 @@ private fun TaskList(
     onTaskClick: (TaskItem) -> Unit,
 ) {
     val listState = rememberLazyListState()
-    // 可重排列表，独立于 viewModel.todoTasks，用于拖拽期间的局部重排
-    val reorderableTasks = remember { mutableStateListOf<TaskItem>() }
+    val reorderableItems = remember { mutableStateListOf<FlatTaskItem>() }
     val haptic = LocalHapticFeedback.current
     val isSelectionMode = viewModel.isSelectionMode
     val selectedIds = viewModel.selectedTaskIds
 
-    // 监听 viewModel.todoTasks 变化并同步到 reorderableTasks
+    var wasMoved by remember { mutableStateOf(false) }
+    var longPressedTaskId by remember { mutableStateOf<String?>(null) }
+    var draggedGroupId by remember { mutableStateOf<String?>(null) }
+    var collapsedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+
     LaunchedEffect(Unit) {
-        snapshotFlow { viewModel.todoTasks }
+        snapshotFlow { viewModel.flatTodoTasks }
             .distinctUntilChanged()
-            .collect { newTasks ->
-                if (reorderableTasks.isEmpty() || reorderableTasks.size != newTasks.size ||
-                    reorderableTasks.zip(newTasks).any { (a, b) -> a != b }) {
-                    reorderableTasks.clear()
-                    reorderableTasks.addAll(newTasks)
+            .collect { newItems ->
+                if (reorderableItems.isEmpty() || reorderableItems.size != newItems.size ||
+                    reorderableItems.zip(newItems).any { (a, b) -> a != b }) {
+                    reorderableItems.clear()
+                    reorderableItems.addAll(newItems)
                 }
             }
     }
 
-    // wasMoved：区分"长按选择"和"长按拖拽排序"
-    // 在 onMove 回调中设为 true，在 onDragStopped 中判断
-    var wasMoved by remember { mutableStateOf(false) }
-    var longPressedTaskId by remember { mutableStateOf<String?>(null) }
-
     val headerCount = 2
+
     val reorderableState = rememberReorderableLazyListState(
         lazyListState = listState,
         onMove = { from, to ->
@@ -217,9 +201,32 @@ private fun TaskList(
             }
             val fromIdx = from.index - headerCount
             val toIdx = to.index - headerCount
-            if (fromIdx in reorderableTasks.indices && toIdx in reorderableTasks.indices) {
-                reorderableTasks.add(toIdx, reorderableTasks.removeAt(fromIdx))
+            if (fromIdx !in reorderableItems.indices || toIdx !in reorderableItems.indices) return@rememberReorderableLazyListState
+
+            val movedItem = reorderableItems[fromIdx]
+
+            if (movedItem.depth == 0 && draggedGroupId == null) {
+                draggedGroupId = movedItem.task.id
+                val groupIds = collectGroupIds(reorderableItems.toList(), movedItem.task.id)
+                if (groupIds.size > 1) {
+                    val toCollapse = groupIds.toSet() - movedItem.task.id
+                    collapsedIds = toCollapse
+                    val filtered = reorderableItems.filter { it.task.id !in toCollapse }
+                    reorderableItems.clear()
+                    reorderableItems.addAll(filtered)
+                    val newFrom = reorderableItems.indexOfFirst { it.task.id == movedItem.task.id }
+                    if (newFrom >= 0) {
+                        var newTo = newFrom + (toIdx - fromIdx)
+                        newTo = newTo.coerceIn(0, reorderableItems.lastIndex)
+                        if (newFrom != newTo) {
+                            reorderableItems.add(newTo, reorderableItems.removeAt(newFrom))
+                        }
+                    }
+                    return@rememberReorderableLazyListState
+                }
             }
+
+            reorderableItems.add(toIdx, reorderableItems.removeAt(fromIdx))
         },
     )
 
@@ -231,83 +238,89 @@ private fun TaskList(
             .padding(innerPadding)
             .padding(horizontal = 16.dp),
         state = listState,
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         item(key = "top_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(8.dp)) }
 
-        if (reorderableTasks.isNotEmpty()) {
-            item(key = "todo_header", contentType = "header") { SectionHeader("待办", reorderableTasks.size) }
+        if (reorderableItems.isNotEmpty()) {
+            item(key = "todo_header", contentType = "header") {
+                SectionHeader("待办", reorderableItems.count { it.depth == 0 && it.task.id !in collapsedIds })
+            }
 
             items(
-                items = reorderableTasks,
-                key = { it.id },
-                contentType = { "task" },
-            ) { task ->
-                val isSelected = task.id in selectedIds
-                ReorderableItem(state = reorderableState, key = task.id) { isDragging ->
+                items = reorderableItems,
+                key = { it.task.id },
+                contentType = { if (it.depth == 0) "main_task" else "sub_task" },
+            ) { flatItem ->
+                if (flatItem.task.id in collapsedIds) return@items
+
+                val isSelected = flatItem.task.id in selectedIds
+                val groupFirst = flatItem.isGroupFirst
+                val groupLast = flatItem.isGroupLast
+                val isDraggedMain = draggedGroupId == flatItem.task.id && flatItem.depth == 0
+
+                val spacingModifier = when {
+                    isDraggedMain -> Modifier.padding(bottom = 8.dp)
+                    groupFirst -> Modifier.padding(top = 8.dp)
+                    groupLast -> Modifier.padding(bottom = 8.dp)
+                    else -> Modifier
+                }
+
+                ReorderableItem(state = reorderableState, key = flatItem.task.id) { isDragging ->
                     val cardShape = remember { RoundedCornerShape(16.dp) }
                     Box(
                         modifier = Modifier
                             .animateItemPlacement()
+                            .then(spacingModifier)
+                            .then(
+                                if (isDragging) Modifier
+                                    .shadow(8.dp, cardShape)
+                                    .graphicsLayer {
+                                        scaleX = 1.03f
+                                        scaleY = 1.03f
+                                    }
+                                else Modifier
+                            )
+                            .zIndex(if (isDragging) 1f else 0f)
                             .longPressDraggableHandle(
                                 onDragStarted = {
                                     wasMoved = false
-                                    longPressedTaskId = task.id
-                                    viewModel.toggleSelection(task.id)
+                                    longPressedTaskId = flatItem.task.id
+                                    viewModel.toggleSelection(flatItem.task.id)
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                                 },
                                 onDragStopped = {
                                     if (wasMoved) {
-                                        viewModel.reorderTasks(reorderableTasks.map { it.id })
+                                        handleDrop(reorderableItems, draggedGroupId, flatItem, viewModel)
                                     }
                                     longPressedTaskId = null
+                                    draggedGroupId = null
+                                    collapsedIds = emptySet()
                                 },
                             )
-                            .graphicsLayer {
-                                val scale = if (isDragging) 1.03f else 1f
-                                scaleX = scale
-                                scaleY = scale
-                                shadowElevation = if (isDragging) 8.dp.toPx() else 0f
-                                shape = cardShape
-                                clip = true
-                            }
                     ) {
-                        TaskCard(
-                            task = task,
+                        FlatTaskRow(
+                            item = flatItem,
                             onToggleDone = onToggleDone,
                             onClick = { clickedTask ->
-                                if (longPressedTaskId == task.id) return@TaskCard
+                                if (longPressedTaskId == flatItem.task.id) return@FlatTaskRow
                                 if (isSelectionMode) {
                                     viewModel.toggleSelection(clickedTask.id)
                                 } else {
                                     onTaskClick(clickedTask)
                                 }
                             },
-                            onSubtaskClick = { sub ->
-                                if (isSelectionMode) {
-                                    viewModel.toggleSelection(sub.id)
-                                } else {
-                                    onTaskClick(sub)
-                                }
-                            },
-                            modifier = Modifier
-                                .zIndex(if (isDragging) 1f else 0f)
-                                .then(
-                                    if (isSelected) Modifier.border(
-                                        BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
-                                        cardShape,
-                                    ) else Modifier
-                                ),
+                            isSelected = isSelected,
                         )
                     }
                 }
             }
         }
 
-        // 已完成区域（不可拖拽排序）
         val doneTasks = viewModel.doneTasks
         if (doneTasks.isNotEmpty()) {
             item(key = "done_header", contentType = "header") { SectionHeader("已完成", doneTasks.size) }
+
             items(
                 items = doneTasks,
                 key = { it.id },
@@ -315,32 +328,30 @@ private fun TaskList(
             ) { task ->
                 val isSelected = task.id in selectedIds
                 val cardShape = remember { RoundedCornerShape(16.dp) }
-                TaskCard(
-                    task = task,
-                    onToggleDone = onToggleDone,
-                    onClick = { clickedTask ->
-                        if (isSelectionMode) {
-                            viewModel.toggleSelection(clickedTask.id)
-                        } else {
-                            onTaskClick(clickedTask)
-                        }
-                    },
-                    onSubtaskClick = { sub ->
-                        if (isSelectionMode) {
-                            viewModel.toggleSelection(sub.id)
-                        } else {
-                            onTaskClick(sub)
-                        }
-                    },
+                Box(
                     modifier = Modifier
+                        .padding(vertical = 4.dp)
                         .animateItemPlacement()
                         .then(
                             if (isSelected) Modifier.border(
                                 BorderStroke(2.dp, MaterialTheme.colorScheme.primary),
                                 cardShape,
                             ) else Modifier
-                        ),
-                )
+                        )
+                ) {
+                    FlatTaskRow(
+                        item = FlatTaskItem(task, 0, null, true, true),
+                        onToggleDone = onToggleDone,
+                        onClick = { clickedTask ->
+                            if (isSelectionMode) {
+                                viewModel.toggleSelection(clickedTask.id)
+                            } else {
+                                onTaskClick(clickedTask)
+                            }
+                        },
+                        isSelected = isSelected,
+                    )
+                }
             }
         }
 
@@ -348,7 +359,61 @@ private fun TaskList(
     }
 }
 
-/** 分区标题（如"待办"、"已完成"），右侧显示数量气泡 */
+private fun collectGroupIds(items: List<FlatTaskItem>, mainTaskId: String): List<String> {
+    val result = mutableListOf(mainTaskId)
+    val startIdx = items.indexOfFirst { it.task.id == mainTaskId }
+    if (startIdx >= 0) {
+        for (i in (startIdx + 1) until items.size) {
+            if (items[i].depth == 0) break
+            result.add(items[i].task.id)
+        }
+    }
+    return result
+}
+
+private fun handleDrop(
+    reorderableItems: List<FlatTaskItem>,
+    draggedGroupId: String?,
+    currentDragItem: FlatTaskItem,
+    viewModel: TaskViewModel,
+) {
+    val draggedId = draggedGroupId ?: currentDragItem.task.id
+    val currentIdx = reorderableItems.indexOfFirst { it.task.id == draggedId }
+    if (currentIdx == -1) return
+
+    val draggedDepth = reorderableItems[currentIdx].depth
+    var newParentId: String? = null
+
+    if (currentIdx == 0) {
+        newParentId = null
+    } else {
+        val aboveItem = reorderableItems[currentIdx - 1]
+        when {
+            aboveItem.depth == 0 && draggedDepth > 0 -> newParentId = aboveItem.task.id
+            aboveItem.depth == 0 -> newParentId = null
+            aboveItem.depth > draggedDepth -> newParentId = aboveItem.task.id
+            aboveItem.depth == draggedDepth -> newParentId = aboveItem.parentId
+            aboveItem.depth < draggedDepth -> {
+                var si = currentIdx - 1
+                while (si >= 0 && reorderableItems[si].depth > draggedDepth) si--
+                if (si >= 0) {
+                    val anc = reorderableItems[si]
+                    newParentId = if (anc.depth == draggedDepth) anc.parentId else anc.task.id
+                }
+            }
+        }
+    }
+
+    viewModel.moveTask(draggedId, newParentId)
+
+    val siblingIds = reorderableItems
+        .filter { it.parentId == newParentId }
+        .map { it.task.id }
+    if (siblingIds.size > 1) {
+        viewModel.reorderTasks(siblingIds)
+    }
+}
+
 @Composable
 private fun SectionHeader(title: String, count: Int) {
     Row(
@@ -371,7 +436,6 @@ private fun SectionHeader(title: String, count: Int) {
     }
 }
 
-/** 空任务提示页面 */
 @Composable
 private fun EmptyTaskView(modifier: Modifier = Modifier) {
     Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -383,7 +447,6 @@ private fun EmptyTaskView(modifier: Modifier = Modifier) {
     }
 }
 
-/** 多选模式的顶部操作栏 */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SelectionTopBar(
@@ -406,11 +469,7 @@ private fun SelectionTopBar(
         },
         actions = {
             IconButton(onClick = onDeleteSelected) {
-                Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "删除选中",
-                    tint = MaterialTheme.colorScheme.error,
-                )
+                Icon(Icons.Default.Delete, contentDescription = "删除选中", tint = MaterialTheme.colorScheme.error)
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
