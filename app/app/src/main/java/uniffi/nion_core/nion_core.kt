@@ -636,6 +636,8 @@ internal object IntegrityCheckingUniffiLib {
         uniffiCheckContractApiVersion(this)
         uniffiCheckApiChecksums(this)
     }
+    external fun uniffi_nion_core_checksum_method_nioncore_add_focus_time(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_checklist(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_task(
@@ -690,6 +692,8 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_nion_core_fn_constructor_nioncore_new(`dbPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Long
+    external fun uniffi_nion_core_fn_method_nioncore_add_focus_time(`ptr`: Long,`taskId`: RustBuffer.ByValue,`seconds`: Long,uniffi_out_err: UniffiRustCallStatus, 
+    ): Unit
     external fun uniffi_nion_core_fn_method_nioncore_create_checklist(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_nion_core_fn_method_nioncore_create_task(`ptr`: Long,`title`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`dueDate`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -837,6 +841,9 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_add_focus_time() != 5322.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_create_checklist() != 24825.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1042,6 +1049,29 @@ private class JavaLangRefCleanable(
 /**
  * @suppress
  */
+public object FfiConverterLong: FfiConverter<Long, Long> {
+    override fun lift(value: Long): Long {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Long {
+        return buf.getLong()
+    }
+
+    override fun lower(value: Long): Long {
+        return value
+    }
+
+    override fun allocationSize(value: Long) = 8UL
+
+    override fun write(value: Long, buf: ByteBuffer) {
+        buf.putLong(value)
+    }
+}
+
+/**
+ * @suppress
+ */
 public object FfiConverterBoolean: FfiConverter<Boolean, Byte> {
     override fun lift(value: Byte): Boolean {
         return value.toInt() != 0
@@ -1217,6 +1247,11 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 
 public interface NionCoreInterface {
     
+    /**
+     * 给指定任务累加专注时长（秒）
+     */
+    fun `addFocusTime`(`taskId`: kotlin.String, `seconds`: kotlin.Long)
+    
     fun `createChecklist`(`name`: kotlin.String): ChecklistData
     
     fun `createTask`(`title`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `dueDate`: kotlin.String?, `categoryId`: kotlin.String?, `parentId`: kotlin.String?): TaskData
@@ -1355,6 +1390,22 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
             UniffiLib.uniffi_nion_core_fn_clone_nioncore(handle, status)
         }
     }
+
+    
+    /**
+     * 给指定任务累加专注时长（秒）
+     */
+    @Throws(NionException::class)override fun `addFocusTime`(`taskId`: kotlin.String, `seconds`: kotlin.Long)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_add_focus_time(
+        it,
+        FfiConverterString.lower(`taskId`),FfiConverterLong.lower(`seconds`),_status)
+}
+    }
+    
+    
 
     
     @Throws(NionException::class)override fun `createChecklist`(`name`: kotlin.String): ChecklistData {
@@ -1659,6 +1710,8 @@ data class TaskData (
     var `updatedAt`: kotlin.String
     , 
     var `completedAt`: kotlin.String?
+    , 
+    var `focusSeconds`: kotlin.Long
     
 ){
     
@@ -1687,6 +1740,7 @@ public object FfiConverterTypeTaskData: FfiConverterRustBuffer<TaskData> {
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterLong.read(buf),
         )
     }
 
@@ -1702,7 +1756,8 @@ public object FfiConverterTypeTaskData: FfiConverterRustBuffer<TaskData> {
             FfiConverterOptionalString.allocationSize(value.`categoryId`) +
             FfiConverterString.allocationSize(value.`createdAt`) +
             FfiConverterString.allocationSize(value.`updatedAt`) +
-            FfiConverterOptionalString.allocationSize(value.`completedAt`)
+            FfiConverterOptionalString.allocationSize(value.`completedAt`) +
+            FfiConverterLong.allocationSize(value.`focusSeconds`)
     )
 
     override fun write(value: TaskData, buf: ByteBuffer) {
@@ -1718,6 +1773,7 @@ public object FfiConverterTypeTaskData: FfiConverterRustBuffer<TaskData> {
             FfiConverterString.write(value.`createdAt`, buf)
             FfiConverterString.write(value.`updatedAt`, buf)
             FfiConverterOptionalString.write(value.`completedAt`, buf)
+            FfiConverterLong.write(value.`focusSeconds`, buf)
     }
 }
 

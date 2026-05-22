@@ -29,4 +29,5 @@ pub struct TaskData {
     pub created_at: String,
     pub updated_at: String,
     pub completed_at: Option<String>,
+    pub focus_seconds: i64,
 }

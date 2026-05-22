@@ -38,7 +38,8 @@ impl NionCore {
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 completed_at TEXT,
-                sort_order INTEGER NOT NULL DEFAULT 0
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                focus_seconds INTEGER NOT NULL DEFAULT 0
             );
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
@@ -48,10 +49,10 @@ impl NionCore {
             msg: e.to_string(),
         })?;
 
-        conn.execute_batch(
-            "ALTER TABLE checklists ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;
-             ALTER TABLE tasks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0;"
-        ).ok();
+        // 逐条尝试添加新列，忽略已存在的错误
+        conn.execute_batch("ALTER TABLE checklists ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0").ok();
+        conn.execute_batch("ALTER TABLE tasks ADD COLUMN sort_order INTEGER NOT NULL DEFAULT 0").ok();
+        conn.execute_batch("ALTER TABLE tasks ADD COLUMN focus_seconds INTEGER NOT NULL DEFAULT 0").ok();
 
         Ok(Self {
             db: Mutex::new(conn),
@@ -64,7 +65,7 @@ impl NionCore {
         })?;
         let mut stmt = db
             .prepare(
-                "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, created_at, updated_at, completed_at FROM tasks ORDER BY sort_order ASC, created_at DESC"
+                "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, created_at, updated_at, completed_at, focus_seconds FROM tasks ORDER BY sort_order ASC, created_at DESC"
             )
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
 
@@ -134,9 +135,9 @@ impl NionCore {
             msg: e.to_string(),
         })?;
         let sql = if category_id.is_some() {
-            "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, created_at, updated_at, completed_at FROM tasks WHERE category_id = ?1 AND parent_id IS NULL ORDER BY sort_order ASC, created_at DESC"
+            "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, created_at, updated_at, completed_at, focus_seconds FROM tasks WHERE category_id = ?1 AND parent_id IS NULL ORDER BY sort_order ASC, created_at DESC"
         } else {
-            "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, created_at, updated_at, completed_at FROM tasks WHERE category_id IS NULL AND parent_id IS NULL ORDER BY sort_order ASC, created_at DESC"
+            "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, created_at, updated_at, completed_at, focus_seconds FROM tasks WHERE category_id IS NULL AND parent_id IS NULL ORDER BY sort_order ASC, created_at DESC"
         };
         let mut stmt = db.prepare(sql).map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         let params: Vec<Box<dyn rusqlite::types::ToSql>> = if let Some(ref cid) = category_id {
@@ -160,7 +161,7 @@ impl NionCore {
         })?;
         let mut stmt = db
             .prepare(
-                "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, created_at, updated_at, completed_at FROM tasks WHERE parent_id = ?1 ORDER BY sort_order ASC, created_at ASC"
+                "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, created_at, updated_at, completed_at, focus_seconds FROM tasks WHERE parent_id = ?1 ORDER BY sort_order ASC, created_at ASC"
             )
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         let rows = stmt
@@ -209,6 +210,7 @@ impl NionCore {
             created_at: now.clone(),
             updated_at: now,
             completed_at: None,
+            focus_seconds: 0,
         })
     }
 
@@ -329,6 +331,19 @@ impl NionCore {
         Ok(())
     }
 
+    /// 给指定任务累加专注时长（秒）
+    pub fn add_focus_time(&self, task_id: String, seconds: i64) -> Result<(), NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        db.execute(
+            "UPDATE tasks SET focus_seconds = focus_seconds + ?1, updated_at = ?2 WHERE id = ?3",
+            params![seconds, chrono::Utc::now().to_rfc3339(), task_id],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        Ok(())
+    }
+
     pub fn reorder_tasks(&self, ordered_ids: Vec<String>) -> Result<(), NionError> {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
@@ -382,12 +397,13 @@ fn map_task_row(row: &rusqlite::Row) -> rusqlite::Result<TaskData> {
         created_at: row.get(9)?,
         updated_at: row.get(10)?,
         completed_at: row.get(11)?,
+        focus_seconds: row.get(12)?,
     })
 }
 
 fn query_task(db: &rusqlite::Connection, id: &str) -> Result<TaskData, NionError> {
     db.query_row(
-        "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, created_at, updated_at, completed_at FROM tasks WHERE id = ?1",
+        "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, created_at, updated_at, completed_at, focus_seconds FROM tasks WHERE id = ?1",
         params![id],
         |row| map_task_row(row),
     )

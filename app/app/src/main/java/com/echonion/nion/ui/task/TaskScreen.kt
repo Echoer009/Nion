@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.task
 
+import android.util.Log
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
@@ -173,9 +174,11 @@ private fun TaskList(
     val selectedIds = viewModel.selectedTaskIds
 
     var wasMoved by remember { mutableStateOf(false) }
+    var subsRemoved by remember { mutableStateOf(false) }
     var longPressedTaskId by remember { mutableStateOf<String?>(null) }
     var draggedGroupId by remember { mutableStateOf<String?>(null) }
     var preCollapseGroupIds by remember { mutableStateOf<List<String>>(emptyList()) }
+    Log.w("TaskScreen", "TaskScreen STARTUP — reorderableItems init")
 
     LaunchedEffect(Unit) {
         snapshotFlow { viewModel.flatTodoTasks }
@@ -208,8 +211,29 @@ private fun TaskList(
             wasMoved = true
             val fromIdx = from.index - headerCount
             val toIdx = to.index - headerCount
+            Log.w("TaskScreen", "onMove from=$fromIdx to=$toIdx draggedId=$draggedGroupId subsRemoved=$subsRemoved preCollapseSize=${preCollapseGroupIds.size} listSize=${reorderableItems.size}")
+
+            if (draggedGroupId != null && !subsRemoved && preCollapseGroupIds.size > 1) {
+                subsRemoved = true
+                val subIds = preCollapseGroupIds.toSet() - draggedGroupId!!
+                val removedCount = subIds.size
+                Log.w("TaskScreen", "onMove FIRST: removing subIds=$subIds removedCount=$removedCount")
+                reorderableItems.removeAll { it.task.id in subIds }
+                Log.w("TaskScreen", "onMove FIRST: after remove listSize=${reorderableItems.size}")
+                val adjustedToIdx = if (toIdx > fromIdx) toIdx - removedCount else toIdx
+                Log.w("TaskScreen", "onMove FIRST: adjustedToIdx=$adjustedToIdx (orig=$toIdx)")
+                if (fromIdx !in reorderableItems.indices || adjustedToIdx !in reorderableItems.indices) {
+                    Log.w("TaskScreen", "onMove FIRST: index out of bounds, returning")
+                    return@rememberReorderableLazyListState
+                }
+                reorderableItems.add(adjustedToIdx, reorderableItems.removeAt(fromIdx))
+                Log.w("TaskScreen", "onMove FIRST: swap done, listSize=${reorderableItems.size}")
+                return@rememberReorderableLazyListState
+            }
+
             if (fromIdx !in reorderableItems.indices || toIdx !in reorderableItems.indices) return@rememberReorderableLazyListState
             reorderableItems.add(toIdx, reorderableItems.removeAt(fromIdx))
+            Log.w("TaskScreen", "onMove NORMAL: swapped $fromIdx -> $toIdx")
         },
     )
 
@@ -236,7 +260,7 @@ private fun TaskList(
                 contentType = { if (it.depth == 0) "main_task" else "sub_task" },
             ) { flatItem ->
                 val isSelected = flatItem.task.id in selectedIds
-                val isDraggedMain = draggedGroupId == flatItem.task.id && flatItem.depth == 0
+                val isInDraggedGroup = draggedGroupId != null && flatItem.task.id in preCollapseGroupIds
 
                 val effectiveIsLast = effectiveLastMap[flatItem.task.id] ?: flatItem.isGroupLast
                 val displayItem = flatItem.copy(isGroupLast = effectiveIsLast)
@@ -251,7 +275,7 @@ private fun TaskList(
                 }
 
                 val spacingModifier = when {
-                    isDraggedMain && preCollapseGroupIds.size > 1 -> Modifier
+                    isInDraggedGroup -> Modifier
                     displayItem.isGroupFirst -> Modifier.padding(top = 8.dp)
                     displayItem.isGroupLast -> Modifier.padding(bottom = 8.dp)
                     else -> Modifier
@@ -260,7 +284,7 @@ private fun TaskList(
                 ReorderableItem(
                     state = reorderableState,
                     key = flatItem.task.id,
-                    animateItemModifier = Modifier,
+                    animateItemModifier = if (!isInDraggedGroup) Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null) else Modifier,
                 ) { isDragging ->
                     val cardShape = remember { RoundedCornerShape(16.dp) }
                     Box(
@@ -272,6 +296,7 @@ private fun TaskList(
                                     .graphicsLayer {
                                         scaleX = 1.03f
                                         scaleY = 1.03f
+                                        clip = false
                                     }
                                 else Modifier
                             )
@@ -279,27 +304,30 @@ private fun TaskList(
                              .longPressDraggableHandle(
                                 onDragStarted = {
                                     wasMoved = false
+                                    subsRemoved = false
                                     longPressedTaskId = flatItem.task.id
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
 
                                     draggedGroupId = flatItem.task.id
                                     val descendantIds = collectDescendantIds(reorderableItems.toList(), flatItem.task.id)
                                     preCollapseGroupIds = listOf(flatItem.task.id) + descendantIds.toList()
-                                    if (descendantIds.isNotEmpty()) {
-                                        reorderableItems.removeAll { it.task.id in descendantIds }
-                                    }
+                                    Log.w("TaskScreen", "onDragStarted id=$draggedGroupId depth=${flatItem.depth} parentId=${flatItem.parentId} preCollapse=$preCollapseGroupIds descendantCount=${descendantIds.size} listSize=${reorderableItems.size}")
                                 },
                                 onDragStopped = {
+                                    Log.w("TaskScreen", "onDragStopped wasMoved=$wasMoved draggedId=$draggedGroupId preCollapseSize=${preCollapseGroupIds.size} listSize=${reorderableItems.size}")
                                     if (wasMoved) {
                                         val draggedId = draggedGroupId ?: flatItem.task.id
                                         val mainIdx = reorderableItems.indexOfFirst { it.task.id == draggedId }
+                                        Log.w("TaskScreen", "onDragStopped WAS_MOVED mainIdx=$mainIdx draggedId=$draggedId")
                                         if (mainIdx >= 0 && draggedGroupId != null && preCollapseGroupIds.size > 1) {
                                             val subIds = preCollapseGroupIds.toSet() - draggedId
                                             val subs = viewModel.flatTodoTasks.filter { it.task.id in subIds }
+                                            Log.w("TaskScreen", "onDragStopped re-inserting subs: subIds=$subIds subsCount=${subs.size} at mainIdx+1=${mainIdx + 1}")
                                             reorderableItems.addAll(mainIdx + 1, subs)
                                         }
                                         handleDrop(reorderableItems, draggedId, viewModel)
                                     } else {
+                                        Log.w("TaskScreen", "onDragStopped SELECTION mode, preCollapseSize=${preCollapseGroupIds.size}")
                                         if (preCollapseGroupIds.size > 1) {
                                             val groupIds = preCollapseGroupIds
                                             val allSelected = groupIds.all { it in selectedIds }
@@ -315,6 +343,7 @@ private fun TaskList(
                                         }
                                         val fresh = viewModel.flatTodoTasks
                                         if (reorderableItems.size != fresh.size || reorderableItems.zip(fresh).any { (a, b) -> a != b }) {
+                                            Log.w("TaskScreen", "onDragStopped syncing from fresh list: freshSize=${fresh.size} currentSize=${reorderableItems.size}")
                                             reorderableItems.clear()
                                             reorderableItems.addAll(fresh)
                                         }
@@ -322,6 +351,7 @@ private fun TaskList(
                                     longPressedTaskId = null
                                     draggedGroupId = null
                                     preCollapseGroupIds = emptyList()
+                                    subsRemoved = false
                                 },
                             )
                     ) {
@@ -427,18 +457,33 @@ private fun handleDrop(
     viewModel: TaskViewModel,
 ) {
     val currentIdx = reorderableItems.indexOfFirst { it.task.id == draggedId }
-    if (currentIdx == -1) return
+    if (currentIdx == -1) {
+        Log.w("TaskScreen", "handleDrop: draggedId=$draggedId not found in list")
+        return
+    }
     val draggedItem = reorderableItems[currentIdx]
+    Log.w("TaskScreen", "handleDrop: currentIdx=$currentIdx draggedId=$draggedId depth=${draggedItem.depth} parentId=${draggedItem.parentId}")
 
     val newParentId: String? = if (currentIdx == 0) {
+        Log.w("TaskScreen", "handleDrop: at top of list -> newParentId=null")
         null
     } else {
         val aboveItem = reorderableItems[currentIdx - 1]
         val belowIsTopLevel = currentIdx + 1 >= reorderableItems.size || reorderableItems[currentIdx + 1].depth == 0
+        Log.w("TaskScreen", "handleDrop: aboveItem id=${aboveItem.task.id} depth=${aboveItem.depth} belowIsTopLevel=$belowIsTopLevel draggedDepth=${draggedItem.depth}")
         when {
-            aboveItem.depth == 0 && belowIsTopLevel && draggedItem.depth == 0 -> null
-            aboveItem.depth == 0 -> aboveItem.task.id
-            else -> aboveItem.parentId
+            aboveItem.depth == 0 && belowIsTopLevel && draggedItem.depth == 0 -> {
+                Log.w("TaskScreen", "handleDrop: case A: main between two mains -> null")
+                null
+            }
+            aboveItem.depth == 0 -> {
+                Log.w("TaskScreen", "handleDrop: case B: above is main, become child -> parentId=${aboveItem.task.id}")
+                aboveItem.task.id
+            }
+            else -> {
+                Log.w("TaskScreen", "handleDrop: case C: above is child, inherit parent -> parentId=${aboveItem.parentId}")
+                aboveItem.parentId
+            }
         }
     }
 
@@ -452,6 +497,7 @@ private fun handleDrop(
                     result.add(item.task.id)
                 }
             }
+            Log.w("TaskScreen", "handleDrop: siblings for null parent: $result")
             result
         }
         else -> {
@@ -462,6 +508,7 @@ private fun handleDrop(
                     if (item.task.id == draggedId) result.add(item.task.id)
                     else if (item.depth == 0) result.add(item.task.id)
                 }
+                Log.w("TaskScreen", "handleDrop: parentIdx not found ($newParentId), fallback siblings: $result")
                 result
             } else {
                 val result = mutableListOf<String>()
@@ -479,11 +526,13 @@ private fun handleDrop(
                     }
                     i++
                 }
+                Log.w("TaskScreen", "handleDrop: siblings for parent $newParentId (parentIdx=$parentIdx): $result")
                 result
             }
         }
     }
 
+    Log.w("TaskScreen", "handleDrop: CALLING moveAndReorderTasks(draggedId=$draggedId, newParentId=$newParentId, siblingIds=$siblingIds)")
     viewModel.moveAndReorderTasks(draggedId, newParentId, siblingIds)
 }
 
