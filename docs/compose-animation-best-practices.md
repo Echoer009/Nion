@@ -204,6 +204,111 @@ Modifier.offset { IntOffset(scrollState.value, 0) }
 
 ---
 
+## 7. SharedTransition + AnimatedContent：元素变形弹出动画
+
+### 7.1 效果描述
+
+点击一个小组件（如月份标题栏），它从原位"膨胀"变形为一个大的覆盖弹窗。关闭时反向收缩回原位。
+
+### 7.2 核心结构
+
+```
+SharedTransitionLayout {
+    AnimatedContent(showCalendarPicker) { showing ->
+        if (showing) {
+            CalendarPickerDialog(modifier = sharedElement("calendar"))
+        } else {
+            ScheduleContent(modifier = sharedElement("calendar"))
+        }
+    }
+}
+```
+
+三要素：
+1. **`SharedTransitionLayout`** — 最外层容器，提供 shared element 的协调作用域
+2. **`AnimatedContent`** — 控制两个状态的切换动画（fade + size transform）
+3. **`Modifier.sharedElement()`** — 标记参与变形的两个元素，用同一个 key 关联
+
+### 7.3 关键代码
+
+```kotlin
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+fun ScheduleScreen() {
+    var showCalendarPicker by remember { mutableStateOf(false) }
+
+    SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
+        AnimatedContent(
+            targetState = showCalendarPicker,
+            transitionSpec = {
+                // 展开：快速淡入 + 慢淡出，SizeTransform 做尺寸动画
+                if (targetState) {
+                    (fadeIn(tween(300, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(180, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                } else {
+                    // 收回：慢淡入 + 快淡出
+                    (fadeIn(tween(250, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(400, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                }
+            },
+            label = "calendar",
+        ) { showingCalendar ->
+            if (showingCalendar) {
+                CalendarPickerOverlay(
+                    // 收缩状态的 Modifier — 和展开状态用同一个 key
+                    sharedBoundsModifier = Modifier.sharedElement(
+                        sharedContentState = rememberSharedContentState("calendar"),
+                        animatedVisibilityScope = this@AnimatedContent,
+                        boundsTransform = { _, _ ->
+                            // spring 物理动画，让尺寸变化有弹性
+                            spring(
+                                dampingRatio = 0.8f,
+                                stiffness = Spring.StiffnessMediumLow,
+                            )
+                        },
+                    ),
+                )
+            } else {
+                ScheduleContent(
+                    // 展开状态的 Modifier
+                    sharedBoundsModifier = Modifier.sharedElement(
+                        sharedContentState = rememberSharedContentState("calendar"),
+                        animatedVisibilityScope = this@AnimatedContent,
+                        boundsTransform = { _, _ ->
+                            spring(
+                                dampingRatio = 0.8f,
+                                stiffness = Spring.StiffnessMediumLow,
+                            )
+                        },
+                    ),
+                )
+            }
+        }
+    }
+}
+```
+
+### 7.4 设计要点
+
+| 要点 | 说明 |
+|------|------|
+| **key 一致** | 两个状态的 `rememberSharedContentState("calendar")` 用同一个字符串 key，Compose 自动匹配 |
+| **shape 一致** | 两个元素的 `shape` 必须相同（都用 `RoundedCornerShape(24.dp)`），否则圆角会闪烁 |
+| **`boundsTransform` 用 spring** | 物理弹簧动画让尺寸变化自然有弹性，比 tween 线性好 |
+| **`SizeTransform(clip = false)`** | 允许内容溢出边界，变形过程中不会裁剪 |
+| **fade 节奏不对称** | 展开时淡入慢、淡出快；收回时淡入快、淡出慢，避免两阶段内容同时可见造成"重影" |
+| **modifier 作为参数传递** | 两个状态各自通过 `sharedBoundsModifier` 参数接收 modifier，保持 composable 签名干净 |
+
+### 7.5 踩坑记录
+
+- **`renderInSharedTransitionScopeOverlay`** 是独立的 `Modifier`，不是 `sharedElement` 的参数。`sharedElement` 默认已在 overlay 渲染（`renderInOverlayDuringTransition = true`）
+- **`sharedElement` vs `sharedBounds`**：`sharedElement` 做完整形状+内容 morph，效果更好；`sharedBounds` 只做边界动画
+- **shape 不匹配会闪烁**：如果源元素是 `RoundedCornerShape(8.dp)` 而目标是 `24.dp`，过渡期间圆角会跳动。两端的 Surface 必须用相同 shape
+
+---
+
 ## 快速检查清单
 
 - [ ] LazyColumn items 是否有 `key`？

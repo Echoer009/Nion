@@ -50,7 +50,6 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.shadow
-import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -176,22 +175,7 @@ private fun TaskList(
     var wasMoved by remember { mutableStateOf(false) }
     var longPressedTaskId by remember { mutableStateOf<String?>(null) }
     var draggedGroupId by remember { mutableStateOf<String?>(null) }
-    var liftingGroupId by remember { mutableStateOf<String?>(null) }
-    var collapsedIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var preCollapseGroupIds by remember { mutableStateOf<List<String>>(emptyList()) }
-
-    val dynamicGroupBoundaries by remember {
-        derivedStateOf {
-            val result = mutableMapOf<String, Pair<Boolean, Boolean>>()
-            for (i in reorderableItems.indices) {
-                val item = reorderableItems[i]
-                val isFirst = item.depth == 0
-                val isLast = i == reorderableItems.lastIndex || reorderableItems[i + 1].depth == 0
-                result[item.task.id] = isFirst to isLast
-            }
-            result
-        }
-    }
 
     LaunchedEffect(Unit) {
         snapshotFlow { viewModel.flatTodoTasks }
@@ -206,19 +190,25 @@ private fun TaskList(
 
     val headerCount = 2
 
+    val effectiveLastMap by remember {
+        derivedStateOf {
+            val map = mutableMapOf<String, Boolean>()
+            for (i in reorderableItems.indices) {
+                val item = reorderableItems[i]
+                val isLast = i == reorderableItems.lastIndex || reorderableItems[i + 1].depth == 0
+                map[item.task.id] = isLast
+            }
+            map
+        }
+    }
+
     val reorderableState = rememberReorderableLazyListState(
         lazyListState = listState,
         onMove = { from, to ->
             wasMoved = true
-            if (draggedGroupId != null && preCollapseGroupIds.size > 1 && collapsedIds.isEmpty()) {
-                collapsedIds = preCollapseGroupIds.toSet() - draggedGroupId!!
-            }
             val fromIdx = from.index - headerCount
             val toIdx = to.index - headerCount
             if (fromIdx !in reorderableItems.indices || toIdx !in reorderableItems.indices) return@rememberReorderableLazyListState
-
-            if (reorderableItems[toIdx].task.id in collapsedIds) return@rememberReorderableLazyListState
-
             reorderableItems.add(toIdx, reorderableItems.removeAt(fromIdx))
         },
     )
@@ -237,7 +227,7 @@ private fun TaskList(
 
         if (reorderableItems.isNotEmpty()) {
             item(key = "todo_header", contentType = "header") {
-                SectionHeader("待办", reorderableItems.count { it.depth == 0 && it.task.id !in collapsedIds })
+                SectionHeader("待办", reorderableItems.count { it.depth == 0 })
             }
 
             items(
@@ -245,46 +235,39 @@ private fun TaskList(
                 key = { it.task.id },
                 contentType = { if (it.depth == 0) "main_task" else "sub_task" },
             ) { flatItem ->
-                val isCollapsed = flatItem.task.id in collapsedIds
-
                 val isSelected = flatItem.task.id in selectedIds
-                val groupSelected = if (flatItem.depth == 0) {
-                    isSelected && collectGroupIds(reorderableItems.toList(), flatItem.task.id).all { it in selectedIds }
-                } else {
-                    val mainId = flatItem.parentId
-                    mainId != null && mainId in selectedIds &&
-                        collectGroupIds(reorderableItems.toList(), mainId).all { it in selectedIds }
-                }
-                val boundaries = dynamicGroupBoundaries[flatItem.task.id]
-                val effectiveGroupFirst = boundaries?.first ?: flatItem.isGroupFirst
-                val effectiveGroupLast = boundaries?.second ?: flatItem.isGroupLast
                 val isDraggedMain = draggedGroupId == flatItem.task.id && flatItem.depth == 0
-                val isLiftingGroup = flatItem.depth == 0 && liftingGroupId == flatItem.task.id && preCollapseGroupIds.size > 1
-                val parentIsLifting = flatItem.depth != 0 && flatItem.parentId == liftingGroupId && liftingGroupId != null
-                val isHiddenByLift = parentIsLifting && wasMoved
-                val shouldHide = isHiddenByLift || isCollapsed
+
+                val effectiveIsLast = effectiveLastMap[flatItem.task.id] ?: flatItem.isGroupLast
+                val displayItem = flatItem.copy(isGroupLast = effectiveIsLast)
+
+                val groupSelected = if (flatItem.parentId == null) {
+                    val allInGroup = (listOf(flatItem.task.id) + collectDescendantIds(reorderableItems.toList(), flatItem.task.id)).all { it in selectedIds }
+                    isSelected && allInGroup
+                } else {
+                    val mainId = flatItem.parentId!!
+                    val allInGroup = (listOf(mainId) + collectDescendantIds(reorderableItems.toList(), mainId)).all { it in selectedIds }
+                    allInGroup
+                }
 
                 val spacingModifier = when {
-                    shouldHide -> Modifier
-                    effectiveGroupFirst -> Modifier.padding(top = 8.dp)
-                    effectiveGroupLast -> Modifier.padding(bottom = 8.dp)
+                    isDraggedMain && preCollapseGroupIds.size > 1 -> Modifier
+                    displayItem.isGroupFirst -> Modifier.padding(top = 8.dp)
+                    displayItem.isGroupLast -> Modifier.padding(bottom = 8.dp)
                     else -> Modifier
                 }
 
-                val displayItem = if (boundaries != null) {
-                    flatItem.copy(isGroupFirst = effectiveGroupFirst, isGroupLast = effectiveGroupLast)
-                } else {
-                    flatItem
-                }
-
-                ReorderableItem(state = reorderableState, key = flatItem.task.id, animateItemModifier = Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null)) { isDragging ->
+                ReorderableItem(
+                    state = reorderableState,
+                    key = flatItem.task.id,
+                    animateItemModifier = Modifier,
+                ) { isDragging ->
                     val cardShape = remember { RoundedCornerShape(16.dp) }
-                    val showLiftEffect = isDragging
                     Box(
                         modifier = Modifier
                             .then(spacingModifier)
                             .then(
-                                if (showLiftEffect) Modifier
+                                if (isDragging) Modifier
                                     .shadow(8.dp, cardShape)
                                     .graphicsLayer {
                                         scaleX = 1.03f
@@ -292,30 +275,32 @@ private fun TaskList(
                                     }
                                 else Modifier
                             )
-                            .zIndex(if (showLiftEffect) 1f else 0f)
-                            .then(
-                                if (shouldHide) Modifier.height(0.dp) else Modifier
-                            )
-                            .longPressDraggableHandle(
+                            .zIndex(if (isDragging) 1f else 0f)
+                             .longPressDraggableHandle(
                                 onDragStarted = {
                                     wasMoved = false
                                     longPressedTaskId = flatItem.task.id
                                     haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    if (flatItem.depth == 0) {
-                                        draggedGroupId = flatItem.task.id
-                                        liftingGroupId = flatItem.task.id
-                                        preCollapseGroupIds = collectGroupIds(reorderableItems.toList(), flatItem.task.id)
-                                    } else {
-                                        draggedGroupId = null
-                                        liftingGroupId = null
-                                        preCollapseGroupIds = listOf(flatItem.task.id)
+
+                                    draggedGroupId = flatItem.task.id
+                                    val descendantIds = collectDescendantIds(reorderableItems.toList(), flatItem.task.id)
+                                    preCollapseGroupIds = listOf(flatItem.task.id) + descendantIds.toList()
+                                    if (descendantIds.isNotEmpty()) {
+                                        reorderableItems.removeAll { it.task.id in descendantIds }
                                     }
                                 },
                                 onDragStopped = {
                                     if (wasMoved) {
-                                        handleDrop(reorderableItems, draggedGroupId ?: flatItem.task.id, draggedGroupId != null, viewModel)
+                                        val draggedId = draggedGroupId ?: flatItem.task.id
+                                        val mainIdx = reorderableItems.indexOfFirst { it.task.id == draggedId }
+                                        if (mainIdx >= 0 && draggedGroupId != null && preCollapseGroupIds.size > 1) {
+                                            val subIds = preCollapseGroupIds.toSet() - draggedId
+                                            val subs = viewModel.flatTodoTasks.filter { it.task.id in subIds }
+                                            reorderableItems.addAll(mainIdx + 1, subs)
+                                        }
+                                        handleDrop(reorderableItems, draggedId, viewModel)
                                     } else {
-                                        if (flatItem.depth == 0) {
+                                        if (preCollapseGroupIds.size > 1) {
                                             val groupIds = preCollapseGroupIds
                                             val allSelected = groupIds.all { it in selectedIds }
                                             for (id in groupIds) {
@@ -336,48 +321,37 @@ private fun TaskList(
                                     }
                                     longPressedTaskId = null
                                     draggedGroupId = null
-                                    liftingGroupId = null
-                                    collapsedIds = emptySet()
+                                    preCollapseGroupIds = emptyList()
                                 },
                             )
                     ) {
-                        if (shouldHide) return@Box
-                        if (isLiftingGroup) {
-                            FlatTaskRow(
-                                item = displayItem,
-                                onToggleDone = onToggleDone,
-                                onClick = {},
-                                isSelected = isSelected,
-                                isGroupSelected = false,
-                            )
-                        } else {
-                            FlatTaskRow(
-                                item = displayItem,
-                                onToggleDone = onToggleDone,
-                                onClick = { clickedTask ->
-                                    if (longPressedTaskId == flatItem.task.id) return@FlatTaskRow
-                                    if (isSelectionMode) {
-                                        if (flatItem.depth == 0) {
-                                            val groupIds = collectGroupIds(reorderableItems.toList(), flatItem.task.id)
-                                            val allSelected = groupIds.all { it in selectedIds }
-                                            for (id in groupIds) {
-                                                if (allSelected) {
-                                                    if (id in selectedIds) viewModel.toggleSelection(id)
-                                                } else {
-                                                    if (id !in selectedIds) viewModel.toggleSelection(id)
-                                                }
+                        FlatTaskRow(
+                            item = displayItem,
+                            onToggleDone = onToggleDone,
+                            onClick = { clickedTask ->
+                                if (longPressedTaskId == flatItem.task.id) return@FlatTaskRow
+                                if (isSelectionMode) {
+                                    val descendantIds = collectDescendantIds(reorderableItems.toList(), flatItem.task.id)
+                                    if (descendantIds.isNotEmpty()) {
+                                        val groupIds = listOf(flatItem.task.id) + descendantIds.toList()
+                                        val allSelected = groupIds.all { it in selectedIds }
+                                        for (id in groupIds) {
+                                            if (allSelected) {
+                                                if (id in selectedIds) viewModel.toggleSelection(id)
+                                            } else {
+                                                if (id !in selectedIds) viewModel.toggleSelection(id)
                                             }
-                                        } else {
-                                            viewModel.toggleSelection(clickedTask.id)
                                         }
                                     } else {
-                                        onTaskClick(clickedTask)
+                                        viewModel.toggleSelection(clickedTask.id)
                                     }
-                                },
-                                isSelected = isSelected,
-                                isGroupSelected = groupSelected,
-                            )
-                        }
+                                } else {
+                                    onTaskClick(clickedTask)
+                                }
+                            },
+                            isSelected = isSelected,
+                            isGroupSelected = groupSelected,
+                        )
                     }
                 }
             }
@@ -425,6 +399,16 @@ private fun TaskList(
     }
 }
 
+private fun collectDescendantIds(items: List<FlatTaskItem>, parentId: String): Set<String> {
+    val result = mutableSetOf<String>()
+    val children = items.filter { it.parentId == parentId }
+    for (child in children) {
+        result.add(child.task.id)
+        result.addAll(collectDescendantIds(items, child.task.id))
+    }
+    return result
+}
+
 private fun collectGroupIds(items: List<FlatTaskItem>, mainTaskId: String): List<String> {
     val result = mutableListOf(mainTaskId)
     val startIdx = items.indexOfFirst { it.task.id == mainTaskId }
@@ -437,46 +421,70 @@ private fun collectGroupIds(items: List<FlatTaskItem>, mainTaskId: String): List
     return result
 }
 
-private fun findGroupMainId(items: List<FlatTaskItem>, subtaskId: String): String? {
-    val idx = items.indexOfFirst { it.task.id == subtaskId }
-    if (idx < 0) return null
-    for (i in idx downTo 0) {
-        if (items[i].depth == 0) return items[i].task.id
-    }
-    return null
-}
-
 private fun handleDrop(
     reorderableItems: List<FlatTaskItem>,
     draggedId: String,
-    isDraggingMainTask: Boolean,
     viewModel: TaskViewModel,
 ) {
     val currentIdx = reorderableItems.indexOfFirst { it.task.id == draggedId }
     if (currentIdx == -1) return
+    val draggedItem = reorderableItems[currentIdx]
 
     val newParentId: String? = if (currentIdx == 0) {
-        null
-    } else if (isDraggingMainTask) {
         null
     } else {
         val aboveItem = reorderableItems[currentIdx - 1]
         val belowIsTopLevel = currentIdx + 1 >= reorderableItems.size || reorderableItems[currentIdx + 1].depth == 0
-        if (aboveItem.depth == 0 && belowIsTopLevel) {
-            null
-        } else if (aboveItem.depth == 0) {
-            aboveItem.task.id
-        } else {
-            aboveItem.parentId
+        when {
+            aboveItem.depth == 0 && belowIsTopLevel && draggedItem.depth == 0 -> null
+            aboveItem.depth == 0 -> aboveItem.task.id
+            else -> aboveItem.parentId
         }
     }
 
+    val siblingIds = when (newParentId) {
+        null -> {
+            val result = mutableListOf<String>()
+            for (item in reorderableItems) {
+                if (item.task.id == draggedId) {
+                    result.add(item.task.id)
+                } else if (item.depth == 0) {
+                    result.add(item.task.id)
+                }
+            }
+            result
+        }
+        else -> {
+            val parentIdx = reorderableItems.indexOfFirst { it.task.id == newParentId }
+            if (parentIdx < 0) {
+                val result = mutableListOf<String>()
+                for (item in reorderableItems) {
+                    if (item.task.id == draggedId) result.add(item.task.id)
+                    else if (item.depth == 0) result.add(item.task.id)
+                }
+                result
+            } else {
+                val result = mutableListOf<String>()
+                var i = parentIdx + 1
+                while (i < reorderableItems.size) {
+                    val item = reorderableItems[i]
+                    if (item.task.id == draggedId) {
+                        result.add(item.task.id)
+                        i++
+                        continue
+                    }
+                    if (item.depth == 0) break
+                    if (item.parentId == newParentId) {
+                        result.add(item.task.id)
+                    }
+                    i++
+                }
+                result
+            }
+        }
+    }
 
-    viewModel.moveAndReorderTasks(
-        draggedId,
-        newParentId,
-        reorderableItems.filter { it.parentId == newParentId }.map { it.task.id },
-    )
+    viewModel.moveAndReorderTasks(draggedId, newParentId, siblingIds)
 }
 
 @Composable

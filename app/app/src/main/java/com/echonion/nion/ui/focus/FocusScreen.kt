@@ -4,10 +4,14 @@ import android.app.Application
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.clickable
@@ -132,23 +136,41 @@ private fun focusSetupViewModel(): FocusSetupViewModel {
     )
 }
 
+/**
+ * 专注计时器主界面。
+ *
+ * 交互设计（方案 A —— 圆圈原地放大）：
+ * - 正常态：260dp 圆形计时器，显示时间 + 进度环，下方有播放控制按钮
+ * - 点击圆圈：圆圈从 260dp 放大到接近全屏宽度（~400dp），保持圆形
+ *   放大过程中时间文字淡出，设置内容（表盘、任务列表、按钮）依次淡入
+ * - 关闭设置：圆圈缩回 260dp，设置内容淡出，时间文字淡入
+ *
+ * @param onOpenCompanion 点击右上角伙伴图标的回调，用于打开右侧伙伴侧栏
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FocusScreen(
     onOpenCompanion: () -> Unit = {},
 ) {
+    // focusMinutes: 用户设置的专注时长（分钟），默认 45
     var focusMinutes by remember { mutableIntStateOf(45) }
+    // selectedTaskId / selectedTaskTitle: 当前关联的任务信息
     var selectedTaskId by remember { mutableStateOf<String?>(null) }
     var selectedTaskTitle by remember { mutableStateOf<String?>(null) }
+    // isRunning: 计时器是否正在运行
     var isRunning by remember { mutableStateOf(false) }
+    // remainingSeconds: 剩余秒数
     var remainingSeconds by remember { mutableIntStateOf(focusMinutes * 60) }
+    // completedSessions: 已完成的专注次数
     var completedSessions by remember { mutableIntStateOf(0) }
+    // showSetup: 是否显示设置模式（圆圈放大态）
     var showSetup by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     val totalSeconds = focusMinutes * 60
     val progress = remainingSeconds.toFloat() / totalSeconds.toFloat()
 
+    // animatedProgress: 进度环的动画进度，用 tween 做 600ms 平滑过渡
     val animatedProgress = remember { Animatable(1f) }
     LaunchedEffect(progress) {
         animatedProgress.animateTo(
@@ -157,6 +179,7 @@ fun FocusScreen(
         )
     }
 
+    // 计时器倒计时协程：每秒 -1，到 0 自动停止并 +1 session
     LaunchedEffect(isRunning) {
         while (isRunning) {
             if (remainingSeconds > 0) {
@@ -176,6 +199,7 @@ fun FocusScreen(
 
     val ringColor = MaterialTheme.colorScheme.primary
 
+    // pulseAlpha: 计时器运行时的脉冲光晕透明度，用无限循环动画实现呼吸效果
     val pulseAlpha = remember { Animatable(0f) }
     LaunchedEffect(isRunning) {
         if (isRunning) {
@@ -200,6 +224,7 @@ fun FocusScreen(
         }
     }
 
+    // playScale: 播放/暂停按钮的缩放动画，按下时缩小再弹回
     val playScale = remember { Animatable(1f) }
     LaunchedEffect(isRunning) {
         playScale.animateTo(
@@ -211,6 +236,36 @@ fun FocusScreen(
             animationSpec = spring(dampingRatio = 0.4f, stiffness = 400f),
         )
     }
+
+    // circleSize: 圆圈当前尺寸，260dp ↔ 400dp，用 spring 物理动画让膨胀/收缩有弹性
+    val circleSize by animateDpAsState(
+        targetValue = if (showSetup) 400.dp else 260.dp,
+        animationSpec = spring(
+            dampingRatio = 0.7f,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "circleSize",
+    )
+
+    // contentAlpha: 设置内容的透明度，展开时淡入，收回时淡出
+    val contentAlpha by animateFloatAsState(
+        targetValue = if (showSetup) 1f else 0f,
+        animationSpec = tween(
+            durationMillis = if (showSetup) 400 else 250,
+            delayMillis = if (showSetup) 150 else 0,
+        ),
+        label = "contentAlpha",
+    )
+
+    // timerAlpha: 计时器内容的透明度，和 contentAlpha 相反
+    val timerAlpha by animateFloatAsState(
+        targetValue = if (showSetup) 0f else 1f,
+        animationSpec = tween(
+            durationMillis = if (showSetup) 150 else 300,
+            delayMillis = if (showSetup) 0 else 100,
+        ),
+        label = "timerAlpha",
+    )
 
     Scaffold(
         contentWindowInsets = WindowInsets.statusBars,
@@ -252,186 +307,328 @@ fun FocusScreen(
                 .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            Spacer(modifier = Modifier.height(64.dp))
+            Spacer(modifier = Modifier.height(32.dp))
 
-            Box(
-                modifier = Modifier
-                    .size(260.dp)
-                    .clip(CircleShape)
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = {
-                            if (!isRunning) showSetup = true
-                        },
-                    ),
-                contentAlignment = Alignment.Center,
+            // 圆圈容器：一个 Surface，始终保持 CircleShape，尺寸动画从 260dp → 400dp
+            Surface(
+                modifier = Modifier.size(circleSize),
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.surfaceContainerLow,
+                shadowElevation = if (showSetup) 8.dp else 0.dp,
             ) {
-                Canvas(modifier = Modifier.fillMaxSize()) {
-                    val strokeWidth = 10.dp.toPx()
-                    val diameter = size.minDimension - strokeWidth * 2
-                    val topLeft = Offset(
-                        (size.width - diameter) / 2f,
-                        (size.height - diameter) / 2f,
-                    )
-                    val arcSize = Size(diameter, diameter)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            // 点击圆圈：未运行时切换设置模式，设置模式时关闭
+                            onClick = {
+                                if (!isRunning) showSetup = !showSetup
+                            },
+                        ),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    // ---- 计时器内容层（正常态显示，设置态淡出） ----
+                    if (timerAlpha > 0.01f) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .graphicsLayer { alpha = timerAlpha },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            // 进度环 Canvas
+                            Canvas(modifier = Modifier.fillMaxSize()) {
+                                val strokeWidth = 10.dp.toPx()
+                                val diameter = size.minDimension - strokeWidth * 2
+                                val topLeft = Offset(
+                                    (size.width - diameter) / 2f,
+                                    (size.height - diameter) / 2f,
+                                )
+                                val arcSize = Size(diameter, diameter)
 
-                    drawArc(
-                        color = ringColor.copy(alpha = 0.12f),
-                        startAngle = -90f,
-                        sweepAngle = 360f,
-                        useCenter = false,
-                        topLeft = topLeft,
-                        size = arcSize,
-                        style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
-                    )
+                                // 背景轨道环
+                                drawArc(
+                                    color = ringColor.copy(alpha = 0.12f),
+                                    startAngle = -90f,
+                                    sweepAngle = 360f,
+                                    useCenter = false,
+                                    topLeft = topLeft,
+                                    size = arcSize,
+                                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+                                )
 
-                    if (pulseAlpha.value > 0.01f) {
-                        drawArc(
-                            color = ringColor.copy(alpha = pulseAlpha.value),
-                            startAngle = -90f,
-                            sweepAngle = 360f * animatedProgress.value,
-                            useCenter = false,
-                            topLeft = topLeft,
-                            size = arcSize,
-                            style = Stroke(width = strokeWidth + 6.dp.toPx(), cap = StrokeCap.Round),
-                        )
+                                // 运行时的脉冲光晕环
+                                if (pulseAlpha.value > 0.01f) {
+                                    drawArc(
+                                        color = ringColor.copy(alpha = pulseAlpha.value),
+                                        startAngle = -90f,
+                                        sweepAngle = 360f * animatedProgress.value,
+                                        useCenter = false,
+                                        topLeft = topLeft,
+                                        size = arcSize,
+                                        style = Stroke(width = strokeWidth + 6.dp.toPx(), cap = StrokeCap.Round),
+                                    )
+                                }
+
+                                // 进度环
+                                drawArc(
+                                    color = ringColor,
+                                    startAngle = -90f,
+                                    sweepAngle = 360f * animatedProgress.value,
+                                    useCenter = false,
+                                    topLeft = topLeft,
+                                    size = arcSize,
+                                    style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+                                )
+                            }
+
+                            // 时间文本 + 任务/分钟标签
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                                modifier = Modifier.padding(horizontal = 32.dp),
+                            ) {
+                                Text(
+                                    timeText,
+                                    style = MaterialTheme.typography.displayLarge.copy(
+                                        fontWeight = FontWeight.Light,
+                                        letterSpacing = 2.sp,
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                if (selectedTaskTitle != null) {
+                                    Text(
+                                        selectedTaskTitle!!,
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
+                                    )
+                                } else {
+                                    Text(
+                                        "${focusMinutes} 分钟",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
                     }
 
-                    drawArc(
-                        color = ringColor,
-                        startAngle = -90f,
-                        sweepAngle = 360f * animatedProgress.value,
-                        useCenter = false,
-                        topLeft = topLeft,
-                        size = arcSize,
-                        style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
-                    )
-                }
-
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.padding(horizontal = 32.dp),
-                ) {
-                    Text(
-                        timeText,
-                        style = MaterialTheme.typography.displayLarge.copy(
-                            fontWeight = FontWeight.Light,
-                            letterSpacing = 2.sp,
-                        ),
-                        color = MaterialTheme.colorScheme.onSurface,
-                    )
-                    Spacer(modifier = Modifier.height(4.dp))
-                    if (selectedTaskTitle != null) {
-                        Text(
-                            selectedTaskTitle!!,
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    } else {
-                        Text(
-                            "${focusMinutes} 分钟",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    // ---- 设置内容层（设置态显示，正常态淡出） ----
+                    if (contentAlpha > 0.01f) {
+                        FocusSetupContent(
+                            currentMinutes = focusMinutes,
+                            currentTaskId = selectedTaskId,
+                            alpha = contentAlpha,
+                            onConfirm = { minutes, taskId, taskTitle ->
+                                focusMinutes = minutes
+                                selectedTaskId = taskId
+                                selectedTaskTitle = taskTitle
+                                remainingSeconds = minutes * 60
+                                scope.launch { animatedProgress.snapTo(1f) }
+                                showSetup = false
+                            },
                         )
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(40.dp))
-
-            Row(
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Surface(
-                    shape = CircleShape,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.size(52.dp),
+            // 播放控制行：仅在非设置态显示
+            if (!showSetup) {
+                Spacer(modifier = Modifier.height(40.dp))
+                Row(
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    IconButton(
-                        onClick = {
-                            remainingSeconds = focusMinutes * 60
-                            isRunning = false
-                            scope.launch { animatedProgress.snapTo(1f) }
-                        },
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         modifier = Modifier.size(52.dp),
                     ) {
-                        Icon(
-                            Icons.Default.Refresh,
-                            contentDescription = "重置",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        IconButton(
+                            onClick = {
+                                remainingSeconds = focusMinutes * 60
+                                isRunning = false
+                                scope.launch { animatedProgress.snapTo(1f) }
+                            },
+                            modifier = Modifier.size(52.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "重置",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
-                }
-                Spacer(modifier = Modifier.width(32.dp))
-                Surface(
-                    shape = CircleShape,
-                    color = ringColor,
-                    modifier = Modifier
-                        .size(72.dp)
-                        .scale(playScale.value)
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = { isRunning = !isRunning },
-                        ),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            if (isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                            contentDescription = if (isRunning) "暂停" else "开始",
-                            tint = Color.White,
-                            modifier = Modifier.size(36.dp),
-                        )
-                    }
-                }
-                Spacer(modifier = Modifier.width(32.dp))
-                Surface(
-                    shape = CircleShape,
-                    color = if (isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.size(52.dp),
-                ) {
-                    IconButton(
-                        onClick = {
-                            if (isRunning) completedSessions++
-                            remainingSeconds = focusMinutes * 60
-                            isRunning = false
-                            scope.launch { animatedProgress.snapTo(1f) }
-                        },
-                        modifier = Modifier.size(52.dp),
-                        enabled = isRunning || remainingSeconds < focusMinutes * 60,
+                    Spacer(modifier = Modifier.width(32.dp))
+                    Surface(
+                        shape = CircleShape,
+                        color = ringColor,
+                        modifier = Modifier
+                            .size(72.dp)
+                            .scale(playScale.value)
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = { isRunning = !isRunning },
+                            ),
                     ) {
-                        Icon(
-                            Icons.Default.Stop,
-                            contentDescription = "提前结束",
-                            tint = if (isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                if (isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (isRunning) "暂停" else "开始",
+                                tint = Color.White,
+                                modifier = Modifier.size(36.dp),
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(32.dp))
+                    Surface(
+                        shape = CircleShape,
+                        color = if (isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.size(52.dp),
+                    ) {
+                        IconButton(
+                            onClick = {
+                                if (isRunning) completedSessions++
+                                remainingSeconds = focusMinutes * 60
+                                isRunning = false
+                                scope.launch { animatedProgress.snapTo(1f) }
+                            },
+                            modifier = Modifier.size(52.dp),
+                            enabled = isRunning || remainingSeconds < focusMinutes * 60,
+                        ) {
+                            Icon(
+                                Icons.Default.Stop,
+                                contentDescription = "提前结束",
+                                tint = if (isRunning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
                     }
                 }
             }
         }
     }
+}
 
-    if (showSetup) {
-        FocusSetupSheet(
-            currentMinutes = focusMinutes,
-            currentTaskId = selectedTaskId,
-            onDismiss = { showSetup = false },
-            onConfirm = { minutes, taskId, taskTitle ->
-                focusMinutes = minutes
-                selectedTaskId = taskId
-                selectedTaskTitle = taskTitle
-                remainingSeconds = minutes * 60
-                scope.launch { animatedProgress.snapTo(1f) }
-                showSetup = false
-            },
+/**
+ * 设置面板内容 —— 嵌在放大后的圆圈内部。
+ * 包含：表盘时间选择器、任务列表、开始按钮。
+ * 整体用 graphicsLayer alpha 控制淡入淡出。
+ *
+ * @param currentMinutes 打开时当前的专注时长，用作表盘初始值
+ * @param currentTaskId 打开时当前关联的任务 ID
+ * @param alpha 内容的透明度，由外层动画控制
+ * @param onConfirm 点击"开始专注"时触发，回调 (分钟, 任务ID, 任务标题)
+ */
+@Composable
+private fun FocusSetupContent(
+    currentMinutes: Int,
+    currentTaskId: String?,
+    alpha: Float,
+    onConfirm: (minutes: Int, taskId: String?, taskTitle: String?) -> Unit,
+) {
+    val vm = focusSetupViewModel()
+    LaunchedEffect(Unit) { vm.loadTasks() }
+
+    // 面板内部编辑状态
+    var selectedMinutes by remember { mutableIntStateOf(currentMinutes) }
+    var selectedTaskId by remember { mutableStateOf(currentTaskId) }
+    val selectedTaskTitle = vm.tasks.find { it.id == selectedTaskId }?.title
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .graphicsLayer { this.alpha = alpha }
+            .padding(24.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // 标题
+        Text(
+            "专注设置",
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.Bold,
         )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 缩小版表盘（圆内空间有限，用 150dp）
+        DialTimePicker(
+            minutes = selectedMinutes,
+            onMinutesChange = { selectedMinutes = it },
+            modifier = Modifier.size(150.dp),
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 关联任务（紧凑列表）
+        if (vm.tasks.isEmpty()) {
+            Text(
+                "暂无待办任务",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 80.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                item {
+                    TaskOptionRow(
+                        title = "不关联",
+                        selected = selectedTaskId == null,
+                        onClick = { selectedTaskId = null },
+                    )
+                }
+                items(vm.tasks, key = { it.id }) { task ->
+                    TaskOptionRow(
+                        title = task.title,
+                        selected = selectedTaskId == task.id,
+                        onClick = { selectedTaskId = task.id },
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 开始按钮
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth(0.7f)
+                .clickable {
+                    onConfirm(selectedMinutes, selectedTaskId, selectedTaskTitle)
+                },
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.primary,
+        ) {
+            Box(
+                modifier = Modifier.padding(vertical = 10.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "开始",
+                    color = Color.White,
+                    fontWeight = FontWeight.Bold,
+                    style = MaterialTheme.typography.titleSmall,
+                )
+            }
+        }
     }
 }
 
+/**
+ * 圆弧表盘时间选择器 —— 拖拽/点击圆弧设置专注时长（1-120 分钟）。
+ *
+ * @param minutes 当前选中的分钟数
+ * @param onMinutesChange 分钟数变化时的回调
+ * @param modifier 外部 modifier
+ */
 @Composable
 private fun DialTimePicker(
     minutes: Int,
@@ -611,119 +808,14 @@ private fun DialTimePicker(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-private fun FocusSetupSheet(
-    currentMinutes: Int,
-    currentTaskId: String?,
-    onDismiss: () -> Unit,
-    onConfirm: (minutes: Int, taskId: String?, taskTitle: String?) -> Unit,
-) {
-    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    val vm = focusSetupViewModel()
-
-    LaunchedEffect(Unit) { vm.loadTasks() }
-
-    var selectedMinutes by remember { mutableIntStateOf(currentMinutes) }
-    var selectedTaskId by remember { mutableStateOf(currentTaskId) }
-    val selectedTaskTitle = vm.tasks.find { it.id == selectedTaskId }?.title
-
-    ModalBottomSheet(
-        onDismissRequest = onDismiss,
-        sheetState = sheetState,
-        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
-    ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .padding(bottom = 32.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                "专注设置",
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.align(Alignment.Start),
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            DialTimePicker(
-                minutes = selectedMinutes,
-                onMinutesChange = { selectedMinutes = it },
-            )
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Text(
-                "关联任务",
-                style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.align(Alignment.Start),
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-
-            if (vm.tasks.isEmpty()) {
-                Text(
-                    "暂无待办任务",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier
-                        .align(Alignment.Start)
-                        .padding(vertical = 12.dp),
-                )
-            } else {
-                LazyColumn(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(max = 200.dp),
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    item {
-                        TaskOptionRow(
-                            title = "不关联任务",
-                            selected = selectedTaskId == null,
-                            onClick = { selectedTaskId = null },
-                        )
-                    }
-                    items(vm.tasks, key = { it.id }) { task ->
-                        TaskOptionRow(
-                            title = task.title,
-                            selected = selectedTaskId == task.id,
-                            onClick = { selectedTaskId = task.id },
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(20.dp))
-
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clickable {
-                        onConfirm(selectedMinutes, selectedTaskId, selectedTaskTitle)
-                    },
-                shape = RoundedCornerShape(16.dp),
-                color = MaterialTheme.colorScheme.primary,
-            ) {
-                Box(
-                    modifier = Modifier.padding(vertical = 14.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "开始专注",
-                        color = Color.White,
-                        fontWeight = FontWeight.Bold,
-                        style = MaterialTheme.typography.titleMedium,
-                    )
-                }
-            }
-        }
-    }
-}
-
+/**
+ * 任务选项行 —— 用于专注设置面板中的任务列表。
+ * 单选模式，选中时高亮背景 + 显示勾选图标。
+ *
+ * @param title 任务标题
+ * @param selected 是否被选中
+ * @param onClick 点击回调，触发选中切换
+ */
 @Composable
 private fun TaskOptionRow(
     title: String,

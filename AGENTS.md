@@ -65,8 +65,49 @@ cd app && ./gradlew assembleDebug     # build APK
 | Known pitfalls | `docs/pitfalls.md` |
 | Code audit | `docs/code-audit-report.md` |
 
+## Coding Rules
+
+### 不要主动修改不是本次任务范围的代码
+
+如果某个文件存在编译错误或代码问题，但该文件**不是你当前任务涉及的目标文件**，不要主动去修复它。只在用户明确要求时才修改。当前已知存在的预存问题（不要碰）：
+
+- `TaskScreen.kt` 有 `isGroupSelected` 参数相关的编译错误
+- `TaskCard.kt` 有 `animateItem` 引用相关的编译错误
+- 这些问题不在当前任务范围内，除非用户明确要求修复
+
+### 注释规范
+
+所有新增和修改的代码**必须写详细注释**。要求：
+
+- 每个函数/Composable 必须有中文注释说明其用途
+- 复杂逻辑块（动画、手势、状态转换等）必须有行内注释解释"为什么这么做"
+- 状态变量的用途必须用注释标明
+- 回调参数（`onXxx`）必须注释说明触发时机和传递的数据
+- 动画的 `transitionSpec` 和 `animationSpec` 必须注释说明动画效果的意图
+
+示例：
+```kotlin
+/**
+ * 周日期选择器 —— 显示当前周的 7 天，支持左右滑动切换周次。
+ *
+ * @param selectedDate 当前选中的日期，用于高亮显示
+ * @param today 今天的日期，用于标记"今天"圆点
+ * @param onSelect 用户点击某一天时触发，回调传入被点击的 LocalDate
+ */
+@Composable
+private fun WeekDaySelector(
+    selectedDate: LocalDate,
+    today: LocalDate,
+    onSelect: (LocalDate) -> Unit,
+) {
+    // weekOffset: 相对于本周的周偏移量，0=本周，1=下周，-1=上周
+    var weekOffset by remember { mutableStateOf(0) }
+    ...
+}
+```
+
 ## Environment
 
 - WSL2 development. Android SDK at `~/android-sdk`. NDK version `27.0.12077973`.
 - `deploy.sh` uses `usbipd` for USB passthrough from Windows to WSL.
-- Rust edition 2021. Java 17. Kotlin 2.1.0. Compose BOM 2024.12.01. AGP 8.7.3.
+- Rust edition 2021. Java 17. Kotlin 2.3.21. Compose BOM 2026.05.00. AGP 9.1.1.

@@ -3,6 +3,7 @@ package com.echonion.nion.ui.schedule
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -10,9 +11,8 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
-import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,6 +32,8 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -57,6 +59,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -67,6 +71,8 @@ import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 import kotlin.math.ceil
+import kotlin.math.roundToInt
+import kotlin.math.sign
 
 data class ScheduleEvent(
     val id: String,
@@ -84,12 +90,12 @@ val dayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 fun ScheduleScreen(
     onOpenCompanion: () -> Unit = {},
 ) {
-    var yearMonth by remember { mutableStateOf(YearMonth.now()) }
-    var selectedDay by remember { mutableStateOf(LocalDate.now().dayOfWeek) }
+    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     var showCalendarPicker by remember { mutableStateOf(false) }
     val today = LocalDate.now()
     val selectedEvents = emptyList<ScheduleEvent>()
-    val dayLabel = dayLabels[selectedDay.value - 1]
+    val dayLabel = dayLabels[selectedDate.dayOfWeek.value - 1]
+    val yearMonth = YearMonth.from(selectedDate)
 
     SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
         AnimatedContent(
@@ -112,31 +118,40 @@ fun ScheduleScreen(
                     initialYearMonth = yearMonth,
                     today = today,
                     onDismiss = { showCalendarPicker = false },
-                        onSelect = { ym, day ->
-                            yearMonth = ym
-                            selectedDay = day
-                            showCalendarPicker = false
+                    onSelect = { date ->
+                        selectedDate = date
+                        showCalendarPicker = false
+                    },
+                    sharedBoundsModifier = Modifier.sharedElement(
+                        sharedContentState = rememberSharedContentState("calendar"),
+                        animatedVisibilityScope = this@AnimatedContent,
+                        boundsTransform = { _, _ ->
+                            spring(
+                                dampingRatio = 0.8f,
+                                stiffness = Spring.StiffnessMediumLow,
+                            )
                         },
-                        sharedBoundsModifier = Modifier.sharedBounds(
-                            sharedContentState = rememberSharedContentState("calendar_bounds"),
-                            animatedVisibilityScope = this@AnimatedContent,
-                        ),
+                    ),
                 )
             } else {
                 ScheduleContent(
-                    yearMonth = yearMonth,
-                    selectedDay = selectedDay,
+                    selectedDate = selectedDate,
                     dayLabel = dayLabel,
                     today = today,
                     selectedEvents = selectedEvents,
-                    onYearMonthChange = { yearMonth = it },
-                    onSelectedDayChange = { selectedDay = it },
+                    onSelectedDateChange = { selectedDate = it },
                     onOpenCalendar = { showCalendarPicker = true },
-                        onOpenCompanion = onOpenCompanion,
-                        sharedBoundsModifier = Modifier.sharedBounds(
-                            sharedContentState = rememberSharedContentState("calendar_bounds"),
-                            animatedVisibilityScope = this@AnimatedContent,
-                        ),
+                    onOpenCompanion = onOpenCompanion,
+                    sharedBoundsModifier = Modifier.sharedElement(
+                        sharedContentState = rememberSharedContentState("calendar"),
+                        animatedVisibilityScope = this@AnimatedContent,
+                        boundsTransform = { _, _ ->
+                            spring(
+                                dampingRatio = 0.8f,
+                                stiffness = Spring.StiffnessMediumLow,
+                            )
+                        },
+                    ),
                 )
             }
         }
@@ -146,17 +161,17 @@ fun ScheduleScreen(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ScheduleContent(
-    yearMonth: YearMonth,
-    selectedDay: DayOfWeek,
+    selectedDate: LocalDate,
     dayLabel: String,
     today: LocalDate,
     selectedEvents: List<ScheduleEvent>,
-    onYearMonthChange: (YearMonth) -> Unit,
-    onSelectedDayChange: (DayOfWeek) -> Unit,
+    onSelectedDateChange: (LocalDate) -> Unit,
     onOpenCalendar: () -> Unit,
     onOpenCompanion: () -> Unit,
     sharedBoundsModifier: Modifier,
 ) {
+    val yearMonth = YearMonth.from(selectedDate)
+    val formatter = DateTimeFormatter.ofPattern("yyyy年 M月", Locale.CHINESE)
     Scaffold(
         contentWindowInsets = WindowInsets.statusBars,
         topBar = {
@@ -169,7 +184,7 @@ private fun ScheduleContent(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            "周${dayLabel}",
+                            "周${dayLabel} · ${selectedDate.monthValue}月${selectedDate.dayOfMonth}日",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -198,8 +213,8 @@ private fun ScheduleContent(
             item {
                 MonthHeader(
                     yearMonth = yearMonth,
-                    onPrev = { onYearMonthChange(yearMonth.minusMonths(1)) },
-                    onNext = { onYearMonthChange(yearMonth.plusMonths(1)) },
+                    onPrev = { onSelectedDateChange(selectedDate.minusMonths(1)) },
+                    onNext = { onSelectedDateChange(selectedDate.plusMonths(1)) },
                     onClick = onOpenCalendar,
                     modifier = sharedBoundsModifier,
                 )
@@ -207,9 +222,9 @@ private fun ScheduleContent(
 
             item {
                 WeekDaySelector(
-                    selectedDay = selectedDay,
-                    onSelect = onSelectedDayChange,
+                    selectedDate = selectedDate,
                     today = today,
+                    onSelect = onSelectedDateChange,
                 )
             }
 
@@ -256,13 +271,12 @@ private fun ScheduleContent(
     }
 }
 
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun CalendarPickerOverlay(
     initialYearMonth: YearMonth,
     today: LocalDate,
     onDismiss: () -> Unit,
-    onSelect: (YearMonth, DayOfWeek) -> Unit,
+    onSelect: (LocalDate) -> Unit,
     sharedBoundsModifier: Modifier,
 ) {
     Box(
@@ -337,66 +351,106 @@ private fun MonthHeader(
 
 @Composable
 private fun WeekDaySelector(
-    selectedDay: DayOfWeek,
-    onSelect: (DayOfWeek) -> Unit,
+    selectedDate: LocalDate,
     today: LocalDate,
+    onSelect: (LocalDate) -> Unit,
 ) {
-    val startOfWeek = today.with(DayOfWeek.MONDAY)
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceEvenly,
-    ) {
-        DayOfWeek.entries.forEachIndexed { index, dow ->
-            val date = startOfWeek.plusDays(index.toLong())
-            val isSelected = selectedDay == dow
-            val isToday = date == today
+    var weekOffset by remember { mutableStateOf(0) }
+    var dragOffsetX by remember { mutableStateOf(0f) }
+    val density = LocalDensity.current
 
-            val bgColor by animateColorAsState(
-                targetValue = when {
-                    isSelected -> MaterialTheme.colorScheme.primary
-                    isToday -> MaterialTheme.colorScheme.primaryContainer
-                    else -> Color.Transparent
-                },
-                animationSpec = tween(200),
-                label = "dowBg",
-            )
-            val textColor by animateColorAsState(
-                targetValue = when {
-                    isSelected -> MaterialTheme.colorScheme.onPrimary
-                    isToday -> MaterialTheme.colorScheme.onPrimaryContainer
-                    else -> MaterialTheme.colorScheme.onSurfaceVariant
-                },
-                animationSpec = tween(200),
-                label = "dowText",
-            )
-
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = { onSelect(dow) },
-                ),
-            ) {
-                Text(
-                    dayLabels[index],
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .pointerInput(weekOffset) {
+                detectHorizontalDragGestures(
+                    onDragEnd = {
+                        val threshold = with(density) { 40.dp.toPx() }
+                        val totalOffset = dragOffsetX
+                        dragOffsetX = 0f
+                        if (totalOffset < -threshold) {
+                            weekOffset++
+                        } else if (totalOffset > threshold) {
+                            weekOffset--
+                        }
+                    },
+                    onDragCancel = { dragOffsetX = 0f },
+                    onHorizontalDrag = { _, dragAmount ->
+                        dragOffsetX += dragAmount
+                    },
                 )
-                Spacer(modifier = Modifier.height(6.dp))
-                Surface(
-                    shape = CircleShape,
-                    color = bgColor,
-                    modifier = Modifier.size(42.dp),
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
+            },
+    ) {
+        AnimatedContent(
+            targetState = weekOffset,
+            transitionSpec = {
+                val direction = if (targetState > initialState) 1 else -1
+                (slideInHorizontally { width -> direction * width / 3 } + fadeIn(tween(250)))
+                    .togetherWith(slideOutHorizontally { width -> -direction * width / 3 } + fadeOut(tween(200)))
+                    .using(SizeTransform(clip = false))
+            },
+            label = "weekSlide",
+        ) { offset ->
+            val startOfWeek = remember(today, offset) {
+                today.with(DayOfWeek.MONDAY).plusWeeks(offset.toLong())
+            }
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+            ) {
+                DayOfWeek.entries.forEachIndexed { index, _ ->
+                    val date = startOfWeek.plusDays(index.toLong())
+                    val isSelected = date == selectedDate
+                    val isToday = date == today
+
+                    val bgColor by animateColorAsState(
+                        targetValue = when {
+                            isSelected -> MaterialTheme.colorScheme.primary
+                            isToday -> MaterialTheme.colorScheme.primaryContainer
+                            else -> Color.Transparent
+                        },
+                        animationSpec = tween(200),
+                        label = "dowBg$index",
+                    )
+                    val textColor by animateColorAsState(
+                        targetValue = when {
+                            isSelected -> MaterialTheme.colorScheme.onPrimary
+                            isToday -> MaterialTheme.colorScheme.onPrimaryContainer
+                            else -> MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                        animationSpec = tween(200),
+                        label = "dowText$index",
+                    )
+
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { onSelect(date) },
+                        ),
+                    ) {
                         Text(
-                            date.dayOfMonth.toString(),
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal,
-                            color = textColor,
-                            textAlign = TextAlign.Center,
+                            dayLabels[index],
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                         )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Surface(
+                            shape = CircleShape,
+                            color = bgColor,
+                            modifier = Modifier.size(42.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Text(
+                                    date.dayOfMonth.toString(),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal,
+                                    color = textColor,
+                                    textAlign = TextAlign.Center,
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -469,7 +523,7 @@ private fun CalendarPickerDialog(
     initialYearMonth: YearMonth,
     today: LocalDate,
     onDismiss: () -> Unit,
-    onSelect: (YearMonth, DayOfWeek) -> Unit,
+    onSelect: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var yearMonth by remember { mutableStateOf(initialYearMonth) }
@@ -556,7 +610,7 @@ private fun CalendarPickerDialog(
                                     enabled = isValid,
                                     onClick = {
                                         if (date != null) {
-                                            onSelect(yearMonth, date.dayOfWeek)
+                                            onSelect(date)
                                         }
                                     },
                                 ),
@@ -587,7 +641,7 @@ private fun CalendarPickerDialog(
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
-                        onClick = { onSelect(initialYearMonth, today.dayOfWeek) },
+                        onClick = { onSelect(today) },
                     ),
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,

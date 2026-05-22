@@ -14,13 +14,15 @@ YELLOW='\033[1;33m'
 CYAN='\033[0;36m'
 NC='\033[0m'
 
-step() { echo -e "${CYAN}[1/5] $1${NC}"; }
+step() { echo -e "${CYAN}[$1] $2${NC}"; }
 ok()   { echo -e "${GREEN}  ✓ $1${NC}"; }
 warn() { echo -e "${YELLOW}  ⚠ $1${NC}"; }
 fail() { echo -e "${RED}  ✗ $1${NC}"; }
 
+TOTAL_STEPS=4
+
 # ---------- 1. USB attach ----------
-step "检查 USB 设备"
+step 1/$TOTAL_STEPS "检查 USB 设备"
 
 find_phone_busid() {
     "$POWERSHELL" -Command "usbipd list" 2>/dev/null \
@@ -37,10 +39,10 @@ is_attached() {
 }
 
 adb_has_device() {
-    sudo "$ADB" devices 2>/dev/null | grep -q -v 'List of devices' | grep -q -v '^$'
+    sudo "$ADB" devices 2>/dev/null | grep -v 'List of devices' | grep -v '^$' | grep -q .
 }
 
-if is_attached; then
+if is_attached || adb_has_device; then
     ok "USB 设备已透传"
 else
     BUSID=$(find_phone_busid)
@@ -51,7 +53,7 @@ else
     warn "正在透传 USB 设备 (busid=$BUSID)..."
     "$POWERSHELL" -Command "Start-Process usbipd -ArgumentList 'attach','--wsl','--busid','$BUSID' -Verb RunAs -Wait" 2>/dev/null
     sleep 2
-    if is_attached; then
+    if is_attached || adb_has_device; then
         ok "USB 透传成功"
     else
         fail "USB 透传失败，请手动在 Windows PowerShell (管理员) 执行:"
@@ -62,7 +64,7 @@ else
 fi
 
 # ---------- 2. Build ----------
-step "构建 APK"
+step 2/$TOTAL_STEPS "构建 APK"
 BUILD_OUTPUT=$(cd "$PROJECT_DIR/app" && ./gradlew assembleDebug 2>&1)
 BUILD_EXIT=$?
 if [ $BUILD_EXIT -ne 0 ]; then
@@ -73,11 +75,8 @@ fi
 APK_SIZE=$(du -h "$ADB_APK" | cut -f1)
 ok "构建完成 ($APK_SIZE)"
 
-# ---------- 3. Install ----------
-step "安装到手机"
-sudo "$ADB" kill-server 2>/dev/null || true
-sudo "$ADB" start-server 2>/dev/null
-sleep 1
+# ---------- 3. Install + Restart ----------
+step 3/$TOTAL_STEPS "安装到手机"
 
 DEVICES=$(sudo "$ADB" devices 2>/dev/null | grep -v 'List of devices' | grep -v '^$' | wc -l)
 if [ "$DEVICES" -eq 0 ]; then
@@ -86,19 +85,26 @@ if [ "$DEVICES" -eq 0 ]; then
     exit 1
 fi
 
-# 直接执行 install，不通过管道，避免 tail 导致阻塞
-INSTALL_OUTPUT=$(sudo "$ADB" install -r "$ADB_APK" 2>&1) || true
-if echo "$INSTALL_OUTPUT" | grep -q "Success"; then
-    ok "安装完成"
-else
-    fail "安装失败: $INSTALL_OUTPUT"
-    exit 1
+# 用 timeout 包裹 adb install，防止卡死
+if ! timeout 30 sudo "$ADB" install -r "$ADB_APK" 2>&1 | grep -q "Success"; then
+    # install 可能因为旧 session 卡住，先 force-stop 再重试
+    sudo "$ADB" shell am force-stop "$PACKAGE" 2>/dev/null || true
+    if ! timeout 30 sudo "$ADB" install -r "$ADB_APK" 2>&1 | grep -q "Success"; then
+        fail "安装失败，尝试 kill-server 后重试..."
+        sudo "$ADB" kill-server 2>/dev/null || true
+        sleep 1
+        sudo "$ADB" start-server 2>/dev/null || true
+        sleep 1
+        if ! timeout 30 sudo "$ADB" install -r "$ADB_APK" 2>&1 | grep -q "Success"; then
+            fail "安装失败，请手动检查"
+            exit 1
+        fi
+    fi
 fi
+ok "安装完成"
 
-# ---------- 4. Restart app ----------
-step "重启应用"
-sudo "$ADB" shell am force-stop "$PACKAGE" 2>/dev/null
-sudo "$ADB" logcat -c 2>/dev/null
+step 4/$TOTAL_STEPS "重启应用"
+sudo "$ADB" shell am force-stop "$PACKAGE" 2>/dev/null || true
 sudo "$ADB" shell am start -n "$ACTIVITY" >/dev/null 2>&1
 ok "应用已启动"
 
