@@ -1,6 +1,7 @@
 package com.echonion.nion.ui.task
 
 import android.app.Application
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.derivedStateOf
@@ -14,6 +15,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.echonion.nion.core
+import com.echonion.nion.dataEvents
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -49,7 +51,11 @@ data class FlatTaskItem(
     val isGroupLast: Boolean,
 )
 
-class TaskViewModel(private val core: NionCore, private val onError: (String) -> Unit) : ViewModel() {
+class TaskViewModel(
+    private val core: NionCore,
+    private val onError: (String) -> Unit,
+    private val app: android.app.Application,
+) : ViewModel() {
 
     var tasks by mutableStateOf<List<TaskItem>>(emptyList())
         private set
@@ -123,6 +129,13 @@ class TaskViewModel(private val core: NionCore, private val onError: (String) ->
 
     init {
         refresh()
+        // 监听 Agent 工具执行后的数据变更事件，自动刷新任务列表
+        viewModelScope.launch {
+            app.dataEvents().collect { event ->
+                Log.d("TaskViewModel", "收到数据变更事件: ${event.type}")
+                refresh()
+            }
+        }
     }
 
     fun refresh() {
@@ -200,7 +213,7 @@ class TaskViewModel(private val core: NionCore, private val onError: (String) ->
                 val allIds = collectIds(updatedTask)
                 withContext(Dispatchers.IO) {
                     for (id in allIds) {
-                        core.updateTask(id, null, null, null, newStatus)
+                        core.updateTask(id, null, null, null, newStatus, null, null, null)
                     }
                 }
             } catch (e: Exception) {
@@ -218,7 +231,7 @@ class TaskViewModel(private val core: NionCore, private val onError: (String) ->
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    core.updateTask(id, title, description, priority, null)
+                    core.updateTask(id, title, description, priority, null, null, null, null)
                 }
                 tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId) }
                 scheduleRefreshCounts()
@@ -456,9 +469,9 @@ fun taskViewModel(): TaskViewModel {
         factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 @Suppress("UNCHECKED_CAST")
-                return TaskViewModel(app.core()) { msg ->
+                return TaskViewModel(app.core(), { msg ->
                     Toast.makeText(app, msg, Toast.LENGTH_SHORT).show()
-                } as T
+                }, app) as T
             }
         }
     )

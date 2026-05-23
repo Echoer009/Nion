@@ -114,7 +114,7 @@ fun NionApp() {
             val currentRoute = currentDestination?.route
             DualPanelLayout(
                 leftPanelWidth = 260.dp,
-                rightPanelWidth = 280.dp,
+                rightPanelWidth = 320.dp,
                 state = dualState,
                 enableLeftSwipe = currentRoute == "tasks",
                 modifier = Modifier.padding(innerPadding),
