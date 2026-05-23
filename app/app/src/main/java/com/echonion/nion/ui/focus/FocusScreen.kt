@@ -744,17 +744,15 @@ private fun TaskCardRow(
         cardWhite.copy(alpha = 0f),         // colorFraction=1: 完全透明（透出米白底）
         colorFraction,
     )
-    // 选中状态：主题橙半透明背景 + 主题橙边框
-    val finalCardColor = if (selected) primaryColor.copy(alpha = 0.12f) else cardColor
+    // 选中状态：仅描边 + 文字变色 + 打勾，不添加背景色
     val borderColor = if (selected) primaryColor else Color.Transparent
 
     Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onClick),
+        modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(16.dp),
-        color = finalCardColor,
+        color = cardColor,
         border = if (selected) BorderStroke(2.dp, borderColor) else null,
+        onClick = onClick,
     ) {
         Row(
             modifier = Modifier
