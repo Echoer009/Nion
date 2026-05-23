@@ -11,8 +11,6 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,8 +30,8 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
-import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -54,26 +52,33 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
-import kotlin.math.ceil
-import kotlin.math.roundToInt
-import kotlin.math.sign
 
+/**
+ * 日程事件数据类。
+ *
+ * @param id 事件唯一标识
+ * @param title 事件标题
+ * @param timeRange 时间段描述，如 "09:00 - 10:30"
+ * @param location 地点，可为 null
+ * @param color 事件标记色
+ * @param dayOfWeek 所属星期几
+ */
 data class ScheduleEvent(
     val id: String,
     val title: String,
@@ -85,6 +90,14 @@ data class ScheduleEvent(
 
 val dayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 
+/**
+ * 日程主屏幕 —— 显示月/周选择器 + 当日事件列表。
+ *
+ * 使用 SharedTransitionLayout + AnimatedContent 在月视图日历弹窗和主界面之间切换，
+ * 点击 MonthHeader 弹出日历选择器 overlay。
+ *
+ * @param onOpenCompanion 点击顶栏伙伴图标时的回调，用于打开右侧 AI 面板
+ */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun ScheduleScreen(
@@ -132,6 +145,17 @@ fun ScheduleScreen(
                             )
                         },
                     ),
+                    // 月份文字的 shared element modifier，让年月文字从 MonthHeader 飞到弹窗 header
+                    textSharedModifier = Modifier.sharedElement(
+                        sharedContentState = rememberSharedContentState("monthText"),
+                        animatedVisibilityScope = this@AnimatedContent,
+                        boundsTransform = { _, _ ->
+                            spring(
+                                dampingRatio = 0.8f,
+                                stiffness = Spring.StiffnessMediumLow,
+                            )
+                        },
+                    ),
                 )
             } else {
                 ScheduleContent(
@@ -152,12 +176,36 @@ fun ScheduleScreen(
                             )
                         },
                     ),
+                    // 月份文字的 shared element modifier
+                    textSharedModifier = Modifier.sharedElement(
+                        sharedContentState = rememberSharedContentState("monthText"),
+                        animatedVisibilityScope = this@AnimatedContent,
+                        boundsTransform = { _, _ ->
+                            spring(
+                                dampingRatio = 0.8f,
+                                stiffness = Spring.StiffnessMediumLow,
+                            )
+                        },
+                    ),
                 )
             }
         }
     }
 }
 
+/**
+ * 日程主界面内容 —— 顶栏 + 月份头部 + 周选择器 + 事件列表。
+ *
+ * @param selectedDate 当前选中日期
+ * @param dayLabel "一"~"日" 的中文标签
+ * @param today 今天的日期
+ * @param selectedEvents 当日事件列表（当前为 empty）
+ * @param onSelectedDateChange 日期变更回调
+ * @param onOpenCalendar 点击月份头部时打开日历弹窗
+ * @param onOpenCompanion 点击顶栏伙伴图标回调
+ * @param sharedBoundsModifier shared element 动画 modifier（容器 bounds）
+ * @param textSharedModifier shared element 动画 modifier（月份文字）
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ScheduleContent(
@@ -169,6 +217,7 @@ private fun ScheduleContent(
     onOpenCalendar: () -> Unit,
     onOpenCompanion: () -> Unit,
     sharedBoundsModifier: Modifier,
+    textSharedModifier: Modifier,
 ) {
     val yearMonth = YearMonth.from(selectedDate)
     val formatter = DateTimeFormatter.ofPattern("yyyy年 M月", Locale.CHINESE)
@@ -217,6 +266,7 @@ private fun ScheduleContent(
                     onNext = { onSelectedDateChange(selectedDate.plusMonths(1)) },
                     onClick = onOpenCalendar,
                     modifier = sharedBoundsModifier,
+                    textSharedModifier = textSharedModifier,
                 )
             }
 
@@ -271,6 +321,16 @@ private fun ScheduleContent(
     }
 }
 
+/**
+ * 日历弹窗的半透明遮罩层 —— 点击背景关闭弹窗。
+ *
+ * @param initialYearMonth 初始显示的年月
+ * @param today 今天的日期
+ * @param onDismiss 关闭弹窗回调
+ * @param onSelect 选中日期回调
+ * @param sharedBoundsModifier shared element 动画 modifier（容器 bounds）
+ * @param textSharedModifier shared element 动画 modifier（月份文字）
+ */
 @Composable
 private fun CalendarPickerOverlay(
     initialYearMonth: YearMonth,
@@ -278,6 +338,7 @@ private fun CalendarPickerOverlay(
     onDismiss: () -> Unit,
     onSelect: (LocalDate) -> Unit,
     sharedBoundsModifier: Modifier,
+    textSharedModifier: Modifier,
 ) {
     Box(
         modifier = Modifier
@@ -296,10 +357,21 @@ private fun CalendarPickerOverlay(
             onDismiss = onDismiss,
             onSelect = onSelect,
             modifier = sharedBoundsModifier,
+            textSharedModifier = textSharedModifier,
         )
     }
 }
 
+/**
+ * 月份头部组件 —— 显示 "yyyy年 M月"，左右箭头切换月份，点击弹日历。
+ *
+ * @param yearMonth 当前显示的年月
+ * @param onPrev 点击左箭头时回调
+ * @param onNext 点击右箭头时回调
+ * @param onClick 点击年月文字时回调（打开日历弹窗）
+ * @param modifier 外部 shared element modifier（容器 bounds）
+ * @param textSharedModifier shared element 动画 modifier（月份文字）
+ */
 @Composable
 private fun MonthHeader(
     yearMonth: YearMonth,
@@ -307,6 +379,7 @@ private fun MonthHeader(
     onNext: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
+    textSharedModifier: Modifier = Modifier,
 ) {
     val formatter = DateTimeFormatter.ofPattern("yyyy年 M月", Locale.CHINESE)
     Surface(
@@ -338,6 +411,7 @@ private fun MonthHeader(
             ) {
                 Text(
                     yearMonth.format(formatter),
+                    modifier = textSharedModifier,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
@@ -349,107 +423,97 @@ private fun MonthHeader(
     }
 }
 
+/**
+ * 周日期选择器 —— 显示当前周的 7 天，支持左右滑动切换周次。
+ *
+ * 使用 HorizontalPager 实现滑动切换，预渲染相邻两周，确保滑动时能看到前/后一周。
+ * Pager 的 pageCount 设为 Int.MAX_VALUE，初始页居中，通过 pageOffset 计算实际日期。
+ *
+ * @param selectedDate 当前选中的日期，用于高亮显示
+ * @param today 今天的日期，用于标记"今天"圆点
+ * @param onSelect 用户点击某一天时触发，回调传入被点击的 LocalDate
+ */
 @Composable
 private fun WeekDaySelector(
     selectedDate: LocalDate,
     today: LocalDate,
     onSelect: (LocalDate) -> Unit,
 ) {
-    var weekOffset by remember { mutableStateOf(0) }
-    var dragOffsetX by remember { mutableStateOf(0f) }
-    val density = LocalDensity.current
+    // START_PAGE 居中，避免用户滑动到边界
+    val startPage = Int.MAX_VALUE / 2
+    val pagerState = rememberPagerState(
+        initialPage = startPage,
+        pageCount = { Int.MAX_VALUE },
+    )
 
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .pointerInput(weekOffset) {
-                detectHorizontalDragGestures(
-                    onDragEnd = {
-                        val threshold = with(density) { 40.dp.toPx() }
-                        val totalOffset = dragOffsetX
-                        dragOffsetX = 0f
-                        if (totalOffset < -threshold) {
-                            weekOffset++
-                        } else if (totalOffset > threshold) {
-                            weekOffset--
-                        }
+    HorizontalPager(
+        state = pagerState,
+        // 预渲染当前页两侧各 1 页，滑动时能提前看到相邻周
+        beyondViewportPageCount = 1,
+        modifier = Modifier.fillMaxWidth(),
+    ) { page ->
+        // pageOffset: 相对于初始页的页偏移量，用于计算该页对应的周一日期
+        val pageOffset = page - startPage
+        val startOfWeek = remember(today, pageOffset) {
+            today.with(DayOfWeek.MONDAY).plusWeeks(pageOffset.toLong())
+        }
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            DayOfWeek.entries.forEachIndexed { index, _ ->
+                val date = startOfWeek.plusDays(index.toLong())
+                val isSelected = date == selectedDate
+                val isToday = date == today
+
+                // 选中/今天的背景色过渡动画
+                val bgColor by animateColorAsState(
+                    targetValue = when {
+                        isSelected -> MaterialTheme.colorScheme.primary
+                        isToday -> MaterialTheme.colorScheme.primaryContainer
+                        else -> Color.Transparent
                     },
-                    onDragCancel = { dragOffsetX = 0f },
-                    onHorizontalDrag = { _, dragAmount ->
-                        dragOffsetX += dragAmount
-                    },
+                    animationSpec = tween(200),
+                    label = "dowBg$index",
                 )
-            },
-    ) {
-        AnimatedContent(
-            targetState = weekOffset,
-            transitionSpec = {
-                val direction = if (targetState > initialState) 1 else -1
-                (slideInHorizontally { width -> direction * width / 3 } + fadeIn(tween(250)))
-                    .togetherWith(slideOutHorizontally { width -> -direction * width / 3 } + fadeOut(tween(200)))
-                    .using(SizeTransform(clip = false))
-            },
-            label = "weekSlide",
-        ) { offset ->
-            val startOfWeek = remember(today, offset) {
-                today.with(DayOfWeek.MONDAY).plusWeeks(offset.toLong())
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                DayOfWeek.entries.forEachIndexed { index, _ ->
-                    val date = startOfWeek.plusDays(index.toLong())
-                    val isSelected = date == selectedDate
-                    val isToday = date == today
+                // 选中/今天的文字色过渡动画
+                val textColor by animateColorAsState(
+                    targetValue = when {
+                        isSelected -> MaterialTheme.colorScheme.onPrimary
+                        isToday -> MaterialTheme.colorScheme.onPrimaryContainer
+                        else -> MaterialTheme.colorScheme.onSurfaceVariant
+                    },
+                    animationSpec = tween(200),
+                    label = "dowText$index",
+                )
 
-                    val bgColor by animateColorAsState(
-                        targetValue = when {
-                            isSelected -> MaterialTheme.colorScheme.primary
-                            isToday -> MaterialTheme.colorScheme.primaryContainer
-                            else -> Color.Transparent
-                        },
-                        animationSpec = tween(200),
-                        label = "dowBg$index",
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onSelect(date) },
+                    ),
+                ) {
+                    Text(
+                        dayLabels[index],
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                     )
-                    val textColor by animateColorAsState(
-                        targetValue = when {
-                            isSelected -> MaterialTheme.colorScheme.onPrimary
-                            isToday -> MaterialTheme.colorScheme.onPrimaryContainer
-                            else -> MaterialTheme.colorScheme.onSurfaceVariant
-                        },
-                        animationSpec = tween(200),
-                        label = "dowText$index",
-                    )
-
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = { onSelect(date) },
-                        ),
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Surface(
+                        shape = CircleShape,
+                        color = bgColor,
+                        modifier = Modifier.size(42.dp),
                     ) {
-                        Text(
-                            dayLabels[index],
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                        )
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Surface(
-                            shape = CircleShape,
-                            color = bgColor,
-                            modifier = Modifier.size(42.dp),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    date.dayOfMonth.toString(),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal,
-                                    color = textColor,
-                                    textAlign = TextAlign.Center,
-                                )
-                            }
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                date.dayOfMonth.toString(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isSelected || isToday) FontWeight.Bold else FontWeight.Normal,
+                                color = textColor,
+                                textAlign = TextAlign.Center,
+                            )
                         }
                     }
                 }
@@ -458,6 +522,11 @@ private fun WeekDaySelector(
     }
 }
 
+/**
+ * 日程事件卡片 —— 左侧圆形色块 + 标题 + 时间段 + 可选地点标签。
+ *
+ * @param event 日程事件数据
+ */
 @Composable
 private fun EventCard(event: ScheduleEvent) {
     ElevatedCard(
@@ -518,6 +587,20 @@ private fun EventCard(event: ScheduleEvent) {
     }
 }
 
+/**
+ * 日历选择对话框 —— 显示月视图日历，支持左右滑动切换月份。
+ *
+ * 使用 HorizontalPager 包裹月网格，预渲染相邻月份，滑动时能看到前/后一个月。
+ * 顶部 header 的年月文字和箭头按钮与 pager 状态双向同步。
+ * 网格高度固定为 6 行，避免不同月份行数不同导致滑动时高度跳动。
+ *
+ * @param initialYearMonth 对话框打开时初始显示的年月
+ * @param today 今天的日期，用于高亮标记
+ * @param onDismiss 用户点击背景区域关闭对话框时触发
+ * @param onSelect 用户点击某一天时触发，回调传入被点击的 LocalDate
+ * @param modifier 外部传入的 modifier（用于 shared element 动画容器 bounds）
+ * @param textSharedModifier shared element 动画 modifier（月份文字，从 MonthHeader 飞入）
+ */
 @Composable
 private fun CalendarPickerDialog(
     initialYearMonth: YearMonth,
@@ -525,13 +608,29 @@ private fun CalendarPickerDialog(
     onDismiss: () -> Unit,
     onSelect: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
+    textSharedModifier: Modifier = Modifier,
 ) {
-    var yearMonth by remember { mutableStateOf(initialYearMonth) }
+    // START_PAGE 居中，避免用户滑动到边界
+    val startPage = Int.MAX_VALUE / 2
+    val pagerState = rememberPagerState(
+        initialPage = startPage,
+        pageCount = { Int.MAX_VALUE },
+    )
+    val scope = rememberCoroutineScope()
+
+    // monthOffset: 当前 pager settled 页相对于初始页的偏移量
+    val monthOffset = pagerState.settledPage - startPage
+    // header 显示的月份跟随 pager 滑动
+    val displayedYearMonth = remember(initialYearMonth, monthOffset) {
+        initialYearMonth.plusMonths(monthOffset.toLong())
+    }
 
     Surface(
         modifier = modifier
             .fillMaxWidth()
-            .padding(horizontal = 24.dp),
+            // 16dp 与 ScheduleContent 的 LazyColumn padding 一致，
+            // 避免收回时因宽度差异导致"日历变宽"的视觉 bug
+            .padding(horizontal = 16.dp),
         shape = RoundedCornerShape(24.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHigh,
         tonalElevation = 6.dp,
@@ -539,26 +638,39 @@ private fun CalendarPickerDialog(
         Column(
             modifier = Modifier.padding(20.dp),
         ) {
+            // 月份 header：箭头按钮和年月文字，与 pager 双向同步
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                IconButton(onClick = { yearMonth = yearMonth.minusMonths(1) }) {
+                IconButton(onClick = {
+                    scope.launch {
+                        pagerState.animateScrollToPage(pagerState.currentPage - 1)
+                    }
+                }) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "上月")
                 }
                 Text(
-                    yearMonth.format(DateTimeFormatter.ofPattern("yyyy年 M月", Locale.CHINESE)),
+                    displayedYearMonth.format(
+                        DateTimeFormatter.ofPattern("yyyy年 M月", Locale.CHINESE)
+                    ),
+                    modifier = textSharedModifier,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.SemiBold,
                 )
-                IconButton(onClick = { yearMonth = yearMonth.plusMonths(1) }) {
+                IconButton(onClick = {
+                    scope.launch {
+                        pagerState.animateScrollToPage(pagerState.currentPage + 1)
+                    }
+                }) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下月")
                 }
             }
 
             Spacer(modifier = Modifier.height(12.dp))
 
+            // 星期标签行，固定不变
             Row(modifier = Modifier.fillMaxWidth()) {
                 dayLabels.forEach { label ->
                     Box(
@@ -577,63 +689,30 @@ private fun CalendarPickerDialog(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            val firstDay = yearMonth.atDay(1)
-            val daysInMonth = yearMonth.lengthOfMonth()
-            val startDow = firstDay.dayOfWeek.value - 1
-            val totalCells = startDow + daysInMonth
-            val rows = ceil(totalCells / 7.0).toInt()
-
-            for (row in 0 until rows) {
-                Row(modifier = Modifier.fillMaxWidth()) {
-                    for (col in 0..6) {
-                        val cellIndex = row * 7 + col
-                        val day = cellIndex - startDow + 1
-                        val isValid = day in 1..daysInMonth
-                        val date = if (isValid) yearMonth.atDay(day) else null
-                        val isToday = date == today
-
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .padding(2.dp)
-                                .size(40.dp)
-                                .clip(CircleShape)
-                                .background(
-                                    when {
-                                        isToday -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-                                        else -> Color.Transparent
-                                    }
-                                )
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    enabled = isValid,
-                                    onClick = {
-                                        if (date != null) {
-                                            onSelect(date)
-                                        }
-                                    },
-                                ),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            if (isValid) {
-                                Text(
-                                    day.toString(),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
-                                    color = when {
-                                        isToday -> MaterialTheme.colorScheme.primary
-                                        else -> MaterialTheme.colorScheme.onSurface
-                                    },
-                                )
-                            }
-                        }
-                    }
+            // 月网格 pager：每页是一个月的日期网格，高度固定 6 行避免跳动
+            HorizontalPager(
+                state = pagerState,
+                // 预渲染当前页两侧各 1 页，滑动时能提前看到相邻月
+                beyondViewportPageCount = 1,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(264.dp),
+            ) { page ->
+                // pageOffset: 相对于初始页的偏移量，用于计算该页对应的年月
+                val pageOffset = page - startPage
+                val month = remember(initialYearMonth, pageOffset) {
+                    initialYearMonth.plusMonths(pageOffset.toLong())
                 }
+                CalendarMonthGrid(
+                    yearMonth = month,
+                    today = today,
+                    onSelect = onSelect,
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // "回到今天" 按钮
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -656,6 +735,80 @@ private fun CalendarPickerDialog(
                         color = MaterialTheme.colorScheme.primary,
                         fontWeight = FontWeight.SemiBold,
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 单个月的日期网格 —— 渲染指定年月的日历格子。
+ *
+ * 固定渲染 6 行，空位补齐，避免不同月份行数不同导致高度变化。
+ *
+ * @param yearMonth 要渲染的年月
+ * @param today 今天的日期，用于高亮标记
+ * @param onSelect 用户点击某一天时触发，回调传入被点击的 LocalDate
+ */
+@Composable
+private fun CalendarMonthGrid(
+    yearMonth: YearMonth,
+    today: LocalDate,
+    onSelect: (LocalDate) -> Unit,
+) {
+    val firstDay = yearMonth.atDay(1)
+    val daysInMonth = yearMonth.lengthOfMonth()
+    val startDow = firstDay.dayOfWeek.value - 1
+    val totalCells = startDow + daysInMonth
+    // 始终渲染 6 行，保持高度一致
+    val rows = 6
+
+    Column {
+        for (row in 0 until rows) {
+            Row(modifier = Modifier.fillMaxWidth()) {
+                for (col in 0..6) {
+                    val cellIndex = row * 7 + col
+                    val day = cellIndex - startDow + 1
+                    val isValid = day in 1..daysInMonth
+                    val date = if (isValid) yearMonth.atDay(day) else null
+                    val isToday = date == today
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(2.dp)
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(
+                                when {
+                                    isToday -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                    else -> Color.Transparent
+                                }
+                            )
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                enabled = isValid,
+                                onClick = {
+                                    if (date != null) {
+                                        onSelect(date)
+                                    }
+                                },
+                            ),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        if (isValid) {
+                            Text(
+                                day.toString(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                                color = when {
+                                    isToday -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurface
+                                },
+                            )
+                        }
+                    }
                 }
             }
         }
