@@ -48,6 +48,11 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 
+/**
+ * 扁平任务行 —— 根据 depth 分发到主任务行或子任务行。
+ *
+ * @param sharedElementModifier shared element 动画 modifier，用于任务详情展开时的 morph 动画
+ */
 @Composable
 fun FlatTaskRow(
     item: FlatTaskItem,
@@ -56,6 +61,7 @@ fun FlatTaskRow(
     isSelected: Boolean,
     isGroupSelected: Boolean,
     modifier: Modifier = Modifier,
+    sharedElementModifier: Modifier = Modifier,
 ) {
     val task = item.task
     val priorityColor = task.priority.priorityColor
@@ -80,6 +86,7 @@ fun FlatTaskRow(
             isSelected = isSelected,
             isGroupSelected = isGroupSelected,
             modifier = modifier,
+            sharedElementModifier = sharedElementModifier,
         )
     } else {
         SubTaskRow(
@@ -91,6 +98,7 @@ fun FlatTaskRow(
             isSelected = isSelected,
             isGroupSelected = isGroupSelected,
             modifier = modifier,
+            sharedElementModifier = sharedElementModifier,
         )
     }
 }
@@ -135,6 +143,11 @@ private fun Modifier.groupBorder(
     drawPath(path, color, style = Stroke(w))
 }
 
+/**
+ * 主任务行 —— 显示主任务标题、描述、完成状态。
+ *
+ * @param sharedElementModifier shared element 动画 modifier，用于任务详情展开时的 morph 动画
+ */
 @Composable
 private fun MainTaskRow(
     task: TaskItem,
@@ -146,6 +159,7 @@ private fun MainTaskRow(
     isSelected: Boolean,
     isGroupSelected: Boolean,
     modifier: Modifier = Modifier,
+    sharedElementModifier: Modifier = Modifier,
 ) {
     val shape = if (isGroupLast) MaterialTheme.shapes.medium
         else RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 0.dp, bottomEnd = 0.dp)
@@ -170,6 +184,7 @@ private fun MainTaskRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .then(sharedElementModifier)
             .then(
                 when {
                     isGroupSelected -> Modifier.groupBorder(true, isGroupLast, borderColor, borderWidth)
@@ -230,6 +245,11 @@ private fun MainTaskRow(
     }
 }
 
+/**
+ * 子任务行 —— 带缩进、小图标，嵌套在主任务下方。
+ *
+ * @param sharedElementModifier shared element 动画 modifier，用于任务详情展开时的 morph 动画
+ */
 @Composable
 private fun SubTaskRow(
     item: FlatTaskItem,
@@ -240,6 +260,7 @@ private fun SubTaskRow(
     isSelected: Boolean,
     isGroupSelected: Boolean,
     modifier: Modifier = Modifier,
+    sharedElementModifier: Modifier = Modifier,
 ) {
     val task = item.task
     val checkSize = 18.dp
@@ -257,6 +278,7 @@ private fun SubTaskRow(
     Row(
         modifier = modifier
             .fillMaxWidth()
+            .then(sharedElementModifier)
             .then(
                 when {
                     isGroupSelected -> Modifier.groupBorder(false, item.isGroupLast, borderColor, borderWidth)
