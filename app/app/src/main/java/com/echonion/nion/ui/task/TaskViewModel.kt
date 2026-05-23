@@ -210,6 +210,24 @@ class TaskViewModel(private val core: NionCore, private val onError: (String) ->
         }
     }
 
+    /**
+     * 更新任务字段（标题、描述、优先级）。
+     * 所有参数均为可选，仅非 null 参数会被更新。
+     */
+    fun updateTask(id: String, title: String? = null, description: String? = null, priority: String? = null) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    core.updateTask(id, title, description, priority, null)
+                }
+                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId) }
+                scheduleRefreshCounts()
+            } catch (e: Exception) {
+                onError("更新任务失败: ${e.message}")
+            }
+        }
+    }
+
     fun deleteTask(id: String) {
         val snapshot = tasks
         tasks = removeTaskFromList(tasks, id)
