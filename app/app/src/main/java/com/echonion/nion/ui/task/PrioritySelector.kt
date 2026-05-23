@@ -27,12 +27,20 @@ import androidx.compose.ui.unit.dp
 /**
  * 优先级选择器组件
  * 提供"高/中/低"三档选择，选中项会高亮显示对应颜色和下划线指示器
+ *
+ * @param selected 当前选中的优先级 key
+ * @param onSelect 用户点击某一项时触发，回调传入优先级 key
+ * @param modifier 外部 modifier
+ * @param labelColor 未选中项的文字颜色，默认 onSurfaceVariant（适配深/浅背景）
+ * @param indicatorColor 选中时底部指示条的颜色，默认跟随优先级色
  */
 @Composable
 fun PrioritySelector(
     selected: String,
     onSelect: (String) -> Unit,
     modifier: Modifier = Modifier,
+    labelColor: Color = MaterialTheme.colorScheme.onSurfaceVariant,
+    indicatorColor: Color? = null,
 ) {
     val items = listOf("high", "medium", "low")
     Row(
@@ -42,6 +50,8 @@ fun PrioritySelector(
         items.forEach { key ->
             val isSelected = selected == key
             val color = key.priorityColor
+            // 指示条颜色：外部传入则用外部颜色，否则用优先级自身颜色
+            val effectiveIndicatorColor = indicatorColor ?: color
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 modifier = Modifier
@@ -56,7 +66,7 @@ fun PrioritySelector(
                     key.priorityLabel,
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                    color = if (isSelected) color else MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isSelected) color else labelColor,
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 // 选中时的底部指示条
@@ -65,7 +75,7 @@ fun PrioritySelector(
                         .width(24.dp)
                         .height(3.dp)
                         .clip(RoundedCornerShape(1.5.dp))
-                        .background(if (isSelected) color else Color.Transparent),
+                        .background(if (isSelected) effectiveIndicatorColor else Color.Transparent),
                 )
             }
         }
