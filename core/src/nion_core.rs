@@ -59,6 +59,14 @@ impl NionCore {
         })
     }
 
+    /// 根据 ID 查询单个任务，不存在则返回 NotFound 错误
+    pub fn get_task(&self, id: String) -> Result<TaskData, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        query_task(&db, &id)
+    }
+
     pub fn get_tasks(&self) -> Result<Vec<TaskData>, NionError> {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
@@ -221,6 +229,9 @@ impl NionCore {
         description: Option<String>,
         priority: Option<String>,
         status: Option<String>,
+        due_date: Option<String>,
+        category_id: Option<String>,
+        reminder: Option<String>,
     ) -> Result<TaskData, NionError> {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
@@ -249,6 +260,19 @@ impl NionCore {
                 sets.push(format!("completed_at = ?{}", param_values.len() + 1));
                 param_values.push(Box::new(now.clone()));
             }
+        }
+        // 新增：支持修改截止日期、所属清单、提醒时间
+        if let Some(ref v) = due_date {
+            sets.push(format!("due_date = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(v.clone()));
+        }
+        if let Some(ref v) = category_id {
+            sets.push(format!("category_id = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(v.clone()));
+        }
+        if let Some(ref v) = reminder {
+            sets.push(format!("reminder = ?{}", param_values.len() + 1));
+            param_values.push(Box::new(v.clone()));
         }
 
         if sets.is_empty() {
@@ -363,6 +387,30 @@ impl NionCore {
         Ok(())
     }
 
+    /// 修改清单名称
+    pub fn update_checklist_name(&self, id: String, name: String) -> Result<ChecklistData, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        db.execute(
+            "UPDATE checklists SET name = ?1 WHERE id = ?2",
+            params![name, id],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        db.query_row(
+            "SELECT id, name, created_at FROM checklists WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(ChecklistData {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    created_at: row.get(2)?,
+                })
+            },
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })
+    }
+
     pub fn reorder_checklists(&self, ordered_ids: Vec<String>) -> Result<(), NionError> {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
@@ -460,6 +508,9 @@ mod tests {
             None,
             Some("high".to_string()),
             Some("in_progress".to_string()),
+            None,
+            None,
+            None,
         ).unwrap();
 
         assert_eq!(updated.title, "Updated");
@@ -486,6 +537,9 @@ mod tests {
             None,
             None,
             Some("done".to_string()),
+            None,
+            None,
+            None,
         ).unwrap();
 
         assert_eq!(updated.status, "done");
@@ -584,5 +638,72 @@ mod tests {
         assert_eq!(top.len(), 3);
         let subs_b = core.get_subtasks(parent_b.id.clone()).unwrap();
         assert_eq!(subs_b.len(), 0);
+    }
+
+    #[test]
+    fn test_get_task() {
+        let core = make_in_memory();
+        let task = core.create_task(
+            "Single task".to_string(),
+            Some("desc".to_string()),
+            "high".to_string(),
+            Some("2026-06-01".to_string()),
+            None,
+            None,
+        ).unwrap();
+
+        // 通过 ID 查询单个任务
+        let found = core.get_task(task.id.clone()).unwrap();
+        assert_eq!(found.id, task.id);
+        assert_eq!(found.title, "Single task");
+        assert_eq!(found.due_date, Some("2026-06-01".to_string()));
+
+        // 不存在的 ID 应返回错误
+        let err = core.get_task("nonexistent".to_string());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_update_task_extended_fields() {
+        let core = make_in_memory();
+        let cl = core.create_checklist("工作".to_string()).unwrap();
+        let task = core.create_task(
+            "Task".to_string(),
+            None,
+            "medium".to_string(),
+            None,
+            None,
+            None,
+        ).unwrap();
+
+        // 修改截止日期、所属清单、提醒时间
+        let updated = core.update_task(
+            task.id.clone(),
+            None,
+            None,
+            None,
+            None,
+            Some("2026-12-31".to_string()),
+            Some(cl.id.clone()),
+            Some("2026-12-30T09:00:00Z".to_string()),
+        ).unwrap();
+        assert_eq!(updated.due_date, Some("2026-12-31".to_string()));
+        assert_eq!(updated.category_id, Some(cl.id));
+        assert_eq!(updated.reminder, Some("2026-12-30T09:00:00Z".to_string()));
+    }
+
+    #[test]
+    fn test_update_checklist_name() {
+        let core = make_in_memory();
+        let cl = core.create_checklist("旧名称".to_string()).unwrap();
+        assert_eq!(cl.name, "旧名称");
+
+        let updated = core.update_checklist_name(cl.id.clone(), "新名称".to_string()).unwrap();
+        assert_eq!(updated.name, "新名称");
+        assert_eq!(updated.id, cl.id);
+
+        // 持久化验证
+        let lists = core.get_checklists().unwrap();
+        assert_eq!(lists[0].name, "新名称");
     }
 }

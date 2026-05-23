@@ -652,6 +652,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_subtasks(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_get_task(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_tasks(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_tasks_by_category(
@@ -661,6 +663,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_nion_core_checksum_method_nioncore_reorder_tasks(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_set_setting(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_update_checklist_name(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_update_task(
     ): Short
@@ -708,6 +712,8 @@ internal object UniffiLib {
     ): RustBuffer.ByValue
     external fun uniffi_nion_core_fn_method_nioncore_get_subtasks(`ptr`: Long,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
+    external fun uniffi_nion_core_fn_method_nioncore_get_task(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
     external fun uniffi_nion_core_fn_method_nioncore_get_tasks(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_nion_core_fn_method_nioncore_get_tasks_by_category(`ptr`: Long,`categoryId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -718,7 +724,9 @@ internal object UniffiLib {
     ): Unit
     external fun uniffi_nion_core_fn_method_nioncore_set_setting(`ptr`: Long,`key`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
-    external fun uniffi_nion_core_fn_method_nioncore_update_task(`ptr`: Long,`id`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`status`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    external fun uniffi_nion_core_fn_method_nioncore_update_checklist_name(`ptr`: Long,`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+    ): RustBuffer.ByValue
+    external fun uniffi_nion_core_fn_method_nioncore_update_task(`ptr`: Long,`id`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`status`: RustBuffer.ByValue,`dueDate`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`reminder`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): RustBuffer.ByValue
     external fun uniffi_nion_core_fn_method_nioncore_update_task_parent(`ptr`: Long,`taskId`: RustBuffer.ByValue,`newParentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
     ): Unit
@@ -865,6 +873,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_subtasks() != 40915.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_task() != 15615.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_tasks() != 7846.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -880,7 +891,10 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_set_setting() != 44047.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_nion_core_checksum_method_nioncore_update_task() != 356.toShort()) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_update_checklist_name() != 4118.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_update_task() != 50352.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_update_task_parent() != 21109.toShort()) {
@@ -1266,6 +1280,11 @@ public interface NionCoreInterface {
     
     fun `getSubtasks`(`parentId`: kotlin.String): List<TaskData>
     
+    /**
+     * 根据 ID 查询单个任务，不存在则返回 NotFound 错误
+     */
+    fun `getTask`(`id`: kotlin.String): TaskData
+    
     fun `getTasks`(): List<TaskData>
     
     fun `getTasksByCategory`(`categoryId`: kotlin.String?): List<TaskData>
@@ -1276,7 +1295,12 @@ public interface NionCoreInterface {
     
     fun `setSetting`(`key`: kotlin.String, `value`: kotlin.String)
     
-    fun `updateTask`(`id`: kotlin.String, `title`: kotlin.String?, `description`: kotlin.String?, `priority`: kotlin.String?, `status`: kotlin.String?): TaskData
+    /**
+     * 修改清单名称
+     */
+    fun `updateChecklistName`(`id`: kotlin.String, `name`: kotlin.String): ChecklistData
+    
+    fun `updateTask`(`id`: kotlin.String, `title`: kotlin.String?, `description`: kotlin.String?, `priority`: kotlin.String?, `status`: kotlin.String?, `dueDate`: kotlin.String?, `categoryId`: kotlin.String?, `reminder`: kotlin.String?): TaskData
     
     /**
      * 更新任务的父任务 ID（用于拖拽改变层级关系）
@@ -1506,6 +1530,23 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
 
     
+    /**
+     * 根据 ID 查询单个任务，不存在则返回 NotFound 错误
+     */
+    @Throws(NionException::class)override fun `getTask`(`id`: kotlin.String): TaskData {
+            return FfiConverterTypeTaskData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_get_task(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
     @Throws(NionException::class)override fun `getTasks`(): List<TaskData> {
             return FfiConverterSequenceTypeTaskData.lift(
     callWithHandle {
@@ -1573,13 +1614,30 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
 
     
-    @Throws(NionException::class)override fun `updateTask`(`id`: kotlin.String, `title`: kotlin.String?, `description`: kotlin.String?, `priority`: kotlin.String?, `status`: kotlin.String?): TaskData {
+    /**
+     * 修改清单名称
+     */
+    @Throws(NionException::class)override fun `updateChecklistName`(`id`: kotlin.String, `name`: kotlin.String): ChecklistData {
+            return FfiConverterTypeChecklistData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_update_checklist_name(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterString.lower(`name`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(NionException::class)override fun `updateTask`(`id`: kotlin.String, `title`: kotlin.String?, `description`: kotlin.String?, `priority`: kotlin.String?, `status`: kotlin.String?, `dueDate`: kotlin.String?, `categoryId`: kotlin.String?, `reminder`: kotlin.String?): TaskData {
             return FfiConverterTypeTaskData.lift(
     callWithHandle {
     uniffiRustCallWithError(NionException) { _status ->
     UniffiLib.uniffi_nion_core_fn_method_nioncore_update_task(
         it,
-        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`title`),FfiConverterOptionalString.lower(`description`),FfiConverterOptionalString.lower(`priority`),FfiConverterOptionalString.lower(`status`),_status)
+        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`title`),FfiConverterOptionalString.lower(`description`),FfiConverterOptionalString.lower(`priority`),FfiConverterOptionalString.lower(`status`),FfiConverterOptionalString.lower(`dueDate`),FfiConverterOptionalString.lower(`categoryId`),FfiConverterOptionalString.lower(`reminder`),_status)
 }
     }
     )
