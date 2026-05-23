@@ -1,16 +1,25 @@
 package com.echonion.nion.ui.task
 
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -31,19 +40,26 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
@@ -57,6 +73,10 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
@@ -68,16 +88,205 @@ import com.echonion.nion.ui.components.DualPanelState
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * 任务主屏幕 —— 显示任务列表 + FAB。
+ *
+ * 使用 SharedTransitionLayout 实现两套动画系统：
+ * 1. FAB ↔ 添加任务表单（sharedBounds，FAD 展开/收回动画）
+ * 2. 任务卡片 ↔ 任务详情浮层（sharedElement + AnimatedContent，卡片 morph 展开动画）
+ *
+ * 两者互斥：同一时间只能展开一个。
+ *
+ * @param dualState 双面板状态，控制左右侧边栏
+ * @param viewModel 任务 ViewModel
+ */
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun TaskScreen(
     dualState: DualPanelState,
     viewModel: TaskViewModel,
 ) {
     var showAddSheet by remember { mutableStateOf(false) }
-    var showDetailSheet by remember { mutableStateOf<TaskItem?>(null) }
-    var showAddSubtaskFor by remember { mutableStateOf<String?>(null) }
+    var expandedTaskId by remember { mutableStateOf<String?>(null) }
 
+    // backdropBlur: 展开时模糊任务列表，收回时恢复清晰
+    // 同时感知 FAD 展开和任务详情展开
+    val blurPx by animateFloatAsState(
+        targetValue = if (showAddSheet || expandedTaskId != null) 25f else 0f,
+        animationSpec = tween(300),
+        label = "backdropBlur",
+    )
+
+    /**
+     * 递归从任务树中按 ID 查找任务。
+     * 用于在 AnimatedContent 的 detail 分支中获取被展开任务的完整数据。
+     */
+    fun findTaskById(tasks: List<TaskItem>, id: String): TaskItem? {
+        for (task in tasks) {
+            if (task.id == id) return task
+            val found = findTaskById(task.subtasks, id)
+            if (found != null) return found
+        }
+        return null
+    }
+
+    // SharedTransitionLayout：为 sharedBounds（FAB）+ sharedElement（任务卡片）两套动画提供容器
+    SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
+        // AnimatedContent：任务列表 ↔ 任务详情浮层的 morph 过渡
+        AnimatedContent(
+            targetState = expandedTaskId,
+            transitionSpec = {
+                if (targetState != null) {
+                    // 展开：详情浮层快速淡入，任务列表缓慢淡出
+                    (fadeIn(tween(300, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(180, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                } else {
+                    // 收回：任务列表快速淡入，详情浮层缓慢淡出
+                    (fadeIn(tween(250, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(400, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                }
+            },
+            label = "taskDetail",
+        ) { taskId ->
+            if (taskId != null) {
+                // 任务详情浮层：从任务卡片位置 morph 展开
+                val task = findTaskById(viewModel.tasks, taskId)
+                if (task != null) {
+                    TaskDetailOverlay(
+                        task = task,
+                        onDismiss = { expandedTaskId = null },
+                        onDelete = { expandedTaskId = null; viewModel.deleteTask(task.id) },
+                        onCreateSubtask = { title, priority -> viewModel.createSubtask(taskId, title, priority); expandedTaskId = null },
+                        onUpdateNotes = { notes ->
+                            viewModel.updateTask(taskId, description = notes)
+                        },
+                        sharedElementModifier = Modifier.sharedElement(
+                            sharedContentState = rememberSharedContentState("task_detail_$taskId"),
+                            animatedVisibilityScope = this@AnimatedContent,
+                            boundsTransform = { _, _ ->
+                                spring(
+                                    dampingRatio = 0.8f,
+                                    stiffness = Spring.StiffnessMediumLow,
+                                )
+                            },
+                        ),
+                    )
+                }
+            } else {
+                // 任务列表 + FAB + 添加任务浮层（原有逻辑，FAD 动画）
+                Box(modifier = Modifier.fillMaxSize()) {
+                    // 任务列表始终渲染，展开时施加高斯模糊
+                    Box(modifier = Modifier.graphicsLayer {
+                        if (blurPx > 0f && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
+                            renderEffect = android.graphics.RenderEffect
+                                .createBlurEffect(blurPx, blurPx, android.graphics.Shader.TileMode.CLAMP)
+                                .asComposeRenderEffect()
+                        }
+                    }) {
+                        val detailAnimatedScope = this@AnimatedContent
+                        TaskScreenContent(
+                            dualState = dualState,
+                            viewModel = viewModel,
+                            onTaskClick = { expandedTaskId = it.id },
+                            /**
+                             * 为每个任务卡片生成 sharedElement modifier。
+                             * key 为 "task_detail_${taskId}"，与 TaskDetailOverlay 中的 key 匹配，
+                             * 使得 AnimatedContent 过渡时该卡片能 morph 展开为详情浮层。
+                             */
+                            taskSharedModifier = { targetId ->
+                                Modifier.sharedElement(
+                                    sharedContentState = rememberSharedContentState("task_detail_$targetId"),
+                                    animatedVisibilityScope = detailAnimatedScope,
+                                    boundsTransform = { _, _ ->
+                                        spring(
+                                            dampingRatio = 0.8f,
+                                            stiffness = Spring.StiffnessMediumLow,
+                                        )
+                                    },
+                                )
+                            },
+                            fab = {
+                                // FAB 通过 AnimatedVisibility 参与 shared bounds 动画
+                                AnimatedVisibility(
+                                    visible = !showAddSheet,
+                                    enter = fadeIn(tween(250, easing = FastOutSlowInEasing)),
+                                    exit = fadeOut(tween(180, easing = FastOutSlowInEasing)),
+                                ) {
+                                    FloatingActionButton(
+                                        onClick = { showAddSheet = true },
+                                        modifier = Modifier.sharedBounds(
+                                            sharedContentState = rememberSharedContentState("fab"),
+                                            animatedVisibilityScope = this@AnimatedVisibility,
+                                            boundsTransform = { _, _ ->
+                                                spring(
+                                                    dampingRatio = 0.8f,
+                                                    stiffness = Spring.StiffnessMediumLow,
+                                                )
+                                            },
+                                        ),
+                                        containerColor = MaterialTheme.colorScheme.primary,
+                                        contentColor = MaterialTheme.colorScheme.onPrimary,
+                                        elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 0.dp, hoveredElevation = 0.dp),
+                                        shape = RoundedCornerShape(16.dp),
+                                    ) { Icon(Icons.Default.Add, contentDescription = "添加任务") }
+                                }
+                            },
+                        )
+                    } // end blur Box
+
+                    // 添加任务浮层，叠加在任务列表之上
+                    AnimatedVisibility(
+                        visible = showAddSheet,
+                        enter = fadeIn(tween(300, easing = FastOutSlowInEasing)),
+                        exit = fadeOut(tween(400, easing = FastOutSlowInEasing)),
+                    ) {
+                        AddTaskOverlay(
+                            onDismiss = { showAddSheet = false },
+                            onAdd = { title, desc, priority ->
+                                viewModel.createTask(title, desc, priority)
+                                showAddSheet = false
+                            },
+                            sharedBoundsModifier = Modifier.sharedBounds(
+                                sharedContentState = rememberSharedContentState("fab"),
+                                animatedVisibilityScope = this@AnimatedVisibility,
+                                boundsTransform = { _, _ ->
+                                    spring(
+                                        dampingRatio = 0.8f,
+                                        stiffness = Spring.StiffnessMediumLow,
+                                    )
+                                },
+                            ),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 任务主界面内容 —— 顶栏 + 任务列表 + FAB。
+ *
+ * FAB 通过 fab 参数传入，由上层 TaskScreen 用 AnimatedVisibility + sharedBounds 包裹，
+ * 任务列表始终渲染，不受 FAB 展开/收回动画影响。
+ *
+ * @param dualState 双面板状态
+ * @param viewModel 任务 ViewModel
+ * @param onTaskClick 任务点击回调，打开任务详情
+ * @param taskSharedModifier 为每个任务卡片生成 sharedElement modifier 的函数，用于详情展开 morph 动画
+ * @param fab FAB 组件，由上层提供（包含 sharedBounds 动画逻辑）
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun TaskScreenContent(
+    dualState: DualPanelState,
+    viewModel: TaskViewModel,
+    onTaskClick: (TaskItem) -> Unit,
+    taskSharedModifier: @Composable (String) -> Modifier,
+    fab: @Composable () -> Unit,
+) {
     Scaffold(
         contentWindowInsets = WindowInsets.statusBars,
         topBar = {
@@ -119,15 +328,7 @@ fun TaskScreen(
                 )
             }
         },
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showAddSheet = true },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = MaterialTheme.colorScheme.onPrimary,
-                elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 4.dp, hoveredElevation = 8.dp),
-                shape = RoundedCornerShape(16.dp),
-            ) { Icon(Icons.Default.Add, contentDescription = "添加任务") }
-        },
+        floatingActionButton = fab,
     ) { innerPadding ->
         if (viewModel.tasks.isEmpty()) {
             EmptyTaskView(modifier = Modifier.padding(innerPadding))
@@ -135,44 +336,419 @@ fun TaskScreen(
             TaskList(
                 viewModel = viewModel,
                 innerPadding = innerPadding,
-                onTaskClick = { showDetailSheet = it },
+                onTaskClick = onTaskClick,
+                taskSharedModifier = taskSharedModifier,
             )
         }
     }
+}
 
-    if (showAddSheet) {
-        AddTaskBottomSheet(
-            onDismiss = { showAddSheet = false },
-            onAdd = { title, desc, priority ->
-                viewModel.createTask(title, desc, priority)
-                showAddSheet = false
-            },
-        )
+/**
+ * 添加任务浮层 —— 从 FAB 位置展开为居中的任务创建表单。
+ *
+ * 米白色卡片 + 半透明遮罩，高斯模糊背景。
+ *
+ * @param onDismiss 点击外部区域关闭回调
+ * @param onAdd 确认添加回调，传入 (标题, 描述, 优先级)
+ * @param sharedBoundsModifier shared element 动画 modifier（与 FAB 共享 bounds）
+ */
+@Composable
+private fun AddTaskOverlay(
+    onDismiss: () -> Unit,
+    onAdd: (String, String, String) -> Unit,
+    sharedBoundsModifier: Modifier,
+) {
+    var title by remember { mutableStateOf("") }
+    var description by remember { mutableStateOf("") }
+    var priority by remember { mutableStateOf("medium") }
+
+    // 自动聚焦标题输入框，展开后立即呼出输入法
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
     }
 
-    showDetailSheet?.let { task ->
-        TaskDetailBottomSheet(
-            task = task,
-            onDismiss = { showDetailSheet = null },
-            onDelete = { viewModel.deleteTask(task.id); showDetailSheet = null },
-            onAddSubtask = { showDetailSheet = null; showAddSubtaskFor = task.id },
-        )
-    }
-
-    showAddSubtaskFor?.let { parentId ->
-        AddSubtaskBottomSheet(
-            onDismiss = { showAddSubtaskFor = null },
-            onAdd = { title, priority -> viewModel.createSubtask(parentId, title, priority); showAddSubtaskFor = null },
-        )
+    // 半透明背景 + 点击外部关闭
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        // 表单卡片：米白色背景
+        Surface(
+            modifier = sharedBoundsModifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp,
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                // 标题：纯文字，无图标
+                Text(
+                    "新建任务",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                // 标题输入框：粗线边框，自动聚焦呼出输入法
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    placeholder = { Text("标题") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp))
+                        .focusRequester(focusRequester),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                    singleLine = true,
+                )
+                // 描述输入框：粗线边框
+                OutlinedTextField(
+                    value = description,
+                    onValueChange = { description = it },
+                    placeholder = { Text("描述") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                    maxLines = 3,
+                )
+                // 优先级选择
+                Text(
+                    "优先级",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                PrioritySelector(selected = priority, onSelect = { priority = it })
+                // 操作按钮
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                    ) { Text("取消", fontWeight = FontWeight.SemiBold) }
+                    Button(
+                        onClick = {
+                            if (title.isNotBlank()) onAdd(title.trim(), description.trim(), priority)
+                        },
+                        enabled = title.isNotBlank(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.weight(1f),
+                    ) { Text("添加", fontWeight = FontWeight.SemiBold) }
+                }
+            }
+        }
     }
 }
 
+/**
+ * 任务详情浮层 —— 从任务卡片位置 morph 展开为居中的任务详情/子任务表单。
+ *
+ * 内部使用 AnimatedContent 在「任务详情」和「添加子任务表单」之间切换，
+ * 两种状态共享的卡片通过 sharedElementModifier 与触发卡片做 morph 动画。
+ *
+ * 卡片本身无边框，通过 tonalElevation 形成粗阴影边缘（与任务列表卡片风格一致）。
+ *
+ * @param task 要展示详情的任务对象
+ * @param onDismiss 关闭回调（点击外部区域）
+ * @param onDelete 删除任务回调
+ * @param onCreateSubtask 创建子任务回调，传入 (标题, 优先级)
+ * @param onUpdateNotes 备注内容变更时触发，自动保存到数据库
+ * @param sharedElementModifier shared element 动画 modifier（与触发卡片共享 key）
+ */
+@Composable
+private fun TaskDetailOverlay(
+    task: TaskItem,
+    onDismiss: () -> Unit,
+    onDelete: () -> Unit,
+    onCreateSubtask: (String, String) -> Unit,
+    onUpdateNotes: (String) -> Unit,
+    sharedElementModifier: Modifier,
+) {
+    // 备注内容：初始值为任务描述，可随时编辑，每次变更自动保存
+    var notes by remember(task.id) { mutableStateOf(task.description ?: "") }
+    // showAddSubtask: true = 显示子任务创建表单，false = 显示任务详情
+    var showAddSubtask by remember { mutableStateOf(false) }
+    // 子任务创建表单的标题和优先级
+    var subtaskTitle by remember { mutableStateOf("") }
+    var subtaskPriority by remember { mutableStateOf("medium") }
+
+    // 全屏透明点击区域（无遮罩）+ 居中卡片
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        // 卡片：通过 sharedElementModifier 与触发卡片共享 bounds 动画
+        // 无边框，使用 tonalElevation=12dp 形成粗阴影边缘
+        Surface(
+            modifier = sharedElementModifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLowest,
+            tonalElevation = 12.dp,
+        ) {
+            // 内部 AnimatedContent：在「任务详情」和「添加子任务表单」之间切换
+            AnimatedContent(
+                targetState = showAddSubtask,
+                transitionSpec = {
+                    if (targetState) {
+                        // 展开子任务表单：快速淡入表单，缓慢淡出详情
+                        (fadeIn(tween(280, easing = FastOutSlowInEasing))
+                            togetherWith fadeOut(tween(180, easing = FastOutSlowInEasing)))
+                            .using(SizeTransform(clip = false))
+                    } else {
+                        // 返回详情：快速淡入详情，缓慢淡出表单
+                        (fadeIn(tween(200, easing = FastOutSlowInEasing))
+                            togetherWith fadeOut(tween(350, easing = FastOutSlowInEasing)))
+                            .using(SizeTransform(clip = false))
+                    }
+                },
+                label = "subtaskForm",
+            ) { adding ->
+                if (adding) {
+                    // ===== 添加子任务表单 =====
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                    ) {
+                        // 标题栏：图标 + "新建子任务" 文字
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                                modifier = Modifier.size(40.dp),
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.AddCircleOutline,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(22.dp),
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(14.dp))
+                            Text(
+                                "新建子任务",
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Spacer(modifier = Modifier.weight(1f))
+                            IconButton(onClick = { showAddSubtask = false }) {
+                                Icon(Icons.Default.Close, contentDescription = "关闭")
+                            }
+                        }
+
+                        // 提示：正在为哪个任务添加子任务
+                        Text(
+                            "添加到：${task.title}",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+
+                        // 子任务标题输入框
+                        OutlinedTextField(
+                            value = subtaskTitle,
+                            onValueChange = { subtaskTitle = it },
+                            label = { Text("标题") },
+                            placeholder = { Text("输入子任务标题...") },
+                            modifier = Modifier.fillMaxWidth(),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ),
+                            singleLine = true,
+                        )
+
+                        // 优先级选择
+                        Text(
+                            "优先级",
+                            style = MaterialTheme.typography.labelLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                        PrioritySelector(selected = subtaskPriority, onSelect = { subtaskPriority = it })
+
+                        // 操作按钮：取消 + 添加
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    subtaskTitle = ""
+                                    subtaskPriority = "medium"
+                                    showAddSubtask = false
+                                },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp),
+                            ) { Text("取消", fontWeight = FontWeight.SemiBold) }
+                            Button(
+                                onClick = {
+                                    if (subtaskTitle.isNotBlank()) {
+                                        onCreateSubtask(subtaskTitle.trim(), subtaskPriority)
+                                        subtaskTitle = ""
+                                        subtaskPriority = "medium"
+                                        showAddSubtask = false
+                                    }
+                                },
+                                enabled = subtaskTitle.isNotBlank(),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                modifier = Modifier.weight(1f),
+                            ) { Text("添加", fontWeight = FontWeight.SemiBold) }
+                        }
+                    }
+                } else {
+                    // ===== 任务详情 =====
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(16.dp),
+                    ) {
+                        // 顶部：任务标题 + 关闭按钮
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(
+                                task.title,
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.weight(1f),
+                            )
+                            IconButton(onClick = onDismiss) {
+                                Icon(Icons.Default.Close, contentDescription = "关闭")
+                            }
+                        }
+
+                        // 可编辑的备注输入框
+                        OutlinedTextField(
+                            value = notes,
+                            onValueChange = {
+                                notes = it
+                                onUpdateNotes(it)
+                            },
+                            placeholder = { Text("添加备注...") },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(120.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            ),
+                        )
+
+                        // 工具栏：添加子任务 + 删除
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                // 添加子任务按钮 —— 点击后卡片内容 morph 为子任务创建表单
+                                TextButton(
+                                    onClick = { showAddSubtask = true },
+                                    colors = ButtonDefaults.textButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.primary,
+                                    ),
+                                ) {
+                                    Icon(
+                                        Icons.Default.AddCircleOutline,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("添加子任务", fontWeight = FontWeight.Medium)
+                                }
+                                // 分隔圆点
+                                Text(
+                                    "·",
+                                    style = MaterialTheme.typography.bodyLarge,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                )
+                                // 删除按钮
+                                TextButton(
+                                    onClick = onDelete,
+                                    colors = ButtonDefaults.textButtonColors(
+                                        contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                    ),
+                                ) {
+                                    Icon(
+                                        Icons.Outlined.DeleteOutline,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("删除", fontWeight = FontWeight.Medium)
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 任务列表 —— LazyColumn + 拖拽排序。
+ *
+ * @param viewModel 任务 ViewModel
+ * @param innerPadding Scaffold 传入的内边距
+ * @param onTaskClick 任务点击回调
+ * @param taskSharedModifier 为每个任务卡片生成 sharedElement modifier 的函数，用于详情展开 morph 动画
+ */
 @Composable
 @OptIn(ExperimentalFoundationApi::class)
 private fun TaskList(
     viewModel: TaskViewModel,
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     onTaskClick: (TaskItem) -> Unit,
+    taskSharedModifier: @Composable (String) -> Modifier,
 ) {
     val listState = rememberLazyListState()
     val reorderableItems = remember { mutableStateListOf<FlatTaskItem>() }
@@ -310,7 +886,8 @@ private fun TaskList(
                     val groupIds = groupIdsMap[flatItem.task.id] ?: setOf(flatItem.task.id)
                     isSelected && groupIds.all { it in selectedIds }
                 } else {
-                    val mainId = itemToMainId[flatItem.task.id] ?: flatItem.parentId!!
+                    // else 分支中 parentId 已由上方 if 判定为非空
+                    val mainId = itemToMainId[flatItem.task.id] ?: flatItem.parentId
                     val groupIds = groupIdsMap[mainId] ?: setOf(mainId)
                     groupIds.all { it in selectedIds }
                 }
@@ -473,6 +1050,7 @@ private fun TaskList(
                                     },
                                     isSelected = false,
                                     isGroupSelected = false,
+                                    sharedElementModifier = taskSharedModifier(flatItem.task.id),
                                 )
                                 /* 子任务区域：长按时展开显示，手指移动后（subsRemoved=true）
                                  * 向上收缩+淡出，模拟子任务"收进"主任务的效果 */
@@ -496,6 +1074,7 @@ private fun TaskList(
                                                 },
                                                 isSelected = false,
                                                 isGroupSelected = false,
+                                                sharedElementModifier = taskSharedModifier(subItem.task.id),
                                             )
                                         }
                                     }
@@ -528,6 +1107,7 @@ private fun TaskList(
                                 },
                                 isSelected = isSelected,
                                 isGroupSelected = groupSelected,
+                                sharedElementModifier = taskSharedModifier(flatItem.task.id),
                             )
                         }
                     }
@@ -568,6 +1148,7 @@ private fun TaskList(
                         },
                         isSelected = isSelected,
                         isGroupSelected = isSelected,
+                        sharedElementModifier = taskSharedModifier(task.id),
                     )
                 }
             }
@@ -590,12 +1171,24 @@ private fun collectDescendantIds(items: List<FlatTaskItem>, parentId: String): S
 /**
  * 处理拖拽释放后的层级和排序逻辑。
  *
- * 核心规则：
- * - 主任务（depth=0）拖拽后始终保持为主任务，不会变成其他任务的子任务
- * - 子任务（depth>0）根据放置位置决定新的 parent_id：
- *   - 放在主任务下方 → 成为该主任务的子任务
- *   - 放在另一个子任务下方 → 继承该子任务的 parent_id
- *   - 放在列表顶部或两个主任务之间 → 提升为主任务
+ * **位置 0（列表最顶端）**：统一晋升为主任务（parent_id = null）。
+ * 子任务只有拖到此处才能晋升为主任务。
+ *
+ * **子任务（depth > 0）**：
+ *   始终成为上方紧邻项的直接子任务（parent_id = 上方项的 id）。
+ *
+ * **主任务（depth == 0）**：
+ *   默认保持主任务，仅当明确拖入子树时才改变层级：
+ *   - 上方是主任务（depth=0）且下方紧接其子任务（depth>0）→ 进入上方主任务的子树
+ *   - 上方是子任务（depth>0）→ 已在子树内部，成为上方子任务的子任务
+ *   - 上方是主任务且下方也是主任务（或无下方）→ 保持主任务，只改变排序
+ *
+ * 正确覆盖全部场景：
+ *   1. "B 放在 A 和 a1 之间" → depth(A)=0, depth(a1)=1 → B 进入 A 的子树 ✓
+ *   2. "B 放在 a1 和 1 之间" → depth(a1)=1 → B 已在子树内，成为 a1 的子任务 ✓
+ *   3. "a1 放在 b1 和 1 之间" → a1 是子任务，上方 b1 → 成为 b1 的子任务 ✓
+ *   4. "a1 和 1 被移到顶端" → 索引 0 → a1 晋升主任务，其子任务 1 保持不变 ✓
+ *   5. "b1 放在 C 下面" → b1 是子任务，上方 C → 成为 C 的子任务 ✓
  *
  * @param reorderableItems 拖拽完成后的扁平列表（已包含位置调整）
  * @param draggedId 被拖拽项的 ID
@@ -610,71 +1203,62 @@ private fun handleDrop(
     if (currentIdx == -1) return
     val draggedItem = reorderableItems[currentIdx]
 
-    /* 计算拖拽后的新父任务 ID */
+    /*
+     * 计算拖拽后的新父任务 ID。
+     *
+     * 位置 0 无条件晋升为主任务。
+     * 其他位置按 isMainTask(被拖项) 分支：
+     *   - 子任务：上方项 id 即新父 id
+     *   - 主任务：仅当"明确拖入子树"时才变为子任务，否则保持 null（主任务）
+     *
+     * "明确拖入子树"的判据：
+     *   (a) 上方是主任务、下方紧接其子任务（depth 差>0）—— 正在进入上方主任务的子树
+     *   (b) 上方本身就是子任务 —— 已经处于子树内部
+     * 不在以上两种情况（两个主任务之间、列表末尾）→ 保持主任务。
+     */
     val newParentId: String? = if (currentIdx == 0) {
-        /* 放在列表最顶部，一定是主任务 */
-        null
-    } else if (draggedItem.depth == 0) {
-        /* 关键修复：主任务拖拽后始终保持为主任务，不会变为子任务。
-         * 无论它被放到哪个位置（主任务下方、子任务下方），都保持 parent_id=null。
-         * 这修复了"主任务A挪到带子任务b1的主任务B下方时，A错误地变为B的子任务"的 bug。 */
         null
     } else {
-        /* 子任务的层级判定：根据上方元素的 depth 和 parentId 决定归属 */
         val aboveItem = reorderableItems[currentIdx - 1]
-        val belowIsTopLevel = currentIdx + 1 >= reorderableItems.size || reorderableItems[currentIdx + 1].depth == 0
-        when {
-            /* 上方是主任务且下方也是主任务级别 → 提升为主任务 */
-            aboveItem.depth == 0 && belowIsTopLevel -> null
-            /* 上方是主任务 → 成为该主任务的子任务 */
-            aboveItem.depth == 0 -> aboveItem.task.id
-            /* 上方是子任务 → 继承其 parent_id */
-            else -> aboveItem.parentId
+        val belowItem = reorderableItems.getOrNull(currentIdx + 1)
+
+        if (draggedItem.depth == 0) {
+            /* 被拖拽的是主任务 —— 仅当明确拖入子树时才改变层级 */
+            when {
+                /* 上方是主任务（depth=0）且下方紧接其子任务（depth>0）：进入上方主任务的子树 */
+                belowItem != null && aboveItem.depth == 0 && belowItem.depth > 0 -> aboveItem.task.id
+                /* 上方是子任务（depth>0）：已处于子树内部，成为上方子任务的子任务 */
+                aboveItem.depth > 0 -> aboveItem.task.id
+                /* 两个主任务之间（或无下方项）：保持主任务，仅改变排序 */
+                else -> null
+            }
+        } else {
+            /* 被拖拽的是子任务 —— 始终成为上方项的直接子任务 */
+            aboveItem.task.id
         }
     }
 
-    /* 收集同级兄弟 ID 列表，用于批量更新 sort_order */
-    val siblingIds = when (newParentId) {
-        null -> {
-            /* 主任务层级：收集所有 depth=0 的项 + 被拖拽项本身 */
-            val result = mutableListOf<String>()
-            for (item in reorderableItems) {
-                if (item.task.id == draggedId) {
-                    result.add(item.task.id)
-                } else if (item.depth == 0) {
-                    result.add(item.task.id)
-                }
-            }
-            result
-        }
-        else -> {
-            /* 子任务层级：收集目标父任务下所有同 parent_id 的子任务 + 被拖拽项 */
-            val parentIdx = reorderableItems.indexOfFirst { it.task.id == newParentId }
-            if (parentIdx < 0) {
-                /* 父任务未找到时的回退逻辑：按主任务层级处理 */
-                val result = mutableListOf<String>()
-                for (item in reorderableItems) {
-                    if (item.task.id == draggedId) result.add(item.task.id)
-                    else if (item.depth == 0) result.add(item.task.id)
-                }
-                result
-            } else {
-                val result = mutableListOf<String>()
-                var i = parentIdx + 1
-                while (i < reorderableItems.size) {
-                    val item = reorderableItems[i]
-                    if (item.task.id == draggedId) {
-                        result.add(item.task.id)
-                        i++
-                        continue
-                    }
-                    if (item.depth == 0) break
-                    if (item.parentId == newParentId) {
-                        result.add(item.task.id)
-                    }
-                    i++
-                }
-                result
+    /*
+     * 收集同级兄弟 ID 列表，用于批量更新 sort_order。
+     *
+     * 遍历整个扁平列表（保持拖拽后的视觉顺序），收集两类项：
+     * 1. 被拖拽项本身（无论其原有的 parentId 是什么，因为 DB 尚未更新）
+     * 2. 新父任务下已有的直接子任务（parentId == newParentId）
+     *
+     * 使用 else-if 避免拖拽项被重复收集（拖拽项的 parentId 可能也等于 newParentId
+     * 如果是主任务且 newParentId==null，则 parentId==null 也匹配）。
+     * 遍历全列表而非分段截断：因为拖拽后 depth 可能不反映新的层级关系。
+     */
+    val siblingIds = buildList {
+        for (item in reorderableItems) {
+            if (item.task.id == draggedId) {
+                add(item.task.id)
+            } else if (newParentId == null && item.parentId == null) {
+                /* 主任务层级：收集所有已有顶级任务 */
+                add(item.task.id)
+            } else if (newParentId != null && item.parentId == newParentId) {
+                /* 子任务层级：收集该父任务下已有的直接子任务 */
+                add(item.task.id)
             }
         }
     }
