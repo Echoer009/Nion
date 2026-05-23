@@ -2,10 +2,7 @@ package com.echonion.nion.ui.focus
 
 import android.app.Application
 import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.animateFloatAsState
@@ -13,7 +10,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -52,7 +50,6 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -66,15 +63,12 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.TransformOrigin
-import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -213,23 +207,28 @@ fun FocusScreen(
     val seconds = remainingSeconds % 60
     val timeText = String.format("%02d:%02d", minutes, seconds)
 
-    val primaryColor = MaterialTheme.colorScheme.primary
-
-    // pulseAlpha: 运行时的脉冲光晕透明度
-    val pulseAlpha = remember { Animatable(0f) }
-    LaunchedEffect(isRunning) {
-        if (isRunning) {
-            pulseAlpha.animateTo(0.35f, tween(800, easing = LinearEasing))
-            launch {
-                pulseAlpha.animateTo(
-                    0.35f,
-                    infiniteRepeatable(tween(2000, easing = LinearEasing), RepeatMode.Reverse),
-                )
-            }
-        } else {
-            pulseAlpha.animateTo(0f, tween(600, easing = LinearEasing))
-        }
+    // dotFraction: 指示圆点在圆周上的位置比例（0=12点, focusMinutes/120=设定时长对应的角度）
+    val dotFraction = if (isRunning || remainingSeconds < focusMinutes * 60) {
+        // 运行中或暂停：圆点跟随剩余进度
+        (focusMinutes.toFloat() / 120f) * (remainingSeconds.toFloat() / (focusMinutes * 60f))
+    } else {
+        // 初始状态：圆点在设定时长对应位置
+        focusMinutes.toFloat() / 120f
     }
+    // dotFractionAnim: 指示圆点的平滑动画值，避免圆点瞬时跳动到新位置
+    val dotFractionAnim = remember { Animatable(dotFraction) }
+    LaunchedEffect(dotFraction) {
+        dotFractionAnim.animateTo(
+            targetValue = dotFraction,
+            animationSpec = tween(
+                durationMillis = 600,
+                easing = androidx.compose.animation.core.FastOutSlowInEasing,
+            ),
+        )
+    }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
 
     // playScale: 播放按钮缩放动画
     val playScale = remember { Animatable(1f) }
@@ -273,7 +272,7 @@ fun FocusScreen(
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                if (isRunning) "计时进行中..." else "点击刻度设置时长",
+                                if (isRunning) "计时进行中..." else "点击/拖拽刻度设置时长",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -305,38 +304,84 @@ fun FocusScreen(
 
                 // ---- 计时器时钟 ----
                 // 300dp 圆形，60 根圆角长条刻度 + 中间时间文字
-                // 点击外圈刻度 → 设置时长；点击中心区域 → 展开任务面板
+                // 点击外圈刻度 → 吸附到最近的 5 分钟刻度；拖拽 → 实时调整时长
+                // 点击中心区域 → 展开任务面板
                 Box(
                     modifier = Modifier
                         .size(timerSize)
                         .pointerInput(isRunning) {
                             if (isRunning) return@pointerInput
-                            detectTapGestures { offset ->
+                            awaitEachGesture {
+                                val down = awaitFirstDown()
+                                val downPos = down.position
                                 val center = Offset(size.width / 2f, size.height / 2f)
-                                val dx = offset.x - center.x
-                                val dy = offset.y - center.y
-                                val dist = kotlin.math.sqrt(dx * dx + dy * dy)
-                                val outerR = kotlin.math.min(size.width, size.height) / 2f
-                                // 外圈 60% 以上为刻度区域
-                                val tickZoneStart = outerR * 0.6f
-                                if (dist >= tickZoneStart) {
-                                    // 点击在刻度区域 → 计算角度并设置时长
+                                val outerR = kotlin.math.min(size.width, size.height).toFloat() / 2f
+                                // 刻度判断区域：外圈 50% 半径以上为刻度/拖拽区
+                                val tickZoneStart = outerR * 0.5f
+
+                                var dragged = false
+
+                                /** 根据触点位置计算对应的分钟数（1~120，未吸附） */
+                                fun minutesFromPosition(pos: Offset): Int {
+                                    val dx = pos.x - center.x
+                                    val dy = pos.y - center.y
                                     val angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
                                     var normalized = angle + 90f
                                     if (normalized < 0) normalized += 360f
                                     val fraction = (normalized / 360f).coerceIn(0f, 1f)
-                                    val newMinutes = (1 + fraction * 119).roundToInt().coerceIn(1, 120)
-                                    focusMinutes = newMinutes
-                                    remainingSeconds = newMinutes * 60
+                                    return (1 + fraction * 119).roundToInt().coerceIn(1, 120)
+                                }
+
+                                // 等待后续事件，判断是点击还是拖拽
+                                var lastPos = downPos
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull() ?: break
+                                    // 通过比较当前与上一次触点位置来判断是否发生拖拽
+                                    if (change.position != lastPos) {
+                                        change.consume()
+                                        dragged = true
+                                        lastPos = change.position
+                                        val newMinutes = minutesFromPosition(change.position)
+                                        focusMinutes = newMinutes
+                                        remainingSeconds = newMinutes * 60
+                                    }
+                                    if (!change.pressed) {
+                                        // 手指抬起
+                                        change.consume()
+                                        break
+                                    }
+                                }
+
+                                if (dragged) {
+                                    // 拖拽结束：吸附到最近的 5 分钟整数倍
+                                    val snapped = ((focusMinutes + 2) / 5) * 5
+                                    val final = snapped.coerceIn(5, 120)
+                                    focusMinutes = final
+                                    remainingSeconds = final * 60
                                     scope.launch { animatedProgress.snapTo(1f) }
                                 } else {
-                                    // 点击在中心区域 → 展开任务面板
-                                    showTaskPanel = true
+                                    // 点击：根据触点位置判断操作
+                                    val dx = downPos.x - center.x
+                                    val dy = downPos.y - center.y
+                                    val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+                                    if (dist >= tickZoneStart) {
+                                        // 点击刻度区域 → 吸附到最近的 5 分钟刻度
+                                        val rawMinutes = minutesFromPosition(downPos)
+                                        val snapped = ((rawMinutes + 2) / 5) * 5
+                                        val newMinutes = snapped.coerceIn(5, 120)
+                                        focusMinutes = newMinutes
+                                        remainingSeconds = newMinutes * 60
+                                        scope.launch { animatedProgress.snapTo(1f) }
+                                    } else {
+                                        // 点击中心区域 → 展开任务面板
+                                        showTaskPanel = true
+                                    }
                                 }
                             }
                         },
-                    contentAlignment = Alignment.Center,
-                ) {
+                        contentAlignment = Alignment.Center,
+                    ) {
                     // 圆角长条刻度 Canvas
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val cx = size.width / 2f
@@ -358,21 +403,6 @@ fun FocusScreen(
                             // 刻度宽度：时刻刻度更宽
                             val tickWidth = if (isMajor) 3.5f.dp.toPx() else 2f.dp.toPx()
 
-                            // 运行时脉冲光晕
-                            if (isLit && pulseAlpha.value > 0.01f) {
-                                val glowOuterX = cx + (outerRadius + 3.dp.toPx()) * cos(angleRad).toFloat()
-                                val glowOuterY = cy + (outerRadius + 3.dp.toPx()) * sin(angleRad).toFloat()
-                                val glowInnerX = cx + (outerRadius - tickLength - 3.dp.toPx()) * cos(angleRad).toFloat()
-                                val glowInnerY = cy + (outerRadius - tickLength - 3.dp.toPx()) * sin(angleRad).toFloat()
-                                drawLine(
-                                    color = primaryColor.copy(alpha = pulseAlpha.value * 0.4f),
-                                    start = Offset(glowInnerX, glowInnerY),
-                                    end = Offset(glowOuterX, glowOuterY),
-                                    strokeWidth = tickWidth + 6.dp.toPx(),
-                                    cap = Stroke.DefaultCap,
-                                )
-                            }
-
                             // 用旋转画布的方式绘制圆角矩形刻度
                             // 旋转到对应角度后，在上方绘制一个水平圆角矩形
                             val tickColor = if (isLit) primaryColor
@@ -391,28 +421,16 @@ fun FocusScreen(
                         }
 
                         // 指示圆点（在刻度内侧）
-                        // 位置逻辑：将专注时长映射到圆周（1min=3°, 120min=一整圈）
-                        // 未运行时：圆点在 focusMinutes 对应的位置
-                        // 运行时：随倒计时，圆点从设置位置走回12点
-                        val dotFraction = if (isRunning || remainingSeconds < focusMinutes * 60) {
-                            // 运行中或暂停：圆点跟随剩余进度
-                            // 剩余时间占比 = remainingSeconds / (focusMinutes * 60)
-                            // 映射到圆周 = (focusMinutes / 120) * (remainingSeconds / totalSeconds)
-                            (focusMinutes.toFloat() / 120f) * (remainingSeconds.toFloat() / (focusMinutes * 60f))
-                        } else {
-                            // 初始状态：圆点在设置时长对应位置
-                            focusMinutes.toFloat() / 120f
-                        }
-                        val dotAngle = -90.0 + 360.0 * dotFraction
+                        // 使用动画后的位置值以产生平滑过渡效果
+                        val dotAngle = -90.0 + 360.0 * dotFractionAnim.value
                         val dotAngleRad = Math.toRadians(dotAngle)
                         // 圆点轨道在刻度内侧，离刻度有间距
                         val dotOrbitRadius = outerRadius - 32.dp.toPx()
                         val dotX = cx + dotOrbitRadius * cos(dotAngleRad).toFloat()
                         val dotY = cy + dotOrbitRadius * sin(dotAngleRad).toFloat()
                         // 用更深的主题色（onPrimary 的暗色版）
-                        val dotColor = MaterialTheme.colorScheme.onSurface
                         drawCircle(
-                            color = dotColor,
+                            color = onSurfaceColor,
                             radius = 5.dp.toPx(),
                             center = Offset(dotX, dotY),
                         )
@@ -577,7 +595,7 @@ private fun TaskPanelOverlay(
 
     val primaryColor = MaterialTheme.colorScheme.primary
     val creamWhite = NionColors.Warm50
-    val panelBg = primaryColor
+    val panelBg = creamWhite
 
     // 计算所有任务中的最大专注秒数，用于归一化颜色深度
     val maxFocusSeconds = vm.tasks.maxOfOrNull { it.focusSeconds }?.coerceAtLeast(1L) ?: 1L
@@ -626,13 +644,13 @@ private fun TaskPanelOverlay(
                     "选择专注任务",
                     style = MaterialTheme.typography.headlineMedium,
                     fontWeight = FontWeight.Bold,
-                    color = creamWhite,
+                    color = primaryColor,
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     "不选择则以空任务专注",
                     style = MaterialTheme.typography.bodySmall,
-                    color = creamWhite.copy(alpha = 0.7f),
+                    color = primaryColor.copy(alpha = 0.6f),
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -641,7 +659,7 @@ private fun TaskPanelOverlay(
                     Text(
                         "暂无待办任务",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = creamWhite.copy(alpha = 0.6f),
+                        color = primaryColor.copy(alpha = 0.5f),
                         modifier = Modifier.padding(vertical = 24.dp),
                     )
                 } else {
@@ -700,11 +718,13 @@ private fun formatFocusTime(seconds: Long): String {
 }
 
 /**
- * 任务卡片行 —— 米白色半透明卡片，累计专注越久越不透明（越实）。
+ * 任务卡片行 —— 纯白半透明卡片在米白背景上，累计专注越久越透明。
+ *
+ * 选中态使用主题橙半透明背景 + 主题橙边框 + 主题橙文字。
  *
  * @param title 任务标题
  * @param subtitle 副标题（如累计时长）
- * @param colorFraction 颜色深度比例 0~1，0=最透明，1=最实
+ * @param colorFraction 颜色深度比例 0~1，0=最实（纯白），1=最透明
  * @param selected 是否被选中
  * @param onClick 点击回调
  */
@@ -716,16 +736,17 @@ private fun TaskCardRow(
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val creamWhite = NionColors.Warm50
-    // 卡片背景：从未专注=纯米白，累计时长越久越透明（融入主题色背景）
-    // colorFraction 越大 = 专注越久 = 越透明
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val cardWhite = Color.White
+    // 卡片背景：纯白 → 透明（融入米白色背景），专注越久越透明
     val cardColor = lerpColor(
-        creamWhite,                          // colorFraction=0: 纯米白
-        creamWhite.copy(alpha = 0.08f),      // colorFraction=1: 几乎全透明
+        cardWhite,                          // colorFraction=0: 纯白卡片
+        cardWhite.copy(alpha = 0f),         // colorFraction=1: 完全透明（透出米白底）
         colorFraction,
     )
-    val finalCardColor = if (selected) creamWhite.copy(alpha = 0.7f) else cardColor
-    val borderColor = if (selected) creamWhite else Color.Transparent
+    // 选中状态：主题橙半透明背景 + 主题橙边框
+    val finalCardColor = if (selected) primaryColor.copy(alpha = 0.12f) else cardColor
+    val borderColor = if (selected) primaryColor else Color.Transparent
 
     Surface(
         modifier = Modifier
@@ -742,34 +763,27 @@ private fun TaskCardRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Column(modifier = Modifier.weight(1f)) {
-                // 文字颜色：米白卡片上用深色文字，透明卡片上用米白文字
-                val textColor = if (colorFraction < 0.3f && !selected) {
-                    Color(0xFF322E2A) // 深色文字（在纯米白背景上）
-                } else {
-                    creamWhite // 米白文字（在透明/主题色背景上）
-                }
                 Text(
                     title,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = if (selected) creamWhite else textColor,
+                    color = if (selected) primaryColor else Color(0xFF322E2A),
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
-                    color = if (colorFraction < 0.3f && !selected)
-                        Color(0xFF322E2A).copy(alpha = 0.5f)
-                    else creamWhite.copy(alpha = 0.6f),
+                    color = if (selected) primaryColor.copy(alpha = 0.7f)
+                        else Color(0xFF322E2A).copy(alpha = 0.5f),
                 )
             }
             if (selected) {
                 Icon(
                     Icons.Default.Check,
                     contentDescription = null,
-                    tint = if (colorFraction < 0.3f) Color(0xFF322E2A) else creamWhite,
+                    tint = primaryColor,
                     modifier = Modifier.size(22.dp),
                 )
             }

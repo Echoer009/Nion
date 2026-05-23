@@ -42,24 +42,29 @@ class DualPanelState {
     val isLeftOpen: Boolean get() = offset.value > 0
     val isRightOpen: Boolean get() = offset.value < 0
 
+    /** 面板开合动画时长（毫秒） */
+    private val animationDurationMs = 200
+    /** 侧滑阈值：从关闭拖出此比例→打开，从打开拖回此比例→关闭（对称） */
+    private val settleThreshold = 0.20f
+
     fun openLeft() {
         val s = scope ?: return
         if (offset.value != 0f) return
         isOpen = true
-        s.launch { offset.animateTo(leftWidthPx, tween(250)) }
+        s.launch { offset.animateTo(leftWidthPx, tween(animationDurationMs)) }
     }
 
     fun openRight() {
         val s = scope ?: return
         if (offset.value != 0f) return
         isOpen = true
-        s.launch { offset.animateTo(-rightWidthPx, tween(250)) }
+        s.launch { offset.animateTo(-rightWidthPx, tween(animationDurationMs)) }
     }
 
     fun closeLeft() {
         val s = scope ?: return
         s.launch {
-            offset.animateTo(0f, tween(250))
+            offset.animateTo(0f, tween(animationDurationMs))
             isOpen = false
         }
     }
@@ -67,7 +72,7 @@ class DualPanelState {
     fun closeRight() {
         val s = scope ?: return
         s.launch {
-            offset.animateTo(0f, tween(250))
+            offset.animateTo(0f, tween(animationDurationMs))
             isOpen = false
         }
     }
@@ -95,17 +100,30 @@ class DualPanelState {
 
     internal suspend fun settle() {
         val current = offset.value
-        val threshold = 0.50f
         when {
             current > 0f -> {
-                val shouldClose = current < leftWidthPx * threshold
-                offset.animateTo(if (shouldClose) 0f else leftWidthPx, tween(250))
-                isOpen = !shouldClose
+                // fraction: 面板打开比例，0=关闭，1=完全打开
+                val fraction = current / leftWidthPx
+                // 根据拖拽前的面板状态决定阈值方向：
+                // - 之前关闭(isOpen=false)：拖出超过 settleThreshold → 打开
+                // - 之前打开(isOpen=true)：拖回超过 settleThreshold → 关闭
+                val shouldOpen = if (isOpen) {
+                    fraction > (1f - settleThreshold)
+                } else {
+                    fraction > settleThreshold
+                }
+                offset.animateTo(if (shouldOpen) leftWidthPx else 0f, tween(animationDurationMs))
+                isOpen = shouldOpen
             }
             current < 0f -> {
-                val shouldClose = -current < rightWidthPx * threshold
-                offset.animateTo(if (shouldClose) 0f else -rightWidthPx, tween(250))
-                isOpen = !shouldClose
+                val fraction = -current / rightWidthPx
+                val shouldOpen = if (isOpen) {
+                    fraction > (1f - settleThreshold)
+                } else {
+                    fraction > settleThreshold
+                }
+                offset.animateTo(if (shouldOpen) -rightWidthPx else 0f, tween(animationDurationMs))
+                isOpen = shouldOpen
             }
         }
     }
