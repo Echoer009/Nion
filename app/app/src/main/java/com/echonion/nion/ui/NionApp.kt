@@ -1,5 +1,6 @@
 package com.echonion.nion.ui
 
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
@@ -18,6 +19,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -39,6 +41,7 @@ import com.echonion.nion.ui.task.SidebarContent
 import com.echonion.nion.ui.task.TaskScreen
 import com.echonion.nion.ui.task.TaskViewModel
 import com.echonion.nion.ui.task.taskViewModel
+import kotlinx.coroutines.launch
 import com.echonion.nion.ui.theme.NionColorTheme
 import com.echonion.nion.ui.theme.NionTheme
 
@@ -69,6 +72,7 @@ fun NionApp() {
 
     val dualState = remember { DualPanelState() }
     val viewModel = taskViewModel()
+    val coroutineScope = rememberCoroutineScope()
 
     NionTheme(colorTheme = colorTheme) {
         val navController = rememberNavController()
@@ -93,12 +97,16 @@ fun NionApp() {
                             },
                             selected = isSelected,
                             onClick = {
-                                navController.navigate(item.route) {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
+                                /* 点击底部导航时，先收起已打开的侧边面板，再执行跳转 */
+                                coroutineScope.launch {
+                                    dualState.closePanel()
+                                    navController.navigate(item.route) {
+                                        popUpTo(navController.graph.findStartDestination().id) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
                                     }
-                                    launchSingleTop = true
-                                    restoreState = true
                                 }
                             },
                             colors = NavigationBarItemDefaults.colors(
@@ -154,24 +162,39 @@ fun NionApp() {
                     navController = navController,
                     startDestination = "tasks",
                     modifier = Modifier.fillMaxSize(),
+                    /* Fade Through：旧页面先淡出，再淡入新页面，中间有短暂空白帧 */
                     enterTransition = {
                         androidx.compose.animation.fadeIn(
-                            animationSpec = tween(300),
+                            animationSpec = tween(
+                                durationMillis = 200,
+                                delayMillis = 150,
+                                easing = FastOutSlowInEasing,
+                            ),
                         )
                     },
                     exitTransition = {
                         androidx.compose.animation.fadeOut(
-                            animationSpec = tween(150),
+                            animationSpec = tween(
+                                durationMillis = 150,
+                                easing = FastOutSlowInEasing,
+                            ),
                         )
                     },
                     popEnterTransition = {
                         androidx.compose.animation.fadeIn(
-                            animationSpec = tween(300),
+                            animationSpec = tween(
+                                durationMillis = 200,
+                                delayMillis = 150,
+                                easing = FastOutSlowInEasing,
+                            ),
                         )
                     },
                     popExitTransition = {
                         androidx.compose.animation.fadeOut(
-                            animationSpec = tween(150),
+                            animationSpec = tween(
+                                durationMillis = 150,
+                                easing = FastOutSlowInEasing,
+                            ),
                         )
                     },
                 ) {

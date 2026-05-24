@@ -77,6 +77,14 @@ class DualPanelState {
         }
     }
 
+    /** 挂起关闭当前打开的面板（左或右），等待动画完成后返回 */
+    suspend fun closePanel() {
+        if (offset.value != 0f) {
+            offset.animateTo(0f, tween(animationDurationMs))
+            isOpen = false
+        }
+    }
+
     fun toggleLeft() {
         if (isLeftOpen) closeLeft() else openLeft()
     }
