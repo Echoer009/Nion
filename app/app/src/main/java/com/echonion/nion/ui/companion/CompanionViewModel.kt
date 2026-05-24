@@ -22,6 +22,25 @@ import java.time.format.DateTimeFormatter
 import java.util.UUID
 
 /**
+ * 已保存的 Provider 配置 —— 用户可保存多组 API 配置，在它们之间自由切换。
+ *
+ * @param id 唯一标识
+ * @param provider 内置 Provider 名称或自定义名称
+ * @param apiKey API 密钥
+ * @param model 模型名称
+ * @param baseUrl 自定义 baseUrl（仅"自定义"provider 需要）
+ * @param apiType API 类型名
+ */
+data class SavedConfig(
+    val id: String,
+    val provider: String,
+    val apiKey: String,
+    val model: String,
+    val baseUrl: String,
+    val apiType: String,
+)
+
+/**
  * 伙伴界面的 ViewModel —— 管理聊天消息、API 配置、Agent Loop。
  *
  * 职责分离：
@@ -54,6 +73,14 @@ class CompanionViewModel(
     var isLoading by mutableStateOf(false)
         private set
 
+    /** 流式输出当前累积的 AI 回复文本（实时更新），流式结束时固化为消息并置 null */
+    var streamingAssistantText by mutableStateOf<String?>(null)
+        private set
+
+    /** 流式消息的时间戳 */
+    var streamingMessageTimestamp by mutableStateOf("")
+        private set
+
     /** 输入框当前文本 */
     var inputText by mutableStateOf("")
 
@@ -83,6 +110,10 @@ class CompanionViewModel(
 
     /** 伙伴头像 URI，从系统图片选择器选取后保存，null 表示使用默认首字母头像 */
     var companionAvatarUri by mutableStateOf<String?>(null)
+        private set
+
+    /** 已保存的多组 Provider 配置，支持在它们之间切换 */
+    var savedConfigs by mutableStateOf<List<SavedConfig>>(emptyList())
         private set
 
     /**
@@ -126,14 +157,36 @@ class CompanionViewModel(
 
     init {
         loadSettings()
+        loadChatMessages()
     }
 
     /**
      * 从 Rust 层 settings 表中加载已保存的 provider / API key / 模型配置。
+     * 同时加载多配置列表，向后兼容旧版单配置存储。
      * 加载完成后设 isInitialized = true，UI 据此决定显示设置页还是聊天页。
      */
     private fun loadSettings() {
         try {
+            // ── 加载多配置列表 ──
+            val configsJson = core.getSetting("llm_saved_configs")
+            if (!configsJson.isNullOrEmpty()) {
+                val arr = JSONArray(configsJson)
+                val configs = mutableListOf<SavedConfig>()
+                for (i in 0 until arr.length()) {
+                    val obj = arr.getJSONObject(i)
+                    configs.add(SavedConfig(
+                        id = obj.getString("id"),
+                        provider = obj.getString("provider"),
+                        apiKey = obj.getString("apiKey"),
+                        model = obj.getString("model"),
+                        baseUrl = obj.optString("baseUrl", ""),
+                        apiType = obj.optString("apiType", "OPENAI_COMPATIBLE"),
+                    ))
+                }
+                savedConfigs = configs
+            }
+
+            // ── 加载当前激活的配置（优先用单键，向后兼容） ──
             val savedProviderName = core.getSetting("llm_provider")
             val savedApiKey = core.getSetting("llm_api_key")
             val savedModel = core.getSetting("llm_model")
@@ -154,6 +207,10 @@ class CompanionViewModel(
                         baseUrl = savedBaseUrl ?: "",
                         apiType = savedApiType,
                     )
+                // 如果多配置列表为空但单配置存在，自动迁移到多配置列表
+                if (savedConfigs.isEmpty()) {
+                    migrateToMultiConfig(savedProviderName, savedApiKey, savedModel, savedBaseUrl ?: "", savedApiTypeName ?: "OPENAI_COMPATIBLE")
+                }
             }
         } catch (_: Exception) {
             // 设置读取失败（如首次启动无记录），保持未配置状态即可
@@ -186,8 +243,133 @@ class CompanionViewModel(
         isInitialized = true
     }
 
+    /** 将旧版单配置数据迁移到多配置列表 */
+    private fun migrateToMultiConfig(
+        providerName: String, apiKey: String, model: String, baseUrl: String, apiType: String,
+    ) {
+        val config = SavedConfig(
+            id = UUID.randomUUID().toString(),
+            provider = providerName,
+            apiKey = apiKey,
+            model = model,
+            baseUrl = baseUrl,
+            apiType = apiType,
+        )
+        savedConfigs = listOf(config)
+        saveConfigsToStorage()
+    }
+
+    /** 将多配置列表序列化为 JSON 存入 Rust settings */
+    private fun saveConfigsToStorage() {
+        try {
+            val arr = JSONArray()
+            for (config in savedConfigs) {
+                arr.put(JSONObject().apply {
+                    put("id", config.id)
+                    put("provider", config.provider)
+                    put("apiKey", config.apiKey)
+                    put("model", config.model)
+                    put("baseUrl", config.baseUrl)
+                    put("apiType", config.apiType)
+                })
+            }
+            core.setSetting("llm_saved_configs", arr.toString())
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * 将当前消息列表序列化为 JSON 并持久化到 Rust settings 的 chat_history 键。
+     * 每次消息变更（发送/接收/清空）后调用。
+     */
+    private fun saveChatMessages() {
+        try {
+            val jsonArr = JSONArray()
+            for (msg in messages) {
+                jsonArr.put(JSONObject().apply {
+                    put("id", msg.id)
+                    put("text", msg.text)
+                    put("isFromUser", msg.isFromUser)
+                    put("timestamp", msg.timestamp)
+                })
+            }
+            core.setSetting("chat_history", jsonArr.toString())
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * 从 Rust settings 的 chat_history 键加载持久化的消息列表。
+     * 在 init 中调用，恢复上次会话的消息。
+     */
+    private fun loadChatMessages() {
+        try {
+            val json = core.getSetting("chat_history")
+            if (!json.isNullOrEmpty()) {
+                val jsonArr = JSONArray(json)
+                val loaded = mutableListOf<ChatMessage>()
+                for (i in 0 until jsonArr.length()) {
+                    val obj = jsonArr.getJSONObject(i)
+                    loaded.add(ChatMessage(
+                        id = obj.getString("id"),
+                        text = obj.getString("text"),
+                        isFromUser = obj.getBoolean("isFromUser"),
+                        timestamp = obj.getString("timestamp"),
+                    ))
+                }
+                messages = loaded
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * 将当前消息列表归档到 Rust settings 的 chat_history_archive 键。
+     * 清空前调用，归档的消息可在历史面板中查看。
+     */
+    private fun archiveCurrentChat() {
+        if (messages.isEmpty()) return
+        try {
+            val jsonArr = JSONArray()
+            for (msg in messages) {
+                jsonArr.put(JSONObject().apply {
+                    put("id", msg.id)
+                    put("text", msg.text)
+                    put("isFromUser", msg.isFromUser)
+                    put("timestamp", msg.timestamp)
+                })
+            }
+            core.setSetting("chat_history_archive", jsonArr.toString())
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * 从 Rust settings 的 chat_history_archive 键加载归档的消息列表，
+     * 供给历史面板展示（只读）。
+     *
+     * @return 归档的消息列表，无归档时返回空列表
+     */
+    fun loadArchivedChat(): List<ChatMessage> {
+        try {
+            val json = core.getSetting("chat_history_archive")
+            if (!json.isNullOrEmpty()) {
+                val jsonArr = JSONArray(json)
+                val loaded = mutableListOf<ChatMessage>()
+                for (i in 0 until jsonArr.length()) {
+                    val obj = jsonArr.getJSONObject(i)
+                    loaded.add(ChatMessage(
+                        id = obj.getString("id"),
+                        text = obj.getString("text"),
+                        isFromUser = obj.getBoolean("isFromUser"),
+                        timestamp = obj.getString("timestamp"),
+                    ))
+                }
+                return loaded
+            }
+        } catch (_: Exception) {}
+        return emptyList()
+    }
+
     /**
      * 保存 API 配置到 Rust 层 settings 表并更新本地状态。
+     * 同时更新多配置列表，支持后续切换。
      *
      * @param provider 用户选中的 Provider
      * @param key      API 密钥
@@ -216,6 +398,77 @@ class CompanionViewModel(
         apiKey = key
         modelName = actualModel
         currentProvider = provider.copy(baseUrl = actualBaseUrl)
+
+        // 更新或新增到多配置列表
+        val existing = savedConfigs.find { it.provider == provider.name && it.model == actualModel }
+        val newConfigs = if (existing != null) {
+            // 更新已存在的配置
+            savedConfigs.map { c ->
+                if (c.id == existing.id) c.copy(apiKey = key, baseUrl = actualBaseUrl, apiType = provider.apiType.name)
+                else c
+            }
+        } else {
+            // 新增配置
+            savedConfigs + SavedConfig(
+                id = UUID.randomUUID().toString(),
+                provider = provider.name,
+                apiKey = key,
+                model = actualModel,
+                baseUrl = actualBaseUrl,
+                apiType = provider.apiType.name,
+            )
+        }
+        savedConfigs = newConfigs
+        saveConfigsToStorage()
+    }
+
+    /**
+     * 切换到指定的已保存配置 —— 只更新当前 provider/API key/模型，不清理消息。
+     *
+     * @param configId 目标配置的 ID
+     */
+    fun switchToConfig(configId: String) {
+        val config = savedConfigs.find { it.id == configId } ?: return
+        apiKey = config.apiKey
+        modelName = config.model
+        val apiType = try {
+            ApiType.valueOf(config.apiType)
+        } catch (_: Exception) {
+            ApiType.OPENAI_COMPATIBLE
+        }
+        currentProvider = builtInProviders.find { it.name == config.provider }
+            ?: ProviderConfig(
+                name = config.provider,
+                baseUrl = config.baseUrl,
+                apiType = apiType,
+            )
+
+        // 持久化当前激活配置到单键（向后兼容）
+        try {
+            core.setSetting("llm_provider", config.provider)
+            core.setSetting("llm_api_key", config.apiKey)
+            core.setSetting("llm_model", config.model)
+            core.setSetting("llm_base_url", config.baseUrl)
+            core.setSetting("llm_api_type", config.apiType)
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * 删除指定的已保存配置，如果当前正使用该配置则一并清空。
+     *
+     * @param configId 要删除的配置 ID
+     */
+    fun deleteConfig(configId: String) {
+        val config = savedConfigs.find { it.id == configId } ?: return
+        savedConfigs = savedConfigs.filter { it.id != configId }
+        saveConfigsToStorage()
+
+        // 如果删除的是当前激活的配置，清空当前状态
+        if (currentProvider?.name == config.provider && apiKey == config.apiKey) {
+            apiKey = null
+            modelName = null
+            currentProvider = null
+        }
     }
 
     /**
@@ -257,11 +510,13 @@ class CompanionViewModel(
      * 用于"切换 provider"或"重置设置"场景。
      */
     fun clearApiConfig() {
+        archiveCurrentChat() // 清空前归档当前消息
         apiKey = null
         modelName = null
         currentProvider = null
         messages = emptyList()
         conversationHistory.clear()
+        saveChatMessages()
         try {
             core.setSetting("llm_api_key", "")
         } catch (_: Exception) {
@@ -299,6 +554,7 @@ class CompanionViewModel(
         messages = messages + userMessage
         inputText = ""
         isLoading = true
+        saveChatMessages()
 
         // 将用户消息追加到 API 对话历史
         conversationHistory.add(JSONObject().apply {
@@ -313,14 +569,16 @@ class CompanionViewModel(
     }
 
     /**
-     * Agent Loop 核心循环 —— 持续调用 LLM 直到获得纯文本回复。
+     * Agent Loop 核心循环 —— 持续调用 LLM（流式）直到获得纯文本回复。
      *
-     * 每次迭代：
+     * 每次迭代使用 [ChatService.chatStream] 进行 SSE 流式请求：
      * 1. 构建完整的 API 消息列表（system + conversationHistory）
-     * 2. 调用 [ChatService.chatWithTools] 发送请求
+     * 2. 调用 [ChatService.chatStream] 发送流式请求
+     *    - 文本增量通过 onTextDelta 回调实时更新 [streamingAssistantText]
+     *    - 工具调用增量在流结束后统一组装
      * 3. 处理响应：
-     *    - 有 tool_calls → 执行每个工具 → 将 assistant 消息和 tool 结果追加到对话历史
-     *    - 有文本 → 追加 assistant 消息到对话历史和 UI，结束循环
+     *    - 有 tool_calls → 将已流式显示的文本固化为消息 → 执行工具 → 继续循环
+     *    - 有文本（无 tool_calls）→ 将流式文本固化为最终消息 → 结束循环
      *    - 失败 → 显示错误消息，结束循环
      *
      * @param provider Provider 配置
@@ -336,32 +594,48 @@ class CompanionViewModel(
 
             // 构建完整的 API 消息列表：system prompt + 对话历史
             val apiMessages = buildApiMessages()
-            val result = ChatService.chatWithTools(provider, apiKey, model, apiMessages)
+
+            // 初始化流式输出状态：记录开始时间、清空累积文本
+            val timestamp = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+            streamingMessageTimestamp = timestamp
+            streamingAssistantText = ""
+
+            // 发送流式 SSE 请求，onTextDelta 在 IO 线程被调用（mutableState 是线程安全的）
+            val result = ChatService.chatStream(
+                provider = provider,
+                apiKey = apiKey,
+                model = model,
+                messages = apiMessages,
+                onTextDelta = { delta ->
+                    // 每次收到文本增量时累积到流式状态，UI 自动刷新
+                    streamingAssistantText = (streamingAssistantText ?: "") + delta
+                },
+            )
 
             if (result.isFailure) {
                 val err = result.exceptionOrNull()?.message ?: "unknown"
                 Log.e(TAG, "API 失败: $err")
+                streamingAssistantText = null // 清除流式残留
                 appendAssistantMessage("抱歉，出了点问题：$err")
                 break
             }
 
             val response = result.getOrThrow()
-            Log.d(TAG, "Response: text=${response.text?.take(100)}, toolCalls=${response.toolCalls?.size}")
+            Log.d(TAG, "Response: streamedText=${streamingAssistantText?.take(100)}, toolCalls=${response.toolCalls?.size}")
 
             // 情况 1：LLM 请求执行工具
             if (response.toolCalls != null && response.toolCalls.isNotEmpty()) {
-                if (!response.text.isNullOrBlank()) {
-                    appendAssistantMessage(response.text.trim())
+                // 将已流式显示的文本固化为一条完整消息（如果有文本的话）
+                val streamedText = streamingAssistantText?.trim()
+                if (!streamedText.isNullOrEmpty()) {
+                    appendAssistantMessage(streamedText, reasoningContent = response.reasoningContent)
                 }
+                streamingAssistantText = null // 清除流式状态，准备下一轮迭代
 
-                // 直接使用 LLM 返回的原始 assistant message（含 reasoning_content 等）
-                // 避免丢失 DeepSeek 推理模型等需要的额外字段
-                if (response.rawMessage != null) {
-                    conversationHistory.add(response.rawMessage)
-                } else {
-                    appendAssistantToolCallsMessage(response.toolCalls)
-                }
+                // 追加 assistant tool_calls 到对话历史（含 reasoning_content）
+                appendAssistantToolCallsMessage(response.toolCalls, response.reasoningContent)
 
+                // 逐个执行工具，结果回传对话历史
                 for (call in response.toolCalls) {
                     Log.d(TAG, "Executing tool: ${call.name} args=${call.arguments.take(200)}")
                     val toolResult = toolExecutor.execute(call.name, call.arguments)
@@ -373,15 +647,23 @@ class CompanionViewModel(
                 continue
             }
 
-            // 情况 2：LLM 返回纯文本回复
-            if (!response.text.isNullOrBlank()) {
-                appendAssistantMessage(response.text.trim(), response.rawMessage)
+            // 情况 2：LLM 返回纯文本回复（无工具调用）
+            val finalText = streamingAssistantText?.trim()
+            if (!finalText.isNullOrEmpty()) {
+                // 使用流式累积的文本（与 UI 显示的完全一致），固化为最终消息
+                // 附带 reasoning_content 以满足 DeepSeek 推理模型的要求
+                appendAssistantMessage(finalText, reasoningContent = response.reasoningContent)
+            } else if (!response.text.isNullOrBlank()) {
+                appendAssistantMessage(response.text.trim(), reasoningContent = response.reasoningContent)
             } else {
-                // 空回复（理论上不应出现）
                 appendAssistantMessage("（${companionName} 没有回复内容）")
             }
+            streamingAssistantText = null
             break
         }
+
+        // 确保迭代结束时流式状态被清除（防止残留的 loading 状态）
+        streamingAssistantText = null
 
         // 达到最大迭代次数，安全退出
         if (iteration >= maxAgentIterations) {
@@ -394,8 +676,13 @@ class CompanionViewModel(
      *
      * @param text AI 回复文本
      * @param rawMessage 可选的原始 assistant message JSON（含 reasoning_content 等）
+     * @param reasoningContent DeepSeek 推理模型的思考内容，必须回传到后续请求
      */
-    private fun appendAssistantMessage(text: String, rawMessage: JSONObject? = null) {
+    private fun appendAssistantMessage(
+        text: String,
+        rawMessage: JSONObject? = null,
+        reasoningContent: String? = null,
+    ) {
         val now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
         messages = messages + ChatMessage(
             id = UUID.randomUUID().toString(),
@@ -403,6 +690,7 @@ class CompanionViewModel(
             isFromUser = false,
             timestamp = now,
         )
+        saveChatMessages()
         // 同步追加到 API 对话历史，优先使用原始消息（保留 reasoning_content 等）
         if (rawMessage != null) {
             conversationHistory.add(rawMessage)
@@ -410,6 +698,10 @@ class CompanionViewModel(
             conversationHistory.add(JSONObject().apply {
                 put("role", "assistant")
                 put("content", text)
+                // DeepSeek 推理模型要求回传 reasoning_content
+                if (!reasoningContent.isNullOrEmpty()) {
+                    put("reasoning_content", reasoningContent)
+                }
             })
         }
     }
@@ -422,9 +714,13 @@ class CompanionViewModel(
      *
      * Anthropic 也接受同样的格式（在 messages 数组中）。
      *
-     * @param toolCalls LLM 请求的工具调用列表
+     * @param toolCalls        LLM 请求的工具调用列表
+     * @param reasoningContent DeepSeek 推理模型的思考内容，必须回传到后续请求
      */
-    private fun appendAssistantToolCallsMessage(toolCalls: List<ToolCall>) {
+    private fun appendAssistantToolCallsMessage(
+        toolCalls: List<ToolCall>,
+        reasoningContent: String? = null,
+    ) {
         val toolCallsJson = JSONArray()
         for (call in toolCalls) {
             toolCallsJson.put(JSONObject().apply {
@@ -440,6 +736,10 @@ class CompanionViewModel(
             put("role", "assistant")
             put("content", null) // 有 tool_calls 时 content 通常为 null
             put("tool_calls", toolCallsJson)
+            // DeepSeek 推理模型要求回传 reasoning_content
+            if (!reasoningContent.isNullOrEmpty()) {
+                put("reasoning_content", reasoningContent)
+            }
         })
     }
 

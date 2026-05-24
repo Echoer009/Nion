@@ -1,9 +1,18 @@
 package com.echonion.nion.ui.companion
 
+import android.util.Log
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ContentTransform
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.scaleIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -30,9 +39,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -55,6 +71,8 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -106,18 +124,31 @@ fun CompanionSidebar(
         return
     }
 
-    // 面板当前模式：null=自动根据 API 配置决定，"profile"=编辑伙伴信息页面
+    // 面板当前模式：null=自动根据 API 配置决定，其余为手动切换的面板
     var panelMode by remember { mutableStateOf<String?>(null) }
 
     // 根据 API 配置和模式决定显示哪个界面
     val actualMode = when {
         panelMode == "profile" -> "profile"
+        panelMode == "setup" -> "setup"
+        panelMode == "history" -> "history"
+        panelMode == "switch" -> "switch"
         viewModel.currentProvider != null && viewModel.apiKey != null -> "chat"
         else -> "setup"
     }
 
+    // 当从设置页保存配置后（currentProvider 从 null 变为非 null），自动回到聊天页
+    LaunchedEffect(viewModel.currentProvider) {
+        if (viewModel.currentProvider != null && panelMode == "setup") {
+            panelMode = null
+        }
+    }
+
     // 头像点击回调：切换到编辑伙伴信息页面
     val onAvatarClick: () -> Unit = { panelMode = "profile" }
+
+    // 是否有已保存的配置（用于 SetupContent 决定是否显示返回按钮）
+    val hasConfigured = viewModel.currentProvider != null && viewModel.apiKey != null
 
     Surface(
         modifier = modifier.draggable(
@@ -134,14 +165,34 @@ fun CompanionSidebar(
                 viewModel = viewModel,
                 onBack = { panelMode = null },
             )
-            "chat" -> ChatContent(
+            "setup" -> SetupContent(
+                viewModel = viewModel,
+                onBack = if (hasConfigured) { { panelMode = null } } else null,
+                onAvatarClick = onAvatarClick,
+            )
+            "history" -> HistoryPanel(
+                messages = viewModel.loadArchivedChat(),
+                onClose = { panelMode = null },
+            )
+            "switch" -> SwitchProviderPanel(
+                configs = viewModel.savedConfigs,
+                activeConfigId = viewModel.savedConfigs.find {
+                    it.provider == viewModel.currentProvider?.name && it.model == viewModel.modelName
+                }?.id,
+                onSelect = { configId ->
+                    viewModel.switchToConfig(configId)
+                    panelMode = null
+                },
+                onDelete = { configId -> viewModel.deleteConfig(configId) },
+                onAddNew = { panelMode = "setup" },
+                onClose = { panelMode = null },
+            )
+            else -> ChatContent(
                 viewModel = viewModel,
                 isVisible = isVisible,
                 onAvatarClick = onAvatarClick,
-            )
-            else -> SetupContent(
-                viewModel = viewModel,
-                onAvatarClick = onAvatarClick,
+                onHistoryClick = { panelMode = "history" },
+                onSwitchClick = { panelMode = "switch" },
             )
         }
     }
@@ -151,11 +202,13 @@ fun CompanionSidebar(
  * API 配置引导页内容 —— 嵌入在侧边栏内部的设置界面。
  *
  * @param viewModel 伙伴 ViewModel
+ * @param onBack 可选的返回按钮回调（从切换面板进入时提供），null 时不显示返回按钮
  * @param onAvatarClick 点击头像时触发，切换到编辑伙伴信息页面
  */
 @Composable
 private fun SetupContent(
     viewModel: CompanionViewModel,
+    onBack: (() -> Unit)? = null,
     onAvatarClick: () -> Unit,
 ) {
     Column(
@@ -163,23 +216,39 @@ private fun SetupContent(
             .fillMaxSize()
             .padding(vertical = 24.dp, horizontal = 16.dp),
     ) {
-        // 设置页标题行：头像 + 名字，点击任意一个进入编辑页
+        // 标题行：返回按钮（可选） + 头像 + 名字
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier.clickable { onAvatarClick() },
         ) {
-            CompanionAvatar(
-                name = viewModel.companionName,
-                avatarUri = viewModel.companionAvatarUri,
-                size = 36.dp,
-            )
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                viewModel.companionName,
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
+            // 返回按钮 —— 仅在从切换面板进入时显示
+            if (onBack != null) {
+                IconButton(onClick = onBack) {
+                    Icon(
+                        Icons.Default.ArrowBack,
+                        contentDescription = "返回",
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                Spacer(modifier = Modifier.width(4.dp))
+            }
+            // 头像 + 名字，点击进入编辑页
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.clickable { onAvatarClick() },
+            ) {
+                CompanionAvatar(
+                    name = viewModel.companionName,
+                    avatarUri = viewModel.companionAvatarUri,
+                    size = 36.dp,
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    viewModel.companionName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
         }
         Spacer(modifier = Modifier.height(20.dp))
 
@@ -375,22 +444,32 @@ private fun ProfileContent(
  * @param viewModel 伙伴 ViewModel
  * @param isVisible 面板可见性，用于自动滚动
  * @param onAvatarClick 点击头像时触发，切换到编辑伙伴信息页面
+ * @param onHistoryClick 点击历史图标时触发，切换到历史记录面板
+ * @param onSwitchClick 点击切换图标时触发，切换到多配置选择面板
  */
 @Composable
 private fun ChatContent(
     viewModel: CompanionViewModel,
     isVisible: Boolean,
     onAvatarClick: () -> Unit,
+    onHistoryClick: () -> Unit,
+    onSwitchClick: () -> Unit,
 ) {
     val listState = rememberLazyListState()
     val messages = viewModel.messages
     val inputText = viewModel.inputText
     val isLoading = viewModel.isLoading
+    val streamingText = viewModel.streamingAssistantText
+    val streamingTimestamp = viewModel.streamingMessageTimestamp
 
     // 面板打开时自动滚动到底部（最新消息）
-    LaunchedEffect(isVisible, messages.size) {
-        if (isVisible && messages.isNotEmpty()) {
-            listState.animateScrollToItem(messages.size) // size = 最后一个 item 的索引 + 1
+    LaunchedEffect(isVisible, messages.size, streamingText) {
+        if (isVisible) {
+            // 有流式文本时，item 数量 = 消息数 + 1（流式气泡），滚动到那个位置
+            val targetIndex = if (!streamingText.isNullOrEmpty()) messages.size + 1 else messages.size
+            if (targetIndex > 0) {
+                listState.animateScrollToItem(targetIndex)
+            }
         }
     }
 
@@ -399,7 +478,7 @@ private fun ChatContent(
             .fillMaxSize()
             .padding(vertical = 24.dp, horizontal = 16.dp),
     ) {
-        // 顶部标题栏：头像（点击编辑） + 伙伴名字 + 切换/重置按钮
+        // 顶部标题栏：头像（点击编辑） + 伙伴名字 + 历史/切换按钮
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -423,20 +502,26 @@ private fun ChatContent(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             }
-            // 切换配置按钮
-            TextButton(onClick = { viewModel.clearApiConfig() }) {
-                Icon(
-                    Icons.Default.Refresh,
-                    contentDescription = "切换配置",
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(
-                    "切换",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
+            // 右侧按钮组：历史记录 + 切换配置
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // 历史记录按钮：查看归档的聊天记录
+                IconButton(onClick = onHistoryClick) {
+                    Icon(
+                        Icons.Default.History,
+                        contentDescription = "历史记录",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // 切换配置按钮：打开多配置选择面板
+                IconButton(onClick = onSwitchClick) {
+                    Icon(
+                        Icons.Default.SwapHoriz,
+                        contentDescription = "切换配置",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
         Spacer(modifier = Modifier.height(16.dp))
@@ -465,19 +550,28 @@ private fun ChatContent(
                 }
             }
             items(messages, key = { it.id }) { message ->
-                // 消息入场动画：淡入 + 从下方滑入
-                AnimatedVisibility(
+                // 消息入场动画：淡入 + 缩放
+                androidx.compose.animation.AnimatedVisibility(
                     visible = true,
-                    enter = fadeIn(tween(300)) + slideInVertically(
-                        initialOffsetY = { it / 4 },
+                    enter = fadeIn(tween(300)) + scaleIn(
+                        initialScale = 0.9f,
                         animationSpec = tween(350),
                     ),
                 ) {
                     MessageBubble(message)
                 }
             }
-            // 加载指示器：等待 AI 回复时显示转圈
-            if (isLoading) {
+            // 流式输出气泡 —— 有流式文本时实时展示正在生成的 AI 回复
+            if (!streamingText.isNullOrEmpty()) {
+                item {
+                    StreamingMessageBubble(
+                        text = streamingText,
+                        timestamp = streamingTimestamp,
+                    )
+                }
+            }
+            // 加载指示器：仅在等待 AI 回复且尚未收到任何文本时显示转圈
+            else if (isLoading) {
                 item {
                     Row(
                         modifier = Modifier
@@ -573,6 +667,9 @@ private fun ChatContent(
 /**
  * 单条消息气泡 —— 用户消息靠右（主题色），AI 消息靠左（灰色）。
  *
+ * AI 消息使用 [MarkdownText] 渲染 Markdown 格式（粗体/斜体/代码/列表/标题等）。
+ * 用户消息使用纯文本渲染。
+ *
  * @param message 要渲染的消息数据
  */
 @Composable
@@ -599,18 +696,37 @@ private fun MessageBubble(message: ChatMessage) {
                 MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = if (!isUser) 1.dp else 0.dp,
         ) {
-            Text(
-                message.text,
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                style = MaterialTheme.typography.bodyMedium.copy(
-                    fontSize = 15.sp,
-                    lineHeight = 22.sp,
-                ),
-                color = if (isUser)
-                    MaterialTheme.colorScheme.onPrimary
-                else
-                    MaterialTheme.colorScheme.onSurface,
-            )
+            val bubbleModifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+            val textColor = if (isUser)
+                MaterialTheme.colorScheme.onPrimary
+            else
+                MaterialTheme.colorScheme.onSurface
+
+            if (isUser) {
+                // 用户消息：纯文本
+                Text(
+                    message.text,
+                    modifier = bubbleModifier,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 15.sp,
+                        lineHeight = 22.sp,
+                    ),
+                    color = textColor,
+                )
+            } else {
+                // AI 消息：使用 MarkdownText 渲染 Markdown 格式
+                Log.d("MarkdownText", "MessageBubble AI msg(${message.text.take(50)}...) length=${message.text.length}")
+                Box(modifier = bubbleModifier) {
+                    MarkdownText(
+                        content = message.text,
+                        style = MaterialTheme.typography.bodyMedium.copy(
+                            fontSize = 15.sp,
+                            lineHeight = 22.sp,
+                            color = textColor,
+                        ),
+                    )
+                }
+            }
         }
         Spacer(modifier = Modifier.height(4.dp))
         // 时间戳
@@ -619,5 +735,373 @@ private fun MessageBubble(message: ChatMessage) {
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
         )
+    }
+}
+
+/**
+ * 流式输出气泡 —— 实时展示正在生成的 AI 回复，显示时间戳和闪烁的光标感。
+ *
+ * 与 [MessageBubble] 的区别：
+ * - 不使用入场动画（文本持续更新，动画会重复触发）
+ * - 使用 [MarkdownText] 渲染已累积的流式文本
+ * - 底部显示一个微弱的闪烁点，给用户"sending"的视觉反馈
+ *
+ * @param text      当前已累积的流式文本
+ * @param timestamp 流式开始时间
+ */
+@Composable
+private fun StreamingMessageBubble(
+    text: String,
+    timestamp: String,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.Start,
+    ) {
+        Surface(
+            shape = RoundedCornerShape(
+                topStart = 20.dp,
+                topEnd = 20.dp,
+                bottomStart = 4.dp,
+                bottomEnd = 20.dp,
+            ),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 1.dp,
+        ) {
+            Box(modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)) {
+                MarkdownText(
+                    content = text,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        fontSize = 15.sp,
+                        lineHeight = 22.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(4.dp))
+        // 时间戳 + 流式指示点
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                timestamp,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            // 打字指示点：一个微小的圆点
+            Box(
+                modifier = Modifier
+                    .size(6.dp)
+                    .background(
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                        shape = CircleShape,
+                    ),
+            )
+        }
+    }
+}
+
+/**
+ * 历史记录面板 —— 展示上次归档的聊天记录（只读），风格对齐设置页。
+ *
+ * @param messages 归档的消息列表
+ * @param onClose  关闭面板的回调
+ */
+@Composable
+private fun HistoryPanel(
+    messages: List<ChatMessage>,
+    onClose: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(vertical = 24.dp, horizontal = 16.dp),
+    ) {
+        // 顶部栏：图标 + 标题 + 关闭按钮
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.History,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                "历史记录",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "关闭",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // 消息列表（只读）
+        if (messages.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = 48.dp),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        "暂无历史记录",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        "切换 API 配置时，当前聊天记录会自动归档到这里。",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                    )
+                }
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                items(messages, key = { it.id }) { message ->
+                    HistoryMessageItem(message)
+                }
+                item { Spacer(modifier = Modifier.height(8.dp)) }
+            }
+        }
+    }
+}
+
+/**
+ * 历史记录中的单条消息项 —— 简化版气泡，只读不可交互。
+ */
+@Composable
+private fun HistoryMessageItem(message: ChatMessage) {
+    val isUser = message.isFromUser
+    val alignment = if (isUser) Alignment.End else Alignment.Start
+
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = alignment,
+    ) {
+        Box(
+            modifier = Modifier
+                .background(
+                    if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                    else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
+                    shape = RoundedCornerShape(
+                        topStart = 16.dp, topEnd = 16.dp,
+                        bottomStart = if (isUser) 16.dp else 3.dp,
+                        bottomEnd = if (isUser) 3.dp else 16.dp,
+                    ),
+                )
+                .padding(horizontal = 14.dp, vertical = 10.dp),
+        ) {
+            Text(
+                text = message.text.take(200) + if (message.text.length > 200) "…" else "",
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
+                ),
+                color = if (isUser) MaterialTheme.colorScheme.onPrimary
+                else MaterialTheme.colorScheme.onSurface,
+                maxLines = 4,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            message.timestamp,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+            modifier = Modifier.padding(top = 2.dp),
+        )
+    }
+}
+
+/**
+ * 多配置切换面板 —— 展示已保存的所有 Provider 配置，风格对齐设置页。
+ *
+ * @param configs        所有已保存的配置
+ * @param activeConfigId 当前激活的配置 ID（用于高亮），null 表示无激活配置
+ * @param onSelect       选择某个配置时触发，传入该配置的 ID
+ * @param onDelete       删除某个配置时触发，传入该配置的 ID
+ * @param onAddNew       点击"新增配置"时触发
+ * @param onClose        关闭面板时触发
+ */
+@Composable
+private fun SwitchProviderPanel(
+    configs: List<SavedConfig>,
+    activeConfigId: String?,
+    onSelect: (String) -> Unit,
+    onDelete: (String) -> Unit,
+    onAddNew: () -> Unit,
+    onClose: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(vertical = 24.dp, horizontal = 16.dp),
+    ) {
+        // 顶部栏：图标 + 标题 + 关闭按钮
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.SwapHoriz,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                "切换配置",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            IconButton(
+                onClick = onClose,
+                modifier = Modifier.size(36.dp),
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "关闭",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(20.dp))
+
+        // 配置列表
+        if (configs.isEmpty()) {
+            Box(
+                modifier = Modifier.fillMaxWidth().padding(top = 48.dp),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                Text(
+                    "暂无已保存配置",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+            }
+        } else {
+            LazyColumn(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                items(configs, key = { it.id }) { config ->
+                    ConfigItem(
+                        config = config,
+                        isActive = config.id == activeConfigId,
+                        onSelect = { onSelect(config.id) },
+                        onDelete = { onDelete(config.id) },
+                    )
+                }
+                item { Spacer(modifier = Modifier.height(8.dp)) }
+            }
+
+            // 底部新增按钮 —— 全宽，分割线上方
+            Spacer(modifier = Modifier.height(12.dp))
+            HorizontalDivider(
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onAddNew() }
+                    .padding(vertical = 14.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Text(
+                    "新增配置",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 单条配置项 —— 显示 Provider 名称 + 模型名，激活状态有对勾标识。
+ */
+@Composable
+private fun ConfigItem(
+    config: SavedConfig,
+    isActive: Boolean,
+    onSelect: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSelect() }
+            .background(
+                if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(12.dp),
+            )
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                config.provider,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+            Text(
+                config.model,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            )
+        }
+        if (isActive) {
+            Icon(
+                Icons.Default.Check,
+                contentDescription = "当前使用",
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+        }
+        IconButton(
+            onClick = onDelete,
+            modifier = Modifier.size(28.dp),
+        ) {
+            Icon(
+                Icons.Default.Delete,
+                contentDescription = "删除配置",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+            )
+        }
     }
 }
