@@ -60,6 +60,9 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.9.8")
     implementation("sh.calvin.reorderable:reorderable:3.1.0")
 
+    // OkHttp —— HTTP 客户端，用于 SSE 流式聊天
+    implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
     // UniFFI - generated bindings will be included as source
     implementation("net.java.dev.jna:jna:5.16.0@aar")
 

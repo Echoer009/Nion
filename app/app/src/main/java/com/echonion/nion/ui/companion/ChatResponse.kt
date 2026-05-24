@@ -12,16 +12,18 @@ import org.json.JSONObject
  * 两种情况互斥：有 toolCalls 时 text 通常为 null，反之亦然。
  * 但某些 LLM（如 Anthropic）可能同时返回文本和工具调用。
  *
- * @property text       LLM 的纯文本回复，无文本回复时为 null
- * @property toolCalls  LLM 请求调用的工具列表，无工具调用时为 null
- * @property rawMessage 原始的 assistant message JSON 对象。
- *                      某些 LLM（如 DeepSeek 推理模型）会在响应中包含 reasoning_content 等额外字段，
- *                      后续请求必须原样回传这些字段，否则 API 返回 400 错误。
+ * @property text             LLM 的纯文本回复，无文本回复时为 null
+ * @property toolCalls        LLM 请求调用的工具列表，无工具调用时为 null
+ * @property rawMessage       原始的 assistant message JSON 对象（非流式模式）。
+ *                            包含 DeepSeek 推理模型的 reasoning_content 等额外字段。
+ * @property reasoningContent DeepSeek 推理模型的思考内容。
+ *                            后续请求必须将此字段原样回传 assistant 消息中，否则 API 返回 400。
  */
 data class ChatResponse(
     val text: String? = null,
     val toolCalls: List<ToolCall>? = null,
     val rawMessage: JSONObject? = null,
+    val reasoningContent: String? = null,
 )
 
 /**
