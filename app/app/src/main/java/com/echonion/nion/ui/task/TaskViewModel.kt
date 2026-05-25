@@ -24,6 +24,7 @@ import kotlinx.coroutines.launch
 import uniffi.nion_core.NionCore
 import uniffi.nion_core.TaskData
 import uniffi.nion_core.ChecklistData
+import uniffi.nion_core.GroupData
 
 @Stable
 data class TaskItem(
@@ -32,6 +33,7 @@ data class TaskItem(
     val description: String?,
     val priority: String,
     val isDone: Boolean,
+    val dueDate: String?,
     val createdAt: String,
     val subtasks: List<TaskItem> = emptyList(),
 )
@@ -40,6 +42,18 @@ data class TaskItem(
 data class ChecklistItem(
     val id: String,
     val name: String,
+)
+
+/**
+ * 分组 UI 模型 —— 对应 Rust 端的 GroupData
+ * 用于在清单下展示二级分类（如"语文"、"英语"）
+ */
+@Stable
+data class GroupItem(
+    val id: String,
+    val name: String,
+    val checklistId: String,
+    val color: String?,
 )
 
 @Stable
@@ -64,6 +78,17 @@ class TaskViewModel(
         private set
 
     var activeChecklistId by mutableStateOf<String?>(null)
+        private set
+
+    /** 当前清单下的分组列表 */
+    var groups by mutableStateOf<List<GroupItem>>(emptyList())
+        private set
+
+    /**
+     * 当前选中的分组 ID。
+     * null 表示显示全部任务（不按分组过滤）
+     */
+    var activeGroupId by mutableStateOf<String?>(null)
         private set
 
     var checklistCounts by mutableStateOf<Map<String?, Pair<Int, Int>>>(emptyMap())
@@ -149,8 +174,18 @@ class TaskViewModel(
                 onError("加载清单失败: ${e.message}")
             }
             try {
+                // 刷新当前清单下的分组
+                groups = if (activeChecklistId != null) {
+                    withContext(Dispatchers.IO) {
+                        core.getGroupsByChecklist(activeChecklistId!!).map { it.toUi() }
+                    }
+                } else {
+                    emptyList()
+                }
+            } catch (_: Exception) { }
+            try {
                 val loadedTasks = withContext(Dispatchers.IO) {
-                    loadTasksWithSubtasks(activeChecklistId)
+                    loadTasksWithSubtasks(activeChecklistId, activeGroupId)
                 }
                 tasks = loadedTasks
             } catch (e: Exception) {
@@ -160,13 +195,27 @@ class TaskViewModel(
         }
     }
 
+    /**
+     * 切换活跃清单，同时加载该清单下的分组列表，并重置分组筛选。
+     * groupId = null 表示显示该清单下所有任务。
+     */
     fun setActiveChecklist(id: String?) {
         viewModelScope.launch {
             try {
-                val loadedTasks = withContext(Dispatchers.IO) {
-                    loadTasksWithSubtasks(id)
-                }
+                // 切换清单时重置分组选择
+                activeGroupId = null
                 activeChecklistId = id
+                // 加载新清单下的分组
+                groups = if (id != null) {
+                    withContext(Dispatchers.IO) {
+                        core.getGroupsByChecklist(id).map { it.toUi() }
+                    }
+                } else {
+                    emptyList()
+                }
+                val loadedTasks = withContext(Dispatchers.IO) {
+                    loadTasksWithSubtasks(id, null)
+                }
                 tasks = loadedTasks
                 scheduleRefreshCounts()
             } catch (e: Exception) {
@@ -175,13 +224,34 @@ class TaskViewModel(
         }
     }
 
-    fun createTask(title: String, description: String?, priority: String) {
+    /**
+     * 切换活跃分组，筛选显示该分组下的任务。
+     * groupId = null 表示显示全部（不按分组过滤）。
+     */
+    fun setActiveGroup(groupId: String?) {
+        viewModelScope.launch {
+            try {
+                activeGroupId = groupId
+                val loadedTasks = withContext(Dispatchers.IO) {
+                    loadTasksWithSubtasks(activeChecklistId, groupId)
+                }
+                tasks = loadedTasks
+            } catch (e: Exception) {
+                onError("切换分组失败: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 创建任务。自动关联到当前活跃清单和活跃分组。
+     */
+    fun createTask(title: String, description: String?, priority: String, dueDate: String? = null) {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    core.createTask(title, description, priority, null, activeChecklistId, null)
+                    core.createTask(title, description, priority, dueDate, activeChecklistId, null, activeGroupId)
                 }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId) }
+                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("创建任务失败: ${e.message}")
@@ -189,13 +259,18 @@ class TaskViewModel(
         }
     }
 
+    /**
+     * 创建子任务。继承父任务所在的清单和分组。
+     */
     fun createSubtask(parentId: String, title: String, priority: String = "medium") {
         viewModelScope.launch {
             try {
+                // 子任务继承父任务的分组归属
+                val parentGroup = activeGroupId
                 withContext(Dispatchers.IO) {
-                    core.createTask(title, null, priority, null, activeChecklistId, parentId)
+                    core.createTask(title, null, priority, null, activeChecklistId, parentId, parentGroup)
                 }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId) }
+                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("创建子任务失败: ${e.message}")
@@ -213,12 +288,12 @@ class TaskViewModel(
                 val allIds = collectIds(updatedTask)
                 withContext(Dispatchers.IO) {
                     for (id in allIds) {
-                        core.updateTask(id, null, null, null, newStatus, null, null, null)
+                        core.updateTask(id, null, null, null, newStatus, null, null, null, null)
                     }
                 }
             } catch (e: Exception) {
                 onError("更新失败: ${e.message}")
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId) }
+                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
             }
         }
     }
@@ -231,12 +306,26 @@ class TaskViewModel(
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    core.updateTask(id, title, description, priority, null, null, null, null)
+                    core.updateTask(id, title, description, priority, null, null, null, null, null)
                 }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId) }
+                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("更新任务失败: ${e.message}")
+            }
+        }
+    }
+
+    /** 更新任务截止日期，dueDate = null 表示清除日期 */
+    fun updateDueDate(id: String, dueDate: String?) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    core.updateTask(id, null, null, null, null, dueDate, null, null, null)
+                }
+                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
+            } catch (e: Exception) {
+                onError("更新日期失败: ${e.message}")
             }
         }
     }
@@ -274,7 +363,7 @@ class TaskViewModel(
                 withContext(Dispatchers.IO) { core.deleteChecklist(id) }
                 if (activeChecklistId == id) {
                     activeChecklistId = null
-                    tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(null) }
+                    tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(null, null) }
                 }
                 checklists = withContext(Dispatchers.IO) { core.getChecklists().map { it.toUi() } }
                 scheduleRefreshCounts()
@@ -293,7 +382,7 @@ class TaskViewModel(
                         core.reorderTasks(siblingIds)
                     }
                 }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId) }
+                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("移动任务失败: ${e.message}")
@@ -307,7 +396,7 @@ class TaskViewModel(
                 withContext(Dispatchers.IO) {
                     core.updateTaskParent(taskId, newParentId)
                 }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId) }
+                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("移动任务失败: ${e.message}")
@@ -319,7 +408,7 @@ class TaskViewModel(
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { core.reorderTasks(orderedIds) }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId) }
+                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
             } catch (e: Exception) {
                 onError("排序失败: ${e.message}")
             }
@@ -344,11 +433,11 @@ class TaskViewModel(
             val result = mutableMapOf<String?, Pair<Int, Int>>()
             result[currentActiveId] = countItems(currentTasks)
             if (currentActiveId != null) {
-                result[null] = countItems(loadTasksWithSubtasks(null))
+                result[null] = countItems(loadTasksWithSubtasks(null, null))
             }
             for (cl in currentChecklists) {
                 if (cl.id != currentActiveId) {
-                    result[cl.id] = countItems(loadTasksWithSubtasks(cl.id))
+                    result[cl.id] = countItems(loadTasksWithSubtasks(cl.id, null))
                 }
             }
             result.toMap()
@@ -369,16 +458,81 @@ class TaskViewModel(
         return Pair(taskCount, subtaskCount)
     }
 
-    private fun loadTasksWithSubtasks(categoryId: String?): List<TaskItem> {
+    /**
+     * 加载指定清单和分组下的任务树。
+     * categoryId = null 表示"我的任务"；groupId = null 表示不按分组过滤。
+     */
+    private fun loadTasksWithSubtasks(categoryId: String?, groupId: String?): List<TaskItem> {
         fun loadChildren(parentId: String): List<TaskItem> {
             return core.getSubtasks(parentId).map { task ->
                 val subs = loadChildren(task.id)
                 task.toUi().copy(subtasks = subs)
             }
         }
-        return core.getTasksByCategory(categoryId).map { task ->
+        return core.getTasksByCategory(categoryId, groupId).map { task ->
             val subs = loadChildren(task.id)
             task.toUi().copy(subtasks = subs)
+        }
+    }
+
+    // ==================== 分组操作 ====================
+
+    /**
+     * 创建分组，创建后刷新分组列表。
+     * @param name 分组名称（如"语文"）
+     * @param color 可选的颜色标识（如"#FF5722"）
+     */
+    fun createGroup(name: String, color: String? = null) {
+        val checklistId = activeChecklistId ?: return
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    core.createGroup(name, checklistId, color)
+                }
+                groups = withContext(Dispatchers.IO) {
+                    core.getGroupsByChecklist(checklistId).map { it.toUi() }
+                }
+            } catch (e: Exception) {
+                onError("创建分组失败: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 删除分组，保留组内任务（group_id 被置空）。
+     */
+    fun deleteGroup(groupId: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { core.deleteGroup(groupId) }
+                groups = withContext(Dispatchers.IO) {
+                    activeChecklistId?.let { core.getGroupsByChecklist(it).map { g -> g.toUi() } } ?: emptyList()
+                }
+                // 如果删除的是当前选中分组，切回"全部"
+                if (activeGroupId == groupId) {
+                    activeGroupId = null
+                }
+                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
+                scheduleRefreshCounts()
+            } catch (e: Exception) {
+                onError("删除分组失败: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 重命名分组。
+     */
+    fun renameGroup(groupId: String, newName: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { core.updateGroup(groupId, newName, null) }
+                groups = withContext(Dispatchers.IO) {
+                    activeChecklistId?.let { core.getGroupsByChecklist(it).map { g -> g.toUi() } } ?: emptyList()
+                }
+            } catch (e: Exception) {
+                onError("重命名分组失败: ${e.message}")
+            }
         }
     }
 }
@@ -453,12 +607,21 @@ private fun TaskData.toUi(): TaskItem = TaskItem(
     description = description,
     priority = priority,
     isDone = status == "done",
+    dueDate = dueDate,
     createdAt = createdAt,
 )
 
 private fun ChecklistData.toUi(): ChecklistItem = ChecklistItem(
     id = id,
     name = name,
+)
+
+/** 将 Rust 端 GroupData 转换为 UI 模型 */
+private fun GroupData.toUi(): GroupItem = GroupItem(
+    id = id,
+    name = name,
+    checklistId = checklistId,
+    color = color,
 )
 
 @Composable

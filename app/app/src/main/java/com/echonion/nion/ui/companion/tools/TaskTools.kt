@@ -102,7 +102,7 @@ object GetTasksTool : Tool {
     override suspend fun execute(params: JSONObject, core: NionCore): String {
         val categoryId = params.optString("category_id", "").takeIf { it.isNotEmpty() }
         val tasks = if (categoryId != null) {
-            core.getTasksByCategory(categoryId)
+            core.getTasksByCategory(categoryId, null)
         } else {
             core.getTasks()
         }
@@ -198,6 +198,7 @@ object CreateTaskTool : Tool {
             dueDate = params.optString("due_date", "").takeIf { it.isNotEmpty() },
             categoryId = params.optString("category_id", "").takeIf { it.isNotEmpty() },
             parentId = params.optString("parent_id", "").takeIf { it.isNotEmpty() },
+            groupId = params.optString("group_id", "").takeIf { it.isNotEmpty() },
         )
         return JSONObject().apply {
             put("success", true)
@@ -281,6 +282,7 @@ object UpdateTaskTool : Tool {
             dueDate = dueDate,
             categoryId = categoryId,
             reminder = reminder,
+            groupId = null,
         )
         return JSONObject().apply {
             put("success", true)

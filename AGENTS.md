@@ -52,6 +52,48 @@ cd app && ./gradlew assembleDebug     # build APK
 - `reorder_tasks` uses manual `BEGIN`/`COMMIT`; other multi-step DB ops do not.
 - The app uses a `DualPanelLayout` with left sidebar (checklists) and right sidebar (companion), both swipeable.
 - Navigation: `tasks`, `schedule`, `pomodoro`, `settings` routes via Jetpack Navigation Compose.
+- **分组 (Groups)**: 清单下的二级分类。数据模型: `Checklist → Group → Task`。`TaskData.group_id` 关联分组，`GroupData.checklist_id` 关联清单。
+
+## Data Model
+
+```
+Checklist (清单) ──1:N──> Group (分组) ──1:N──> Task (任务)
+Checklist (清单) ──1:N──> Task (任务, via category_id, group_id 可为空)
+Task (任务) ──1:N──> Task (子任务, via parent_id)
+```
+
+## Backend API (Axum on :3000)
+
+### 清单 API
+- `GET    /api/checklists` — 获取所有清单
+- `POST   /api/checklists` — 创建清单 `{ "name": "..." }`
+- `PUT    /api/checklists/:id` — 修改清单名称 `{ "name": "..." }`
+- `DELETE /api/checklists/:id` — 删除清单
+- `PUT    /api/checklists/reorder` — 重排清单 `{ "ordered_ids": [...] }`
+
+### 分组 API
+- `POST   /api/groups` — 创建分组 `{ "name": "语文", "checklist_id": "...", "color": "#FF5722" }`
+- `GET    /api/groups/:checklist_id` — 获取清单下的所有分组
+- `PUT    /api/groups/:id` — 更新分组 `{ "name": "...", "color": "..." }`
+- `DELETE /api/groups/:id` — 删除分组（保留组内任务，group_id 置空）
+- `PUT    /api/groups/reorder` — 重排分组 `{ "ordered_ids": [...] }`
+
+### 任务 API
+- `GET    /api/tasks` — 获取所有任务
+- `GET    /api/tasks/by-category?category_id=...&group_id=...` — 按清单和分组筛选
+- `GET    /api/tasks/:id` — 获取单个任务
+- `POST   /api/tasks` — 创建任务 `{ "title": "...", "group_id": "...", ... }`
+- `PUT    /api/tasks/:id` — 更新任务（支持 `group_id` 字段）
+- `DELETE /api/tasks/:id` — 删除任务
+- `GET    /api/tasks/:id/subtasks` — 获取子任务
+- `PUT    /api/tasks/:id/parent` — 更新父任务 `{ "new_parent_id": "..." }`
+- `PUT    /api/tasks/:id/group` — 更新分组归属 `{ "group_id": "..." }`
+- `POST   /api/tasks/:id/focus` — 累加专注时长 `{ "seconds": 60 }`
+- `PUT    /api/tasks/reorder` — 重排任务 `{ "ordered_ids": [...] }`
+
+### 设置 API
+- `GET    /api/settings/:key` — 获取设置值
+- `PUT    /api/settings` — 设置键值对 `{ "key": "...", "value": "..." }`
 
 ## Key Files
 

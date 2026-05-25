@@ -19,6 +19,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -33,21 +34,27 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircleOutline
+import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.DatePicker
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
@@ -62,6 +69,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -162,6 +171,9 @@ fun TaskScreen(
                         onUpdateNotes = { notes ->
                             viewModel.updateTask(taskId, description = notes)
                         },
+                        onUpdateDueDate = { date ->
+                            viewModel.updateDueDate(taskId, date)
+                        },
                         sharedElementModifier = Modifier.sharedElement(
                             sharedContentState = rememberSharedContentState("task_detail_$taskId"),
                             animatedVisibilityScope = this@AnimatedContent,
@@ -244,8 +256,8 @@ fun TaskScreen(
                     ) {
                         AddTaskOverlay(
                             onDismiss = { showAddSheet = false },
-                            onAdd = { title, desc, priority ->
-                                viewModel.createTask(title, desc, priority)
+                            onAdd = { title, desc, priority, dueDate ->
+                                viewModel.createTask(title, desc, priority, dueDate)
                                 showAddSheet = false
                             },
                             sharedBoundsModifier = Modifier.sharedBounds(
@@ -330,15 +342,34 @@ private fun TaskScreenContent(
         },
         floatingActionButton = fab,
     ) { innerPadding ->
-        if (viewModel.tasks.isEmpty()) {
-            EmptyTaskView(modifier = Modifier.padding(innerPadding))
-        } else {
-            TaskList(
-                viewModel = viewModel,
-                innerPadding = innerPadding,
-                onTaskClick = onTaskClick,
-                taskSharedModifier = taskSharedModifier,
-            )
+        // 分组标签栏：选中清单时始终显示（即使没有分组也能新建）
+        val showGroupBar = viewModel.activeChecklistId != null
+        Column(modifier = Modifier.padding(innerPadding)) {
+            if (showGroupBar) {
+                /**
+                 * 分组标签栏 —— 水平滚动的分组选择器。
+                 * 显示"全部" + 各分组名称，点击切换筛选。
+                 * 最右侧有"+"按钮用于新建分组。
+                 */
+                GroupTabBar(
+                    groups = viewModel.groups,
+                    activeGroupId = viewModel.activeGroupId,
+                    onGroupSelected = { viewModel.setActiveGroup(it) },
+                    onCreateGroup = { viewModel.createGroup(it) },
+                    onDeleteGroup = { viewModel.deleteGroup(it) },
+                )
+            }
+            if (viewModel.tasks.isEmpty()) {
+                EmptyTaskView(modifier = Modifier.weight(1f))
+            } else {
+                TaskList(
+                    viewModel = viewModel,
+                    innerPadding = androidx.compose.foundation.layout.PaddingValues(),
+                    onTaskClick = onTaskClick,
+                    taskSharedModifier = taskSharedModifier,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
     }
 }
@@ -355,12 +386,16 @@ private fun TaskScreenContent(
 @Composable
 private fun AddTaskOverlay(
     onDismiss: () -> Unit,
-    onAdd: (String, String, String) -> Unit,
+    onAdd: (String, String?, String, String?) -> Unit,
     sharedBoundsModifier: Modifier,
 ) {
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
     var priority by remember { mutableStateOf("medium") }
+    // 截止日期：ISO 格式字符串，null 表示未设置
+    var dueDate by remember { mutableStateOf<String?>(null) }
+    // showingDatePicker: true=显示日期选择页，false=显示表单
+    var showingDatePicker by remember { mutableStateOf(false) }
 
     // 自动聚焦标题输入框，展开后立即呼出输入法
     val focusRequester = remember { FocusRequester() }
@@ -389,10 +424,96 @@ private fun AddTaskOverlay(
             color = MaterialTheme.colorScheme.surfaceContainerHigh,
             tonalElevation = 6.dp,
         ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(20.dp),
-            ) {
+            // AnimatedContent 在表单与日期选择页之间切换，morph 过渡
+            AnimatedContent(
+                targetState = showingDatePicker,
+                transitionSpec = {
+                    if (targetState) {
+                        (fadeIn(tween(280, easing = FastOutSlowInEasing))
+                            togetherWith fadeOut(tween(180, easing = FastOutSlowInEasing)))
+                            .using(SizeTransform(clip = false))
+                    } else {
+                        (fadeIn(tween(200, easing = FastOutSlowInEasing))
+                            togetherWith fadeOut(tween(350, easing = FastOutSlowInEasing)))
+                            .using(SizeTransform(clip = false))
+                    }
+                },
+                label = "addTaskDatePicker",
+            ) { showPicker ->
+                if (showPicker) {
+                    // ===== 日期选择页（嵌入卡片，自研日历）=====
+                    val todayForPicker = remember { java.time.LocalDate.now() }
+                    val initialLocalDate = remember(dueDate) {
+                        try {
+                            if (!dueDate.isNullOrBlank()) java.time.LocalDate.parse(dueDate, java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+                            else null
+                        } catch (_: Exception) { null }
+                    }
+                    val initialYM = remember(initialLocalDate) {
+                        initialLocalDate?.let { java.time.YearMonth.from(it) } ?: java.time.YearMonth.now()
+                    }
+                    var selectedDate by remember(initialLocalDate) { mutableStateOf(initialLocalDate) }
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        // 标题栏
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            IconButton(onClick = { showingDatePicker = false }) {
+                                Icon(Icons.Default.ArrowBack, contentDescription = "返回", modifier = Modifier.size(20.dp))
+                            }
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text(
+                                "选择日期",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        NionCalendar(
+                            initialYearMonth = initialYM,
+                            today = todayForPicker,
+                            selectedDate = selectedDate,
+                            onSelect = { selectedDate = it },
+                        )
+                        // 底部按钮：等宽横排
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            TextButton(
+                                onClick = {
+                                    dueDate = null
+                                    showingDatePicker = false
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                ),
+                                modifier = Modifier.weight(1f),
+                            ) { Text("清除", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                            TextButton(
+                                onClick = { showingDatePicker = false },
+                                modifier = Modifier.weight(1f),
+                                shape = RoundedCornerShape(14.dp),
+                            ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                            Button(
+                                onClick = {
+                                    dueDate = selectedDate?.format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+                                    showingDatePicker = false
+                                },
+                                shape = RoundedCornerShape(14.dp),
+                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                modifier = Modifier.weight(1f),
+                            ) { Text("确定", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                        }
+                    }
+                } else {
+                    // ===== 表单内容 =====
+                    Column(
+                        modifier = Modifier.padding(20.dp),
+                        verticalArrangement = Arrangement.spacedBy(20.dp),
+                    ) {
                 // 标题：纯文字，无图标
                 Text(
                     "新建任务",
@@ -441,6 +562,29 @@ private fun AddTaskOverlay(
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 PrioritySelector(selected = priority, onSelect = { priority = it })
+                // 日期选择行：点击后卡片内容 morph 为日期选择页
+                Row(
+                    modifier = Modifier
+                        .clickable { showingDatePicker = true }
+                        .padding(vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Outlined.CalendarToday,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                        tint = if (dueDate != null) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = dueDate.formatDueDate() ?: "选择日期",
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.Medium,
+                        color = if (dueDate != null) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 // 操作按钮
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -454,7 +598,7 @@ private fun AddTaskOverlay(
                     ) { Text("取消", fontWeight = FontWeight.SemiBold) }
                     Button(
                         onClick = {
-                            if (title.isNotBlank()) onAdd(title.trim(), description.trim(), priority)
+                            if (title.isNotBlank()) onAdd(title.trim(), description.trim().ifBlank { null }, priority, dueDate)
                         },
                         enabled = title.isNotBlank(),
                         shape = RoundedCornerShape(14.dp),
@@ -462,16 +606,26 @@ private fun AddTaskOverlay(
                         modifier = Modifier.weight(1f),
                     ) { Text("添加", fontWeight = FontWeight.SemiBold) }
                 }
-            }
-        }
-    }
+                    } // end Column (form)
+                } // end else
+            } // end AnimatedContent
+        } // end Surface
+    } // end Box
 }
+
+/**
+ * 任务详情浮层内部的面板状态：
+ * - DETAIL：显示任务详情（备注、工具栏）
+ * - ADD_SUBTASK：显示子任务创建表单
+ * - DATE_PICKER：显示日期选择页面
+ */
+private enum class DetailPanel { DETAIL, ADD_SUBTASK, DATE_PICKER }
 
 /**
  * 任务详情浮层 —— 从任务卡片位置 morph 展开为居中的任务详情/子任务表单。
  *
- * 内部使用 AnimatedContent 在「任务详情」和「添加子任务表单」之间切换，
- * 两种状态共享的卡片通过 sharedElementModifier 与触发卡片做 morph 动画。
+ * 内部使用 AnimatedContent 在「任务详情」「添加子任务表单」「日期选择」三个面板之间切换，
+ * 三种状态共享的卡片通过 sharedElementModifier 与触发卡片做 morph 动画。
  *
  * 卡片本身无边框，通过 tonalElevation 形成粗阴影边缘（与任务列表卡片风格一致）。
  *
@@ -480,6 +634,7 @@ private fun AddTaskOverlay(
  * @param onDelete 删除任务回调
  * @param onCreateSubtask 创建子任务回调，传入 (标题, 优先级)
  * @param onUpdateNotes 备注内容变更时触发，自动保存到数据库
+ * @param onUpdateDueDate 截止日期变更回调，传入 ISO 格式日期字符串或 null
  * @param sharedElementModifier shared element 动画 modifier（与触发卡片共享 key）
  */
 @Composable
@@ -489,12 +644,13 @@ private fun TaskDetailOverlay(
     onDelete: () -> Unit,
     onCreateSubtask: (String, String) -> Unit,
     onUpdateNotes: (String) -> Unit,
+    onUpdateDueDate: (String?) -> Unit,
     sharedElementModifier: Modifier,
 ) {
     // 备注内容：初始值为任务描述，可随时编辑，每次变更自动保存
     var notes by remember(task.id) { mutableStateOf(task.description ?: "") }
-    // showAddSubtask: true = 显示子任务创建表单，false = 显示任务详情
-    var showAddSubtask by remember { mutableStateOf(false) }
+    // 当前面板状态：DETAIL=详情 / ADD_SUBTASK=添加子任务 / DATE_PICKER=选择日期
+    var panel by remember { mutableStateOf(DetailPanel.DETAIL) }
     // 子任务创建表单的标题和优先级
     var subtaskTitle by remember { mutableStateOf("") }
     var subtaskPriority by remember { mutableStateOf("medium") }
@@ -520,210 +676,258 @@ private fun TaskDetailOverlay(
             color = MaterialTheme.colorScheme.surfaceContainerLowest,
             tonalElevation = 12.dp,
         ) {
-            // 内部 AnimatedContent：在「任务详情」和「添加子任务表单」之间切换
+            // 内部 AnimatedContent：在三个面板之间切换，与添加子任务使用相同的 morph 动画
             AnimatedContent(
-                targetState = showAddSubtask,
+                targetState = panel,
                 transitionSpec = {
-                    if (targetState) {
-                        // 展开子任务表单：快速淡入表单，缓慢淡出详情
+                    if (targetState != DetailPanel.DETAIL) {
+                        // 展开子表单/日期选择：快速淡入新面板，缓慢淡出详情
                         (fadeIn(tween(280, easing = FastOutSlowInEasing))
                             togetherWith fadeOut(tween(180, easing = FastOutSlowInEasing)))
                             .using(SizeTransform(clip = false))
                     } else {
-                        // 返回详情：快速淡入详情，缓慢淡出表单
+                        // 返回详情：快速淡入详情，缓慢淡出面板
                         (fadeIn(tween(200, easing = FastOutSlowInEasing))
                             togetherWith fadeOut(tween(350, easing = FastOutSlowInEasing)))
                             .using(SizeTransform(clip = false))
                     }
                 },
-                label = "subtaskForm",
-            ) { adding ->
-                if (adding) {
-                    // ===== 添加子任务表单 =====
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(20.dp),
-                    ) {
-                        // 标题栏：图标 + "新建子任务" 文字
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer,
-                                modifier = Modifier.size(40.dp),
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.AddCircleOutline,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(22.dp),
-                                    )
+                label = "detailPanel",
+            ) { currentPanel ->
+                when (currentPanel) {
+                    DetailPanel.ADD_SUBTASK -> {
+                        // ===== 添加子任务表单 =====
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(20.dp),
+                        ) {
+                            // 标题栏：图标 + "新建子任务" 文字
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(40.dp),
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Default.AddCircleOutline,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(22.dp),
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Text(
+                                    "新建子任务",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Spacer(modifier = Modifier.weight(1f))
+                                IconButton(onClick = { panel = DetailPanel.DETAIL }) {
+                                    Icon(Icons.Default.Close, contentDescription = "关闭")
                                 }
                             }
-                            Spacer(modifier = Modifier.width(14.dp))
+
+                            // 提示：正在为哪个任务添加子任务
                             Text(
-                                "新建子任务",
-                                style = MaterialTheme.typography.headlineMedium,
-                                fontWeight = FontWeight.Bold,
+                                "添加到：${task.title}",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            Spacer(modifier = Modifier.weight(1f))
-                            IconButton(onClick = { showAddSubtask = false }) {
-                                Icon(Icons.Default.Close, contentDescription = "关闭")
-                            }
-                        }
 
-                        // 提示：正在为哪个任务添加子任务
-                        Text(
-                            "添加到：${task.title}",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-
-                        // 子任务标题输入框
-                        OutlinedTextField(
-                            value = subtaskTitle,
-                            onValueChange = { subtaskTitle = it },
-                            label = { Text("标题") },
-                            placeholder = { Text("输入子任务标题...") },
-                            modifier = Modifier.fillMaxWidth(),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            ),
-                            singleLine = true,
-                        )
-
-                        // 优先级选择
-                        Text(
-                            "优先级",
-                            style = MaterialTheme.typography.labelLarge,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                        PrioritySelector(selected = subtaskPriority, onSelect = { subtaskPriority = it })
-
-                        // 操作按钮：取消 + 添加
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            TextButton(
-                                onClick = {
-                                    subtaskTitle = ""
-                                    subtaskPriority = "medium"
-                                    showAddSubtask = false
-                                },
-                                modifier = Modifier.weight(1f),
+                            // 子任务标题输入框
+                            OutlinedTextField(
+                                value = subtaskTitle,
+                                onValueChange = { subtaskTitle = it },
+                                label = { Text("标题") },
+                                placeholder = { Text("输入子任务标题...") },
+                                modifier = Modifier.fillMaxWidth(),
                                 shape = RoundedCornerShape(14.dp),
-                            ) { Text("取消", fontWeight = FontWeight.SemiBold) }
-                            Button(
-                                onClick = {
-                                    if (subtaskTitle.isNotBlank()) {
-                                        onCreateSubtask(subtaskTitle.trim(), subtaskPriority)
-                                        subtaskTitle = ""
-                                        subtaskPriority = "medium"
-                                        showAddSubtask = false
-                                    }
-                                },
-                                enabled = subtaskTitle.isNotBlank(),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                modifier = Modifier.weight(1f),
-                            ) { Text("添加", fontWeight = FontWeight.SemiBold) }
-                        }
-                    }
-                } else {
-                    // ===== 任务详情 =====
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp),
-                    ) {
-                        // 顶部：任务标题 + 关闭按钮
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                ),
+                                singleLine = true,
+                            )
+
+                            // 优先级选择
                             Text(
-                                task.title,
-                                style = MaterialTheme.typography.titleLarge,
-                                fontWeight = FontWeight.Bold,
-                                modifier = Modifier.weight(1f),
+                                "优先级",
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
-                            IconButton(onClick = onDismiss) {
-                                Icon(Icons.Default.Close, contentDescription = "关闭")
-                            }
-                        }
+                            PrioritySelector(selected = subtaskPriority, onSelect = { subtaskPriority = it })
 
-                        // 可编辑的备注输入框
-                        OutlinedTextField(
-                            value = notes,
-                            onValueChange = {
-                                notes = it
-                                onUpdateNotes(it)
-                            },
-                            placeholder = { Text("添加备注...") },
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(120.dp),
-                            shape = RoundedCornerShape(14.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            ),
-                        )
-
-                        // 工具栏：添加子任务 + 删除
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
+                            // 操作按钮：取消 + 添加
                             Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(horizontal = 8.dp, vertical = 4.dp),
-                                horizontalArrangement = Arrangement.SpaceEvenly,
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                // 添加子任务按钮 —— 点击后卡片内容 morph 为子任务创建表单
                                 TextButton(
-                                    onClick = { showAddSubtask = true },
-                                    colors = ButtonDefaults.textButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.primary,
-                                    ),
-                                ) {
-                                    Icon(
-                                        Icons.Default.AddCircleOutline,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("添加子任务", fontWeight = FontWeight.Medium)
-                                }
-                                // 分隔圆点
+                                    onClick = {
+                                        subtaskTitle = ""
+                                        subtaskPriority = "medium"
+                                        panel = DetailPanel.DETAIL
+                                    },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(14.dp),
+                                ) { Text("取消", fontWeight = FontWeight.SemiBold) }
+                                Button(
+                                    onClick = {
+                                        if (subtaskTitle.isNotBlank()) {
+                                            onCreateSubtask(subtaskTitle.trim(), subtaskPriority)
+                                            subtaskTitle = ""
+                                            subtaskPriority = "medium"
+                                            panel = DetailPanel.DETAIL
+                                        }
+                                    },
+                                    enabled = subtaskTitle.isNotBlank(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("添加", fontWeight = FontWeight.SemiBold) }
+                            }
+                        }
+                    }
+
+                    DetailPanel.DATE_PICKER -> {
+                        // ===== 日期选择页面 =====
+                        // morph 动画与添加子任务一致，卡片内容整体切换为日历选择
+                        DatePickerPage(
+                            taskId = task.id,
+                            initialDate = task.dueDate,
+                            onConfirm = { date ->
+                                onUpdateDueDate(date)
+                                panel = DetailPanel.DETAIL
+                            },
+                            onBack = { panel = DetailPanel.DETAIL },
+                        )
+                    }
+
+                    DetailPanel.DETAIL -> {
+                        // ===== 任务详情 =====
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(16.dp),
+                        ) {
+                            // 顶部：任务标题 + 日历图标 + 关闭按钮
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
                                 Text(
-                                    "·",
-                                    style = MaterialTheme.typography.bodyLarge,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                    task.title,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    modifier = Modifier.weight(1f),
                                 )
-                                // 删除按钮
-                                TextButton(
-                                    onClick = onDelete,
-                                    colors = ButtonDefaults.textButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                    ),
+                                // 日历/日期：点击后 morph 为日期选择页面
+                                // 已设置日期时显示日期文字，未设置时显示日历图标
+                                Row(
+                                    modifier = Modifier
+                                        .clickable(
+                                            interactionSource = remember { MutableInteractionSource() },
+                                            indication = null,
+                                            onClick = { panel = DetailPanel.DATE_PICKER },
+                                        )
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Icon(
-                                        Icons.Outlined.DeleteOutline,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
+                                    if (task.dueDate != null) {
+                                        // 已设置日期：显示格式化的日期文字
+                                        Text(
+                                            task.dueDate.formatDueDate() ?: "",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Medium,
+                                            color = MaterialTheme.colorScheme.primary,
+                                        )
+                                    } else {
+                                        // 未设置日期：显示日历图标
+                                        Icon(
+                                            Icons.Outlined.CalendarToday,
+                                            contentDescription = "选择日期",
+                                            modifier = Modifier.size(20.dp),
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                }
+                                IconButton(onClick = onDismiss) {
+                                    Icon(Icons.Default.Close, contentDescription = "关闭")
+                                }
+                            }
+
+                            // 可编辑的备注输入框
+                            OutlinedTextField(
+                                value = notes,
+                                onValueChange = {
+                                    notes = it
+                                    onUpdateNotes(it)
+                                },
+                                placeholder = { Text("添加备注...") },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(120.dp),
+                                shape = RoundedCornerShape(14.dp),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                ),
+                            )
+
+                            // 工具栏：添加子任务 + 删除
+                            Surface(
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                                    horizontalArrangement = Arrangement.SpaceEvenly,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    // 添加子任务按钮 —— 点击后卡片内容 morph 为子任务创建表单
+                                    TextButton(
+                                        onClick = { panel = DetailPanel.ADD_SUBTASK },
+                                        colors = ButtonDefaults.textButtonColors(
+                                            contentColor = MaterialTheme.colorScheme.primary,
+                                        ),
+                                    ) {
+                                        Icon(
+                                            Icons.Default.AddCircleOutline,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("添加子任务", fontWeight = FontWeight.Medium)
+                                    }
+                                    // 分隔圆点
+                                    Text(
+                                        "·",
+                                        style = MaterialTheme.typography.bodyLarge,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
                                     )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Text("删除", fontWeight = FontWeight.Medium)
+                                    // 删除按钮
+                                    TextButton(
+                                        onClick = onDelete,
+                                        colors = ButtonDefaults.textButtonColors(
+                                            contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                        ),
+                                    ) {
+                                        Icon(
+                                            Icons.Outlined.DeleteOutline,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(18.dp),
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text("删除", fontWeight = FontWeight.Medium)
+                                    }
                                 }
                             }
                         }
@@ -749,6 +953,7 @@ private fun TaskList(
     innerPadding: androidx.compose.foundation.layout.PaddingValues,
     onTaskClick: (TaskItem) -> Unit,
     taskSharedModifier: @Composable (String) -> Modifier,
+    modifier: Modifier = Modifier,
 ) {
     val listState = rememberLazyListState()
     val reorderableItems = remember { mutableStateListOf<FlatTaskItem>() }
@@ -855,7 +1060,7 @@ private fun TaskList(
     }
 
     LazyColumn(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxSize()
             .padding(innerPadding)
             .padding(horizontal = 16.dp),
@@ -1326,4 +1531,213 @@ private fun SelectionTopBar(
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
     )
+}
+
+/**
+ * 分组标签栏 —— 在选中清单后，显示该清单下的所有分组标签。
+ * 水平滚动，支持切换分组筛选、新建分组、长按删除分组。
+ *
+ * @param groups 当前清单下的分组列表
+ * @param activeGroupId 当前选中的分组 ID，null 表示"全部"
+ * @param onGroupSelected 点击分组标签时触发，传入分组 ID 或 null
+ * @param onCreateGroup 点击"+"按钮时触发，传入新分组名称
+ * @param onDeleteGroup 长按分组标签时触发，传入要删除的分组 ID
+ */
+@Composable
+private fun GroupTabBar(
+    groups: List<GroupItem>,
+    activeGroupId: String?,
+    onGroupSelected: (String?) -> Unit,
+    onCreateGroup: (String) -> Unit,
+    onDeleteGroup: (String) -> Unit,
+) {
+    // 新建分组的输入状态：true=显示输入框，false=隐藏
+    var showCreateInput by remember { mutableStateOf(false) }
+    // 新建分组的名称文本
+    var newGroupName by remember { mutableStateOf("") }
+    // 输入框焦点控制
+    val focusRequester = remember { FocusRequester() }
+    // 长按触发的删除确认对话框
+    var showDeleteDialogForId by remember { mutableStateOf<String?>(null) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(MaterialTheme.colorScheme.surfaceContainerLow)
+            .padding(horizontal = 16.dp, vertical = 4.dp),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // "全部"标签 —— activeGroupId = null 时选中
+            GroupTabChip(
+                label = "全部",
+                isSelected = activeGroupId == null,
+                onClick = { onGroupSelected(null) },
+                onLongClick = null,
+            )
+            // 各分组标签
+            for (group in groups) {
+                GroupTabChip(
+                    label = group.name,
+                    isSelected = activeGroupId == group.id,
+                    onClick = { onGroupSelected(group.id) },
+                    onLongClick = { showDeleteDialogForId = group.id },
+                    color = group.color,
+                )
+            }
+            // "+"按钮 —— 点击后展开输入框
+            if (!showCreateInput) {
+                IconButton(
+                    onClick = { showCreateInput = true; newGroupName = "" },
+                    modifier = Modifier.size(32.dp),
+                ) {
+                    Icon(
+                        Icons.Default.AddCircleOutline,
+                        contentDescription = "新建分组",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+        }
+
+        // 新建分组输入框 —— 展开在标签栏下方
+        if (showCreateInput) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                OutlinedTextField(
+                    value = newGroupName,
+                    onValueChange = { newGroupName = it },
+                    placeholder = { Text("分组名称") },
+                    singleLine = true,
+                    modifier = Modifier
+                        .weight(1f)
+                        .focusRequester(focusRequester),
+                    textStyle = MaterialTheme.typography.bodyMedium,
+                )
+                TextButton(
+                    onClick = {
+                        if (newGroupName.isNotBlank()) {
+                            onCreateGroup(newGroupName.trim())
+                            newGroupName = ""
+                            showCreateInput = false
+                        }
+                    },
+                ) {
+                    Text("确定")
+                }
+                TextButton(
+                    onClick = { showCreateInput = false; newGroupName = "" },
+                ) {
+                    Text("取消")
+                }
+            }
+            // 自动聚焦输入框
+            LaunchedEffect(showCreateInput) {
+                if (showCreateInput) {
+                    focusRequester.requestFocus()
+                }
+            }
+        }
+    }
+
+    // 删除分组确认对话框
+    showDeleteDialogForId?.let { groupId ->
+        val groupName = groups.find { it.id == groupId }?.name ?: ""
+        AlertDialog(
+            onDismissRequest = { showDeleteDialogForId = null },
+            title = { Text("删除分组") },
+            text = { Text("确定删除分组「$groupName」吗？组内任务不会被删除，将移至未分组。") },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteGroup(groupId)
+                        showDeleteDialogForId = null
+                    },
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error,
+                    ),
+                ) {
+                    Text("删除")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialogForId = null }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+}
+
+/**
+ * 分组标签胶囊 —— 单个可点击的分组标签。
+ *
+ * @param label 显示文本
+ * @param isSelected 是否选中（高亮样式）
+ * @param onClick 点击回调
+ * @param onLongClick 长按回调（用于触发删除），null 表示不支持长按
+ * @param color 可选的颜色标识（如"#FF5722"）
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun GroupTabChip(
+    label: String,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: (() -> Unit)?,
+    color: String? = null,
+) {
+    // 尝试解析分组颜色，失败则使用主题色
+    val chipColor = remember(color) {
+        try {
+            if (color != null) android.graphics.Color.parseColor(color)
+            else null
+        } catch (_: Exception) { null }
+    }
+    val backgroundColor = if (isSelected) {
+        chipColor?.let { Color(it) } ?: MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.surfaceVariant
+    }
+    val contentColor = if (isSelected) {
+        // 简单判断亮暗色：选择白色或深色文字
+        chipColor?.let { c ->
+            val r = android.graphics.Color.red(c)
+            val g = android.graphics.Color.green(c)
+            val b = android.graphics.Color.blue(c)
+            if (r * 0.299 + g * 0.587 + b * 0.114 > 186) Color.Black else Color.White
+        } ?: MaterialTheme.colorScheme.onPrimary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    Surface(
+        modifier = Modifier
+            .then(
+                if (onLongClick != null) Modifier.combinedClickable(
+                    onClick = onClick,
+                    onLongClick = onLongClick,
+                ) else Modifier.clickable(onClick = onClick)
+            ),
+        shape = RoundedCornerShape(20.dp),
+        color = backgroundColor,
+        contentColor = contentColor,
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            style = MaterialTheme.typography.labelLarge,
+        )
+    }
 }

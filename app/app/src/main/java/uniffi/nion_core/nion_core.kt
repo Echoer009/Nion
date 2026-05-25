@@ -640,13 +640,19 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_checklist(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_create_group(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_task(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_delete_checklist(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_delete_group(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_delete_task(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_checklists(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_get_groups_by_checklist(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_setting(
     ): Short
@@ -660,13 +666,19 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_reorder_checklists(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_reorder_groups(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_reorder_tasks(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_set_setting(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_update_checklist_name(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_update_group(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_update_task(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_update_task_group(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_update_task_parent(
     ): Short
@@ -691,151 +703,163 @@ internal object UniffiLib {
         
     }
     external fun uniffi_nion_core_fn_clone_nioncore(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Long
-    external fun uniffi_nion_core_fn_free_nioncore(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Unit
-    external fun uniffi_nion_core_fn_constructor_nioncore_new(`dbPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): Long
-    external fun uniffi_nion_core_fn_method_nioncore_add_focus_time(`ptr`: Long,`taskId`: RustBuffer.ByValue,`seconds`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Unit
-    external fun uniffi_nion_core_fn_method_nioncore_create_checklist(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun uniffi_nion_core_fn_method_nioncore_create_task(`ptr`: Long,`title`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`dueDate`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun uniffi_nion_core_fn_method_nioncore_delete_checklist(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): Byte
-    external fun uniffi_nion_core_fn_method_nioncore_delete_task(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): Byte
-    external fun uniffi_nion_core_fn_method_nioncore_get_checklists(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun uniffi_nion_core_fn_method_nioncore_get_setting(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun uniffi_nion_core_fn_method_nioncore_get_subtasks(`ptr`: Long,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun uniffi_nion_core_fn_method_nioncore_get_task(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun uniffi_nion_core_fn_method_nioncore_get_tasks(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun uniffi_nion_core_fn_method_nioncore_get_tasks_by_category(`ptr`: Long,`categoryId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun uniffi_nion_core_fn_method_nioncore_reorder_checklists(`ptr`: Long,`orderedIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): Unit
-    external fun uniffi_nion_core_fn_method_nioncore_reorder_tasks(`ptr`: Long,`orderedIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): Unit
-    external fun uniffi_nion_core_fn_method_nioncore_set_setting(`ptr`: Long,`key`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): Unit
-    external fun uniffi_nion_core_fn_method_nioncore_update_checklist_name(`ptr`: Long,`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun uniffi_nion_core_fn_method_nioncore_update_task(`ptr`: Long,`id`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`status`: RustBuffer.ByValue,`dueDate`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`reminder`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun uniffi_nion_core_fn_method_nioncore_update_task_parent(`ptr`: Long,`taskId`: RustBuffer.ByValue,`newParentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): Unit
-    external fun ffi_nion_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun ffi_nion_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun ffi_nion_core_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-    ): Unit
-    external fun ffi_nion_core_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun ffi_nion_core_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_cancel_u8(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_free_u8(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Byte
-    external fun ffi_nion_core_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_cancel_i8(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_free_i8(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Byte
-    external fun ffi_nion_core_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_cancel_u16(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_free_u16(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Short
-    external fun ffi_nion_core_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_cancel_i16(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_free_i16(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Short
-    external fun ffi_nion_core_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_cancel_u32(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_free_u32(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Int
-    external fun ffi_nion_core_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_cancel_i32(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_free_i32(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Int
-    external fun ffi_nion_core_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_cancel_u64(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_free_u64(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Long
-    external fun ffi_nion_core_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_cancel_i64(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_free_i64(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Long
-    external fun ffi_nion_core_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_cancel_f32(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_free_f32(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Float
-    external fun ffi_nion_core_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_cancel_f64(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_free_f64(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Double
-    external fun ffi_nion_core_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_cancel_rust_buffer(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_free_rust_buffer(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): RustBuffer.ByValue
-    external fun ffi_nion_core_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_cancel_void(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_free_void(`handle`: Long,
-    ): Unit
-    external fun ffi_nion_core_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
-    ): Unit
+): Long
+external fun uniffi_nion_core_fn_free_nioncore(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_nion_core_fn_constructor_nioncore_new(`dbPath`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun uniffi_nion_core_fn_method_nioncore_add_focus_time(`ptr`: Long,`taskId`: RustBuffer.ByValue,`seconds`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_nion_core_fn_method_nioncore_create_checklist(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_create_group(`ptr`: Long,`name`: RustBuffer.ByValue,`checklistId`: RustBuffer.ByValue,`color`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_create_task(`ptr`: Long,`title`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`dueDate`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_delete_checklist(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_nion_core_fn_method_nioncore_delete_group(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_nion_core_fn_method_nioncore_delete_task(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_nion_core_fn_method_nioncore_get_checklists(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_groups_by_checklist(`ptr`: Long,`checklistId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_setting(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_subtasks(`ptr`: Long,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_task(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_tasks(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_tasks_by_category(`ptr`: Long,`categoryId`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_reorder_checklists(`ptr`: Long,`orderedIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_nion_core_fn_method_nioncore_reorder_groups(`ptr`: Long,`orderedIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_nion_core_fn_method_nioncore_reorder_tasks(`ptr`: Long,`orderedIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_nion_core_fn_method_nioncore_set_setting(`ptr`: Long,`key`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_nion_core_fn_method_nioncore_update_checklist_name(`ptr`: Long,`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_update_group(`ptr`: Long,`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`color`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_update_task(`ptr`: Long,`id`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`status`: RustBuffer.ByValue,`dueDate`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`reminder`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_update_task_group(`ptr`: Long,`taskId`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_nion_core_fn_method_nioncore_update_task_parent(`ptr`: Long,`taskId`: RustBuffer.ByValue,`newParentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun ffi_nion_core_rustbuffer_alloc(`size`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun ffi_nion_core_rustbuffer_from_bytes(`bytes`: ForeignBytes.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun ffi_nion_core_rustbuffer_free(`buf`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun ffi_nion_core_rustbuffer_reserve(`buf`: RustBuffer.ByValue,`additional`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun ffi_nion_core_rust_future_poll_u8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_cancel_u8(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_free_u8(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_complete_u8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun ffi_nion_core_rust_future_poll_i8(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_cancel_i8(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_free_i8(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_complete_i8(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun ffi_nion_core_rust_future_poll_u16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_cancel_u16(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_free_u16(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_complete_u16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Short
+external fun ffi_nion_core_rust_future_poll_i16(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_cancel_i16(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_free_i16(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_complete_i16(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Short
+external fun ffi_nion_core_rust_future_poll_u32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_cancel_u32(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_free_u32(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_complete_u32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Int
+external fun ffi_nion_core_rust_future_poll_i32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_cancel_i32(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_free_i32(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_complete_i32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Int
+external fun ffi_nion_core_rust_future_poll_u64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_cancel_u64(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_free_u64(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_complete_u64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun ffi_nion_core_rust_future_poll_i64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_cancel_i64(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_free_i64(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_complete_i64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Long
+external fun ffi_nion_core_rust_future_poll_f32(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_cancel_f32(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_free_f32(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_complete_f32(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Float
+external fun ffi_nion_core_rust_future_poll_f64(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_cancel_f64(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_free_f64(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_complete_f64(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Double
+external fun ffi_nion_core_rust_future_poll_rust_buffer(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_cancel_rust_buffer(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_free_rust_buffer(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_complete_rust_buffer(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun ffi_nion_core_rust_future_poll_void(`handle`: Long,`callback`: UniffiRustFutureContinuationCallback,`callbackData`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_cancel_void(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_free_void(`handle`: Long,
+): Unit
+external fun ffi_nion_core_rust_future_complete_void(`handle`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 
-        
+    
 }
 
 private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
@@ -855,16 +879,25 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_create_checklist() != 24825.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_nion_core_checksum_method_nioncore_create_task() != 28000.toShort()) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_create_group() != 45929.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_create_task() != 43001.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_delete_checklist() != 38463.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_delete_group() != 55541.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_delete_task() != 53518.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_checklists() != 18608.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_groups_by_checklist() != 13216.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_setting() != 36220.toShort()) {
@@ -879,10 +912,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_tasks() != 7846.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_nion_core_checksum_method_nioncore_get_tasks_by_category() != 58905.toShort()) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_tasks_by_category() != 40304.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_reorder_checklists() != 62700.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_reorder_groups() != 11232.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_reorder_tasks() != 60691.toShort()) {
@@ -894,7 +930,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_update_checklist_name() != 4118.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_nion_core_checksum_method_nioncore_update_task() != 50352.toShort()) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_update_group() != 36991.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_update_task() != 29798.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_update_task_group() != 346.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_update_task_parent() != 21109.toShort()) {
@@ -1058,6 +1100,29 @@ private class JavaLangRefCleanable(
     val cleanable: java.lang.ref.Cleaner.Cleanable
 ) : UniffiCleaner.Cleanable {
     override fun clean() = cleanable.clean()
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterInt: FfiConverter<Int, Int> {
+    override fun lift(value: Int): Int {
+        return value
+    }
+
+    override fun read(buf: ByteBuffer): Int {
+        return buf.getInt()
+    }
+
+    override fun lower(value: Int): Int {
+        return value
+    }
+
+    override fun allocationSize(value: Int) = 4UL
+
+    override fun write(value: Int, buf: ByteBuffer) {
+        buf.putInt(value)
+    }
 }
 
 /**
@@ -1268,13 +1333,28 @@ public interface NionCoreInterface {
     
     fun `createChecklist`(`name`: kotlin.String): ChecklistData
     
-    fun `createTask`(`title`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `dueDate`: kotlin.String?, `categoryId`: kotlin.String?, `parentId`: kotlin.String?): TaskData
+    /**
+     * 创建分组：在指定清单下新建一个分组（如"语文"、"英语"）
+     */
+    fun `createGroup`(`name`: kotlin.String, `checklistId`: kotlin.String, `color`: kotlin.String?): GroupData
+    
+    fun `createTask`(`title`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `dueDate`: kotlin.String?, `categoryId`: kotlin.String?, `parentId`: kotlin.String?, `groupId`: kotlin.String?): TaskData
     
     fun `deleteChecklist`(`id`: kotlin.String): kotlin.Boolean
+    
+    /**
+     * 删除分组：不删除组内任务，仅将组内任务的 group_id 置空
+     */
+    fun `deleteGroup`(`id`: kotlin.String): kotlin.Boolean
     
     fun `deleteTask`(`id`: kotlin.String): kotlin.Boolean
     
     fun `getChecklists`(): List<ChecklistData>
+    
+    /**
+     * 获取指定清单下的所有分组，按 sort_order 排序
+     */
+    fun `getGroupsByChecklist`(`checklistId`: kotlin.String): List<GroupData>
     
     fun `getSetting`(`key`: kotlin.String): kotlin.String?
     
@@ -1287,9 +1367,18 @@ public interface NionCoreInterface {
     
     fun `getTasks`(): List<TaskData>
     
-    fun `getTasksByCategory`(`categoryId`: kotlin.String?): List<TaskData>
+    /**
+     * 获取指定清单（和可选分组）下的顶层任务（parent_id IS NULL）
+     * group_id = None 时不按分组过滤，返回该清单下所有未分组的顶层任务
+     */
+    fun `getTasksByCategory`(`categoryId`: kotlin.String?, `groupId`: kotlin.String?): List<TaskData>
     
     fun `reorderChecklists`(`orderedIds`: List<kotlin.String>)
+    
+    /**
+     * 重排分组顺序，ordered_ids 为期望的新顺序
+     */
+    fun `reorderGroups`(`orderedIds`: List<kotlin.String>)
     
     fun `reorderTasks`(`orderedIds`: List<kotlin.String>)
     
@@ -1300,7 +1389,17 @@ public interface NionCoreInterface {
      */
     fun `updateChecklistName`(`id`: kotlin.String, `name`: kotlin.String): ChecklistData
     
-    fun `updateTask`(`id`: kotlin.String, `title`: kotlin.String?, `description`: kotlin.String?, `priority`: kotlin.String?, `status`: kotlin.String?, `dueDate`: kotlin.String?, `categoryId`: kotlin.String?, `reminder`: kotlin.String?): TaskData
+    /**
+     * 修改分组名称和颜色
+     */
+    fun `updateGroup`(`id`: kotlin.String, `name`: kotlin.String, `color`: kotlin.String?): GroupData
+    
+    fun `updateTask`(`id`: kotlin.String, `title`: kotlin.String?, `description`: kotlin.String?, `priority`: kotlin.String?, `status`: kotlin.String?, `dueDate`: kotlin.String?, `categoryId`: kotlin.String?, `reminder`: kotlin.String?, `groupId`: kotlin.String?): TaskData
+    
+    /**
+     * 更新任务的分组归属：将任务移到指定分组，或移出分组（group_id = None）
+     */
+    fun `updateTaskGroup`(`taskId`: kotlin.String, `groupId`: kotlin.String?)
     
     /**
      * 更新任务的父任务 ID（用于拖拽改变层级关系）
@@ -1446,13 +1545,30 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
 
     
-    @Throws(NionException::class)override fun `createTask`(`title`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `dueDate`: kotlin.String?, `categoryId`: kotlin.String?, `parentId`: kotlin.String?): TaskData {
+    /**
+     * 创建分组：在指定清单下新建一个分组（如"语文"、"英语"）
+     */
+    @Throws(NionException::class)override fun `createGroup`(`name`: kotlin.String, `checklistId`: kotlin.String, `color`: kotlin.String?): GroupData {
+            return FfiConverterTypeGroupData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_create_group(
+        it,
+        FfiConverterString.lower(`name`),FfiConverterString.lower(`checklistId`),FfiConverterOptionalString.lower(`color`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(NionException::class)override fun `createTask`(`title`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `dueDate`: kotlin.String?, `categoryId`: kotlin.String?, `parentId`: kotlin.String?, `groupId`: kotlin.String?): TaskData {
             return FfiConverterTypeTaskData.lift(
     callWithHandle {
     uniffiRustCallWithError(NionException) { _status ->
     UniffiLib.uniffi_nion_core_fn_method_nioncore_create_task(
         it,
-        FfiConverterString.lower(`title`),FfiConverterOptionalString.lower(`description`),FfiConverterString.lower(`priority`),FfiConverterOptionalString.lower(`dueDate`),FfiConverterOptionalString.lower(`categoryId`),FfiConverterOptionalString.lower(`parentId`),_status)
+        FfiConverterString.lower(`title`),FfiConverterOptionalString.lower(`description`),FfiConverterString.lower(`priority`),FfiConverterOptionalString.lower(`dueDate`),FfiConverterOptionalString.lower(`categoryId`),FfiConverterOptionalString.lower(`parentId`),FfiConverterOptionalString.lower(`groupId`),_status)
 }
     }
     )
@@ -1465,6 +1581,23 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     callWithHandle {
     uniffiRustCallWithError(NionException) { _status ->
     UniffiLib.uniffi_nion_core_fn_method_nioncore_delete_checklist(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 删除分组：不删除组内任务，仅将组内任务的 group_id 置空
+     */
+    @Throws(NionException::class)override fun `deleteGroup`(`id`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_delete_group(
         it,
         FfiConverterString.lower(`id`),_status)
 }
@@ -1495,6 +1628,23 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     UniffiLib.uniffi_nion_core_fn_method_nioncore_get_checklists(
         it,
         _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 获取指定清单下的所有分组，按 sort_order 排序
+     */
+    @Throws(NionException::class)override fun `getGroupsByChecklist`(`checklistId`: kotlin.String): List<GroupData> {
+            return FfiConverterSequenceTypeGroupData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_get_groups_by_checklist(
+        it,
+        FfiConverterString.lower(`checklistId`),_status)
 }
     }
     )
@@ -1561,13 +1711,17 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
 
     
-    @Throws(NionException::class)override fun `getTasksByCategory`(`categoryId`: kotlin.String?): List<TaskData> {
+    /**
+     * 获取指定清单（和可选分组）下的顶层任务（parent_id IS NULL）
+     * group_id = None 时不按分组过滤，返回该清单下所有未分组的顶层任务
+     */
+    @Throws(NionException::class)override fun `getTasksByCategory`(`categoryId`: kotlin.String?, `groupId`: kotlin.String?): List<TaskData> {
             return FfiConverterSequenceTypeTaskData.lift(
     callWithHandle {
     uniffiRustCallWithError(NionException) { _status ->
     UniffiLib.uniffi_nion_core_fn_method_nioncore_get_tasks_by_category(
         it,
-        FfiConverterOptionalString.lower(`categoryId`),_status)
+        FfiConverterOptionalString.lower(`categoryId`),FfiConverterOptionalString.lower(`groupId`),_status)
 }
     }
     )
@@ -1580,6 +1734,22 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     callWithHandle {
     uniffiRustCallWithError(NionException) { _status ->
     UniffiLib.uniffi_nion_core_fn_method_nioncore_reorder_checklists(
+        it,
+        FfiConverterSequenceString.lower(`orderedIds`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * 重排分组顺序，ordered_ids 为期望的新顺序
+     */
+    @Throws(NionException::class)override fun `reorderGroups`(`orderedIds`: List<kotlin.String>)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_reorder_groups(
         it,
         FfiConverterSequenceString.lower(`orderedIds`),_status)
 }
@@ -1631,17 +1801,50 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
 
     
-    @Throws(NionException::class)override fun `updateTask`(`id`: kotlin.String, `title`: kotlin.String?, `description`: kotlin.String?, `priority`: kotlin.String?, `status`: kotlin.String?, `dueDate`: kotlin.String?, `categoryId`: kotlin.String?, `reminder`: kotlin.String?): TaskData {
+    /**
+     * 修改分组名称和颜色
+     */
+    @Throws(NionException::class)override fun `updateGroup`(`id`: kotlin.String, `name`: kotlin.String, `color`: kotlin.String?): GroupData {
+            return FfiConverterTypeGroupData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_update_group(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterString.lower(`name`),FfiConverterOptionalString.lower(`color`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    @Throws(NionException::class)override fun `updateTask`(`id`: kotlin.String, `title`: kotlin.String?, `description`: kotlin.String?, `priority`: kotlin.String?, `status`: kotlin.String?, `dueDate`: kotlin.String?, `categoryId`: kotlin.String?, `reminder`: kotlin.String?, `groupId`: kotlin.String?): TaskData {
             return FfiConverterTypeTaskData.lift(
     callWithHandle {
     uniffiRustCallWithError(NionException) { _status ->
     UniffiLib.uniffi_nion_core_fn_method_nioncore_update_task(
         it,
-        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`title`),FfiConverterOptionalString.lower(`description`),FfiConverterOptionalString.lower(`priority`),FfiConverterOptionalString.lower(`status`),FfiConverterOptionalString.lower(`dueDate`),FfiConverterOptionalString.lower(`categoryId`),FfiConverterOptionalString.lower(`reminder`),_status)
+        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`title`),FfiConverterOptionalString.lower(`description`),FfiConverterOptionalString.lower(`priority`),FfiConverterOptionalString.lower(`status`),FfiConverterOptionalString.lower(`dueDate`),FfiConverterOptionalString.lower(`categoryId`),FfiConverterOptionalString.lower(`reminder`),FfiConverterOptionalString.lower(`groupId`),_status)
 }
     }
     )
     }
+    
+
+    
+    /**
+     * 更新任务的分组归属：将任务移到指定分组，或移出分组（group_id = None）
+     */
+    @Throws(NionException::class)override fun `updateTaskGroup`(`taskId`: kotlin.String, `groupId`: kotlin.String?)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_update_task_group(
+        it,
+        FfiConverterString.lower(`taskId`),FfiConverterOptionalString.lower(`groupId`),_status)
+}
+    }
+    
     
 
     
@@ -1744,6 +1947,67 @@ public object FfiConverterTypeChecklistData: FfiConverterRustBuffer<ChecklistDat
 
 
 
+/**
+ * 任务分组 —— 清单下的二级分类，例如"学习清单"下的"语文"、"英语"
+ */
+data class GroupData (
+    var `id`: kotlin.String
+    , 
+    var `name`: kotlin.String
+    , 
+    var `checklistId`: kotlin.String
+    , 
+    var `color`: kotlin.String?
+    , 
+    var `sortOrder`: kotlin.Int
+    , 
+    var `createdAt`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeGroupData: FfiConverterRustBuffer<GroupData> {
+    override fun read(buf: ByteBuffer): GroupData {
+        return GroupData(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterOptionalString.read(buf),
+            FfiConverterInt.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: GroupData) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`checklistId`) +
+            FfiConverterOptionalString.allocationSize(value.`color`) +
+            FfiConverterInt.allocationSize(value.`sortOrder`) +
+            FfiConverterString.allocationSize(value.`createdAt`)
+    )
+
+    override fun write(value: GroupData, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`checklistId`, buf)
+            FfiConverterOptionalString.write(value.`color`, buf)
+            FfiConverterInt.write(value.`sortOrder`, buf)
+            FfiConverterString.write(value.`createdAt`, buf)
+    }
+}
+
+
+
 data class TaskData (
     var `id`: kotlin.String
     , 
@@ -1762,6 +2026,8 @@ data class TaskData (
     var `parentId`: kotlin.String?
     , 
     var `categoryId`: kotlin.String?
+    , 
+    var `groupId`: kotlin.String?
     , 
     var `createdAt`: kotlin.String
     , 
@@ -1795,6 +2061,7 @@ public object FfiConverterTypeTaskData: FfiConverterRustBuffer<TaskData> {
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterOptionalString.read(buf),
@@ -1812,6 +2079,7 @@ public object FfiConverterTypeTaskData: FfiConverterRustBuffer<TaskData> {
             FfiConverterOptionalString.allocationSize(value.`reminder`) +
             FfiConverterOptionalString.allocationSize(value.`parentId`) +
             FfiConverterOptionalString.allocationSize(value.`categoryId`) +
+            FfiConverterOptionalString.allocationSize(value.`groupId`) +
             FfiConverterString.allocationSize(value.`createdAt`) +
             FfiConverterString.allocationSize(value.`updatedAt`) +
             FfiConverterOptionalString.allocationSize(value.`completedAt`) +
@@ -1828,6 +2096,7 @@ public object FfiConverterTypeTaskData: FfiConverterRustBuffer<TaskData> {
             FfiConverterOptionalString.write(value.`reminder`, buf)
             FfiConverterOptionalString.write(value.`parentId`, buf)
             FfiConverterOptionalString.write(value.`categoryId`, buf)
+            FfiConverterOptionalString.write(value.`groupId`, buf)
             FfiConverterString.write(value.`createdAt`, buf)
             FfiConverterString.write(value.`updatedAt`, buf)
             FfiConverterOptionalString.write(value.`completedAt`, buf)
@@ -2023,6 +2292,34 @@ public object FfiConverterSequenceTypeChecklistData: FfiConverterRustBuffer<List
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeChecklistData.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeGroupData: FfiConverterRustBuffer<List<GroupData>> {
+    override fun read(buf: ByteBuffer): List<GroupData> {
+        val len = buf.getInt()
+        return List<GroupData>(len) {
+            FfiConverterTypeGroupData.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<GroupData>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeGroupData.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<GroupData>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeGroupData.write(it, buf)
         }
     }
 }

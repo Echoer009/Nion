@@ -48,6 +48,11 @@ object ToolRegistry {
         CreateChecklistTool,
         UpdateChecklistNameTool,
         DeleteChecklistTool,
+        // ── 分组工具 ──
+        GetGroupsTool,
+        CreateGroupTool,
+        UpdateGroupTool,
+        DeleteGroupTool,
     )
 
     /** 按名称索引的查找表，O(1) 查询 */
