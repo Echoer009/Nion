@@ -91,12 +91,13 @@ class ToolExecutor(
 
     /**
      * 判断工具名称对应的数据变更类型。
-     * 工具执行成功后调用 [onDataChanged] 通知 UI 层。
+     * 统一工具通过 entity_type 参数判断，但工具粒度层面：
+     * - query：只读操作，无需通知
+     * - create/update/delete/move：统一通知 checklists（涵盖清单、分组、任务变更）
      */
     private fun dataTypeForTool(name: String): String = when (name) {
-        "get_tasks", "get_task", "get_subtasks" -> "" // 只读操作，无需通知
-        "get_checklists" -> ""
-        else -> if (name.contains("task")) "tasks" else "checklists"
+        "query" -> "" // 只读操作，无需通知
+        else -> "checklists" // 写操作统一通知 UI 刷新
     }
 
     /**

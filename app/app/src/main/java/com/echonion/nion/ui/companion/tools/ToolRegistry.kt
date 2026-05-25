@@ -7,9 +7,12 @@ import org.json.JSONObject
  * 工具注册中心 —— 自动加载并管理所有 Agent 可用工具。
  *
  * 设计原则：
- * - **自动加载**：新增工具只需在 [all] 列表中添加一项，整个框架自动处理
- *   Schema 生成、参数校验、执行路由，无需修改其他文件
- * - **模块化**：每个工具是独立的 object，互不依赖
+ * - **统一接口**：5 个工具按操作维度划分，entity_type 作为路由键
+ *   - query：查询（合并原 6 个 get_* 工具）
+ *   - create：创建（合并原 create_task / create_checklist / create_group）
+ *   - update：更新（合并原 update_task / update_checklist_name / update_group）
+ *   - delete：删除（合并原 delete_task / delete_checklist / delete_group）
+ *   - move：移动（新增，保留专注时长等数据）
  * - **多格式适配**：自动将内部 Schema 转换为 OpenAI 和 Anthropic 的 tools 格式
  *
  * 使用方式：
@@ -18,41 +21,21 @@ import org.json.JSONObject
  * val tools = ToolRegistry.toOpenAITools()
  *
  * // 根据名称查找工具
- * val tool = ToolRegistry.get("create_task")
+ * val tool = ToolRegistry.get("query")
  * ```
  */
 object ToolRegistry {
 
     /**
      * 所有已注册的工具列表。
-     *
-     * 新增工具只需在此列表末尾添加一个元素，例如：
-     * ```
-     * all = listOf(
-     *     GetTasksTool,
-     *     CreateTaskTool,
-     *     YourNewTool,  // <-- 新增一行即可
-     * )
-     * ```
+     * 5 个工具按 CRUD + Move 维度划分，每个工具通过 entity_type 参数路由到具体实体。
      */
     val all: List<Tool> = listOf(
-        // ── 任务工具 ──
-        GetTasksTool,
-        GetTaskTool,
-        CreateTaskTool,
-        UpdateTaskTool,
-        DeleteTaskTool,
-        GetSubtasksTool,
-        // ── 清单工具 ──
-        GetChecklistsTool,
-        CreateChecklistTool,
-        UpdateChecklistNameTool,
-        DeleteChecklistTool,
-        // ── 分组工具 ──
-        GetGroupsTool,
-        CreateGroupTool,
-        UpdateGroupTool,
-        DeleteGroupTool,
+        QueryTool,
+        CreateTool,
+        UpdateTool,
+        DeleteTool,
+        MoveTool,
     )
 
     /** 按名称索引的查找表，O(1) 查询 */
@@ -61,7 +44,7 @@ object ToolRegistry {
     /**
      * 根据工具名称查找已注册的工具。
      *
-     * @param name 工具名称（如 "create_task"）
+     * @param name 工具名称（如 "query"、"create"）
      * @return 对应的 [Tool] 实例，未找到则返回 null
      */
     fun get(name: String): Tool? = index[name]
@@ -75,8 +58,8 @@ object ToolRegistry {
      *   {
      *     "type": "function",
      *     "function": {
-     *       "name": "create_task",
-     *       "description": "创建一个新任务",
+     *       "name": "query",
+     *       "description": "查询数据...",
      *       "parameters": { ... JSON Schema ... }
      *     }
      *   }
@@ -105,8 +88,8 @@ object ToolRegistry {
      * ```json
      * [
      *   {
-     *     "name": "create_task",
-     *     "description": "创建一个新任务",
+     *     "name": "query",
+     *     "description": "查询数据...",
      *     "input_schema": { ... JSON Schema ... }
      *   }
      * ]
