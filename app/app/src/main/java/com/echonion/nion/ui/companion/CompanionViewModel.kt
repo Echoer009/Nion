@@ -84,6 +84,25 @@ class CompanionViewModel(
     /** 输入框当前文本 */
     var inputText by mutableStateOf("")
 
+    /** 面板关闭时保存的滚动位置（firstVisibleItemIndex），用于面板重新打开时恢复 */
+    var savedScrollIndex by mutableStateOf(0)
+        private set
+
+    /** 面板关闭时保存的滚动偏移（firstVisibleItemScrollOffset），配合 savedScrollIndex 精确恢复 */
+    var savedScrollOffset by mutableStateOf(0)
+        private set
+
+    /** 面板关闭时记录的消息数量，用于判断面板打开时是否有新消息需要滚到底部 */
+    var lastSeenMessageCount by mutableStateOf(0)
+        private set
+
+    /** 保存当前滚动位置和消息数量，面板关闭时调用 */
+    fun saveScrollPosition(index: Int, offset: Int, messageCount: Int) {
+        savedScrollIndex = index
+        savedScrollOffset = offset
+        lastSeenMessageCount = messageCount
+    }
+
     /** 当前已配置的 Provider，null 表示尚未配置 API key */
     var currentProvider by mutableStateOf<ProviderConfig?>(null)
         private set

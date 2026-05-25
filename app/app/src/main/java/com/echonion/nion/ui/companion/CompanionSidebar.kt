@@ -1,17 +1,14 @@
 package com.echonion.nion.ui.companion
 
 import android.util.Log
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.ContentTransform
-import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.scaleIn
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -57,6 +54,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -160,40 +158,77 @@ fun CompanionSidebar(
         color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 2.dp,
     ) {
-        when (actualMode) {
-            "profile" -> ProfileContent(
-                viewModel = viewModel,
-                onBack = { panelMode = null },
-            )
-            "setup" -> SetupContent(
-                viewModel = viewModel,
-                onBack = if (hasConfigured) { { panelMode = null } } else null,
-                onAvatarClick = onAvatarClick,
-            )
-            "history" -> HistoryPanel(
-                messages = viewModel.loadArchivedChat(),
-                onClose = { panelMode = null },
-            )
-            "switch" -> SwitchProviderPanel(
-                configs = viewModel.savedConfigs,
-                activeConfigId = viewModel.savedConfigs.find {
-                    it.provider == viewModel.currentProvider?.name && it.model == viewModel.modelName
-                }?.id,
-                onSelect = { configId ->
-                    viewModel.switchToConfig(configId)
-                    panelMode = null
-                },
-                onDelete = { configId -> viewModel.deleteConfig(configId) },
-                onAddNew = { panelMode = "setup" },
-                onClose = { panelMode = null },
-            )
-            else -> ChatContent(
-                viewModel = viewModel,
-                isVisible = isVisible,
-                onAvatarClick = onAvatarClick,
-                onHistoryClick = { panelMode = "history" },
-                onSwitchClick = { panelMode = "switch" },
-            )
+        // Box 叠放所有面板，AnimatedVisibility 在树中常驻，动画状态机正确触发
+        Box(Modifier.fillMaxSize()) {
+            // 主区域：聊天 / 设置 / 编辑 —— 从面板返回时从顶部展开
+            val isMainVisible = actualMode != "history" && actualMode != "switch"
+            AnimatedVisibility(
+                visible = isMainVisible,
+                enter = fadeIn(tween(250, easing = FastOutSlowInEasing)) +
+                    expandVertically(expandFrom = Alignment.Top, animationSpec = tween(300)) +
+                    scaleIn(initialScale = 0.95f, animationSpec = tween(300, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(200, easing = FastOutSlowInEasing)),
+            ) {
+                // 主区域内即时切换，不包动画
+                when (actualMode) {
+                    "profile" -> ProfileContent(
+                        viewModel = viewModel,
+                        onBack = { panelMode = null },
+                    )
+                    "setup" -> SetupContent(
+                        viewModel = viewModel,
+                        // 设置页只能从切换面板进入，返回按钮始终回到切换面板
+                        onBack = if (hasConfigured) { { panelMode = "switch" } } else null,
+                        onAvatarClick = onAvatarClick,
+                    )
+                    else -> ChatContent(
+                        viewModel = viewModel,
+                        isVisible = isVisible,
+                        onAvatarClick = onAvatarClick,
+                        onHistoryClick = { panelMode = "history" },
+                        onSwitchClick = { panelMode = "switch" },
+                    )
+                }
+            }
+
+            // 历史面板：从顶部向下展开 + 淡入 + 轻微缩放
+            AnimatedVisibility(
+                visible = actualMode == "history",
+                enter = fadeIn(tween(250, easing = FastOutSlowInEasing))
+                    + expandVertically(expandFrom = Alignment.Top, animationSpec = tween(300))
+                    + scaleIn(initialScale = 0.95f, animationSpec = tween(300, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(250, easing = FastOutSlowInEasing))
+                    + shrinkVertically(shrinkTowards = Alignment.Top, animationSpec = tween(300)),
+            ) {
+                HistoryPanel(
+                    messages = viewModel.loadArchivedChat(),
+                    onClose = { panelMode = null },
+                )
+            }
+
+            // 切换面板：从顶部向下展开 + 淡入 + 轻微缩放
+            AnimatedVisibility(
+                visible = actualMode == "switch",
+                enter = fadeIn(tween(250, easing = FastOutSlowInEasing))
+                    + expandVertically(expandFrom = Alignment.Top, animationSpec = tween(300))
+                    + scaleIn(initialScale = 0.95f, animationSpec = tween(300, easing = FastOutSlowInEasing)),
+                exit = fadeOut(tween(250, easing = FastOutSlowInEasing))
+                    + shrinkVertically(shrinkTowards = Alignment.Top, animationSpec = tween(300)),
+            ) {
+                SwitchProviderPanel(
+                    configs = viewModel.savedConfigs,
+                    activeConfigId = viewModel.savedConfigs.find {
+                        it.provider == viewModel.currentProvider?.name && it.model == viewModel.modelName
+                    }?.id,
+                    onSelect = { configId ->
+                        viewModel.switchToConfig(configId)
+                        panelMode = null
+                    },
+                    onDelete = { configId -> viewModel.deleteConfig(configId) },
+                    onAddNew = { panelMode = "setup" },
+                    onClose = { panelMode = null },
+                )
+            }
         }
     }
 }
@@ -455,21 +490,48 @@ private fun ChatContent(
     onHistoryClick: () -> Unit,
     onSwitchClick: () -> Unit,
 ) {
-    val listState = rememberLazyListState()
+    // 用 ViewModel 保存的滚动位置初始化 LazyListState
+    // 当面板因打开左侧清单被移出组合再重新进入时，自动恢复到上次位置
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = viewModel.savedScrollIndex,
+        initialFirstVisibleItemScrollOffset = viewModel.savedScrollOffset,
+    )
     val messages = viewModel.messages
     val inputText = viewModel.inputText
     val isLoading = viewModel.isLoading
     val streamingText = viewModel.streamingAssistantText
     val streamingTimestamp = viewModel.streamingMessageTimestamp
 
-    // 面板打开时自动滚动到底部（最新消息）
-    LaunchedEffect(isVisible, messages.size, streamingText) {
-        if (isVisible) {
-            // 有流式文本时，item 数量 = 消息数 + 1（流式气泡），滚动到那个位置
-            val targetIndex = if (!streamingText.isNullOrEmpty()) messages.size + 1 else messages.size
-            if (targetIndex > 0) {
-                listState.animateScrollToItem(targetIndex)
+    // 面板被移出组合时保存滚动位置（打开左侧清单、切换子面板等场景）
+    // DisposableEffect.onDispose 在 composable 被移除时必定调用，比 LaunchedEffect 更可靠
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.saveScrollPosition(
+                listState.firstVisibleItemIndex,
+                listState.firstVisibleItemScrollOffset,
+                messages.size,
+            )
+        }
+    }
+
+    // 面板打开时：如果面板关闭期间有新消息，滚到最底部；否则位置已由 rememberLazyListState 恢复
+    LaunchedEffect(isVisible) {
+        if (isVisible && messages.isNotEmpty()) {
+            val hasNewMessages = messages.size > viewModel.lastSeenMessageCount
+            if (hasNewMessages) {
+                // 有新消息 → 滚到最后一个 item（底部 Spacer），确保看到最底部
+                val lastIndex = listState.layoutInfo.totalItemsCount - 1
+                listState.scrollToItem(lastIndex)
             }
+        }
+    }
+
+    // 新消息到达时自动滚动到底部（仅面板打开时）
+    // 只在 messages.size 变化时触发，不监听 streamingText（避免流式输出时和手指滑动打架）
+    // 用户发消息或 AI 回复完成后，无条件滚到底部
+    LaunchedEffect(messages.size) {
+        if (messages.size > 0 && isVisible) {
+            listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
         }
     }
 
