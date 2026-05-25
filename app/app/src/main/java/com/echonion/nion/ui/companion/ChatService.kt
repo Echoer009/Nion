@@ -200,9 +200,9 @@ object ChatService {
      *
      * 工具调用在流式中的增量格式：
      * ```
-     * data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_xxx","type":"function","function":{"name":"get_tasks","arguments":""}}]}}]}
-     * data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"check"}}]}}]}
-     * data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"list_id\":\"abc\"}"}}]}}]}
+     * data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"id":"call_xxx","type":"function","function":{"name":"query","arguments":""}}]}}]}
+     * data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\"enti"}}]}}]}
+     * data: {"choices":[{"index":0,"delta":{"tool_calls":[{"index":0,"function":{"arguments":"ty_type\":\"task\"}"}}]}}]}
      * ```
      *
      * 工具调用的 id/name 出现在第一个 chunk 中，arguments 分散在后续 chunk 中。

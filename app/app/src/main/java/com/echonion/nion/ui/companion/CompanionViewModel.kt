@@ -13,10 +13,14 @@ import androidx.lifecycle.viewmodel.CreationExtras
 import com.echonion.nion.NionApp
 import com.echonion.nion.core
 import com.echonion.nion.ui.companion.tools.ToolExecutor
+import com.echonion.nion.ui.companion.tools.ToolResult
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.nion_core.NionCore
+import uniffi.nion_core.ConversationData
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -77,6 +81,13 @@ class CompanionViewModel(
     var streamingAssistantText by mutableStateOf<String?>(null)
         private set
 
+    /** 流式输出的节流显示文本（~80ms 更新一次），避免每 token 触发 Markdown 全量重解析 */
+    var displayedStreamingText by mutableStateOf<String?>(null)
+        private set
+
+    /** 流式节流信号通道 —— CONFLATED 确保高频 token 到来时只保留最新信号 */
+    private val streamingThrottleChannel = Channel<Unit>(Channel.CONFLATED)
+
     /** 流式消息的时间戳 */
     var streamingMessageTimestamp by mutableStateOf("")
         private set
@@ -90,6 +101,10 @@ class CompanionViewModel(
 
     /** 面板关闭时保存的滚动偏移（firstVisibleItemScrollOffset），配合 savedScrollIndex 精确恢复 */
     var savedScrollOffset by mutableStateOf(0)
+        private set
+
+    /** 工具执行状态描述文本（如"正在创建任务..."），null 表示非工具执行阶段 */
+    var toolExecutionStatus by mutableStateOf<String?>(null)
         private set
 
     /** 面板关闭时记录的消息数量，用于判断面板打开时是否有新消息需要滚到底部 */
@@ -127,12 +142,24 @@ class CompanionViewModel(
     var companionPrompt by mutableStateOf("")
         private set
 
+    /** 用户自定义回复要求，追加在系统提示词之后，可从编辑页修改 */
+    var replyRules by mutableStateOf("")
+        private set
+
     /** 伙伴头像 URI，从系统图片选择器选取后保存，null 表示使用默认首字母头像 */
     var companionAvatarUri by mutableStateOf<String?>(null)
         private set
 
     /** 已保存的多组 Provider 配置，支持在它们之间切换 */
     var savedConfigs by mutableStateOf<List<SavedConfig>>(emptyList())
+        private set
+
+    /** 当前活跃的对话 ID，null 表示新对话尚未保存到数据库 */
+    var currentConversationId by mutableStateOf<String?>(null)
+        private set
+
+    /** 对话历史列表（不含完整消息），供给历史面板展示 */
+    var conversationList by mutableStateOf<List<ConversationData>>(emptyList())
         private set
 
     /**
@@ -162,21 +189,46 @@ class CompanionViewModel(
     private val defaultCompanionPrompt = """
 你是 Nion，一个温暖友好的 AI 伴侣，同时也是用户的私人任务管理助手。
 
-你的核心能力：
-- 管理任务：创建、查看、修改、删除任务和子任务
-- 管理清单：创建、查看、重命名、删除任务清单
-- 设置优先级、截止日期、提醒等任务属性
+你有 5 个工具可用：
+1. query：查询任务、清单、分组数据
+2. create：创建任务、清单、分组
+3. update：更新任务属性（标题/优先级/状态等）、清单名称、分组名称/颜色
+4. delete：删除任务、清单、分组
+5. move：移动任务到其他清单/分组，移动分组到其他清单（保留专注时长等数据）
 
 行为准则：
 - 主动但不过度：当用户提到任务相关的事情时，主动使用工具帮忙
 - 自然对话：不是每次都要调用工具，闲聊时正常回复即可
-- 确认重要操作：删除任务等不可逆操作前，先向用户确认
+- 确认重要操作：删除等不可逆操作前，先向用户确认
+- 移动优先：用户要移动任务/分组时，用 move 工具而非删除+重建，避免丢失专注时长
 - 用中文回复，语气温暖简洁
+
+回复格式要求：
+- 不要用 emoji
+- 展示任务层级结构时，使用树形格式（不要用代码块包裹）：
+  ├─ 任务名 [状态]
+  │  ├─ 子任务名 [状态]
+  │  └─ 子任务名 [状态]
+  └─ 任务名 [状态]
+  缩进规则：每级用 "│  "（竖线+两个空格）表示延续，分支用 ├─ 和 └─
+- 展示简单列表时用 Markdown 无序列表（- 开头）
+- 展示数据对比时用 Markdown 表格（| 列 | 格式）
     """.trimIndent()
 
     init {
         loadSettings()
         loadChatMessages()
+        loadConversationList()
+        // 流式文本显示节流：每 ~80ms 才更新一次 UI，避免每次 token 触发 Markdown O(n²) 重解析
+        viewModelScope.launch {
+            var lastDisplay = 0L
+            for (signal in streamingThrottleChannel) {
+                val elapsed = System.currentTimeMillis() - lastDisplay
+                if (elapsed < 80L) delay(80L - elapsed)
+                displayedStreamingText = streamingAssistantText
+                lastDisplay = System.currentTimeMillis()
+            }
+        }
     }
 
     /**
@@ -247,6 +299,10 @@ class CompanionViewModel(
             } else {
                 defaultCompanionPrompt
             }
+            val savedRules = core.getSetting("companion_reply_rules")
+            if (!savedRules.isNullOrEmpty()) {
+                replyRules = savedRules
+            }
         } catch (_: Exception) {
             companionPrompt = defaultCompanionPrompt
         }
@@ -297,7 +353,9 @@ class CompanionViewModel(
     }
 
     /**
-     * 将当前消息列表序列化为 JSON 并持久化到 Rust settings 的 chat_history 键。
+     * 将当前消息列表序列化为 JSON 并持久化。
+     * 如果 currentConversationId 存在则保存到 chat_conversations 表，
+     * 否则保存到 settings 的 chat_history 键（向后兼容）。
      * 每次消息变更（发送/接收/清空）后调用。
      */
     private fun saveChatMessages() {
@@ -309,81 +367,158 @@ class CompanionViewModel(
                     put("text", msg.text)
                     put("isFromUser", msg.isFromUser)
                     put("timestamp", msg.timestamp)
+                    put("isToolMessage", msg.isToolMessage)
+                    put("toolDone", msg.toolDone)
                 })
             }
-            core.setSetting("chat_history", jsonArr.toString())
+            val jsonStr = jsonArr.toString()
+            // 将 conversationHistory 序列化为 JSON 数组字符串
+            val apiHistoryStr = JSONArray(conversationHistory.map { it.toString() }).toString()
+            val convId = currentConversationId
+            if (convId != null) {
+                val title = generateConversationTitle()
+                core.saveConversation(convId, title, jsonStr, apiHistoryStr)
+            } else {
+                core.setSetting("chat_history", jsonStr)
+            }
         } catch (_: Exception) {}
     }
 
     /**
-     * 从 Rust settings 的 chat_history 键加载持久化的消息列表。
-     * 在 init 中调用，恢复上次会话的消息。
+     * 加载聊天消息。
+     * 优先从 settings 中的 current_conversation_id 恢复上次活跃对话，
+     * 否则从旧版 chat_history settings 键加载。
      */
     private fun loadChatMessages() {
         try {
+            val convId = core.getSetting("current_conversation_id")
+            if (!convId.isNullOrEmpty()) {
+                val conv = core.getConversation(convId)
+                currentConversationId = conv.id
+                messages = parseMessagesJson(conv.messages)
+                // 恢复 API 层对话上下文
+                conversationHistory.clear()
+                val apiHistoryStr = conv.apiHistory
+                if (apiHistoryStr.isNotEmpty() && apiHistoryStr != "[]") {
+                    val arr = JSONArray(apiHistoryStr)
+                    for (i in 0 until arr.length()) {
+                        conversationHistory.add(JSONObject(arr.getString(i)))
+                    }
+                }
+                return
+            }
             val json = core.getSetting("chat_history")
             if (!json.isNullOrEmpty()) {
-                val jsonArr = JSONArray(json)
-                val loaded = mutableListOf<ChatMessage>()
-                for (i in 0 until jsonArr.length()) {
-                    val obj = jsonArr.getJSONObject(i)
-                    loaded.add(ChatMessage(
-                        id = obj.getString("id"),
-                        text = obj.getString("text"),
-                        isFromUser = obj.getBoolean("isFromUser"),
-                        timestamp = obj.getString("timestamp"),
-                    ))
-                }
-                messages = loaded
+                messages = parseMessagesJson(json)
             }
-        } catch (_: Exception) {}
+        } catch (_: Exception) {
+            currentConversationId = null
+        }
     }
 
     /**
-     * 将当前消息列表归档到 Rust settings 的 chat_history_archive 键。
-     * 清空前调用，归档的消息可在历史面板中查看。
+     * 从 JSON 字符串解析消息列表。
      */
-    private fun archiveCurrentChat() {
-        if (messages.isEmpty()) return
-        try {
-            val jsonArr = JSONArray()
-            for (msg in messages) {
-                jsonArr.put(JSONObject().apply {
-                    put("id", msg.id)
-                    put("text", msg.text)
-                    put("isFromUser", msg.isFromUser)
-                    put("timestamp", msg.timestamp)
-                })
-            }
-            core.setSetting("chat_history_archive", jsonArr.toString())
-        } catch (_: Exception) {}
+    private fun parseMessagesJson(json: String): List<ChatMessage> {
+        val jsonArr = JSONArray(json)
+        val loaded = mutableListOf<ChatMessage>()
+        for (i in 0 until jsonArr.length()) {
+            val obj = jsonArr.getJSONObject(i)
+            loaded.add(ChatMessage(
+                id = obj.getString("id"),
+                text = obj.getString("text"),
+                isFromUser = obj.getBoolean("isFromUser"),
+                timestamp = obj.getString("timestamp"),
+                isToolMessage = obj.optBoolean("isToolMessage", false),
+                toolDone = obj.optBoolean("toolDone", false),
+            ))
+        }
+        return loaded
     }
 
     /**
-     * 从 Rust settings 的 chat_history_archive 键加载归档的消息列表，
-     * 供给历史面板展示（只读）。
+     * 根据消息内容生成对话标题：取第一条用户消息的前 30 字符。
+     */
+    private fun generateConversationTitle(): String {
+        val firstUserMsg = messages.firstOrNull { it.isFromUser }
+        return if (firstUserMsg != null) {
+            val text = firstUserMsg.text.trim()
+            if (text.length > 30) text.take(30) + "..." else text
+        } else {
+            "新对话"
+        }
+    }
+
+    /**
+     * 加载对话历史列表（不含完整消息），供给历史面板展示。
+     */
+    fun loadConversationList() {
+        try {
+            conversationList = core.getConversations()
+        } catch (_: Exception) {
+            conversationList = emptyList()
+        }
+    }
+
+    /**
+     * 开始新对话 —— 将当前对话保存到历史，然后清空消息开始全新对话。
+     * 如果当前对话为空则不做任何操作。
+     */
+    fun startNewConversation() {
+        // 保存当前对话到数据库
+        if (messages.isNotEmpty()) {
+            saveChatMessages()
+        }
+        // 清空状态，开始新对话
+        currentConversationId = null
+        messages = emptyList()
+        conversationHistory.clear()
+        saveChatMessages()
+    }
+
+    /**
+     * 恢复历史对话 —— 从数据库加载指定对话的消息，设为当前活跃对话。
      *
-     * @return 归档的消息列表，无归档时返回空列表
+     * @param id 要恢复的对话 ID
      */
-    fun loadArchivedChat(): List<ChatMessage> {
+    fun loadConversation(id: String) {
         try {
-            val json = core.getSetting("chat_history_archive")
-            if (!json.isNullOrEmpty()) {
-                val jsonArr = JSONArray(json)
-                val loaded = mutableListOf<ChatMessage>()
-                for (i in 0 until jsonArr.length()) {
-                    val obj = jsonArr.getJSONObject(i)
-                    loaded.add(ChatMessage(
-                        id = obj.getString("id"),
-                        text = obj.getString("text"),
-                        isFromUser = obj.getBoolean("isFromUser"),
-                        timestamp = obj.getString("timestamp"),
-                    ))
-                }
-                return loaded
+            if (messages.isNotEmpty()) {
+                saveChatMessages()
             }
+            val conv = core.getConversation(id)
+            currentConversationId = conv.id
+            messages = parseMessagesJson(conv.messages)
+            // 从持久化的 api_history 恢复 API 层对话上下文
+            conversationHistory.clear()
+            val apiHistoryStr = conv.apiHistory
+            if (apiHistoryStr.isNotEmpty() && apiHistoryStr != "[]") {
+                val arr = JSONArray(apiHistoryStr)
+                for (i in 0 until arr.length()) {
+                    conversationHistory.add(JSONObject(arr.getString(i)))
+                }
+            }
+            core.setSetting("current_conversation_id", id)
         } catch (_: Exception) {}
-        return emptyList()
+    }
+
+    /**
+     * 删除历史对话。
+     *
+     * @param id 要删除的对话 ID
+     */
+    fun deleteConversation(id: String) {
+        try {
+            core.deleteConversation(id)
+            // 如果删除的是当前对话，清空状态
+            if (currentConversationId == id) {
+                currentConversationId = null
+                messages = emptyList()
+                conversationHistory.clear()
+                core.setSetting("current_conversation_id", "")
+            }
+            loadConversationList()
+        } catch (_: Exception) {}
     }
 
     /**
@@ -508,6 +643,17 @@ class CompanionViewModel(
     }
 
     /**
+     * 更新用户自定义回复要求，同时持久化到 Rust 层 settings 表。
+     * 回复要求会追加在系统提示词之后发给 LLM。
+     *
+     * @param rules 新的回复要求文本
+     */
+    fun updateReplyRules(rules: String) {
+        replyRules = rules
+        try { core.setSetting("companion_reply_rules", rules) } catch (_: Exception) {}
+    }
+
+    /**
      * 更新伙伴头像 URI，同时持久化到 Rust 层 settings 表。
      * 传入 null 表示清除头像，恢复默认首字母头像。
      *
@@ -529,15 +675,20 @@ class CompanionViewModel(
      * 用于"切换 provider"或"重置设置"场景。
      */
     fun clearApiConfig() {
-        archiveCurrentChat() // 清空前归档当前消息
+        // 保存当前对话到历史
+        if (messages.isNotEmpty()) {
+            saveChatMessages()
+        }
         apiKey = null
         modelName = null
         currentProvider = null
+        currentConversationId = null
         messages = emptyList()
         conversationHistory.clear()
         saveChatMessages()
         try {
             core.setSetting("llm_api_key", "")
+            core.setSetting("current_conversation_id", "")
         } catch (_: Exception) {
         }
     }
@@ -573,6 +724,15 @@ class CompanionViewModel(
         messages = messages + userMessage
         inputText = ""
         isLoading = true
+
+        // 首次发送消息时分配对话 ID，后续消息自动关联
+        if (currentConversationId == null) {
+            currentConversationId = UUID.randomUUID().toString()
+            try {
+                core.setSetting("current_conversation_id", currentConversationId!!)
+            } catch (_: Exception) {}
+        }
+
         saveChatMessages()
 
         // 将用户消息追加到 API 对话历史
@@ -604,6 +764,111 @@ class CompanionViewModel(
      * @param apiKey   API 密钥
      * @param model    模型名称
      */
+    /**
+     * 将工具名 + 参数转换为中文状态描述，供 UI 在工具执行期间显示。
+     * 例如："create" + entity_type="task" → "正在创建任务..."
+     */
+    private fun toolDisplayName(toolName: String, argumentsJson: String): String {
+        val entityLabel = try {
+            val args = JSONObject(argumentsJson)
+            when (args.optString("entity_type", "")) {
+                "task" -> "任务"
+                "checklist" -> "清单"
+                "group" -> "分组"
+                else -> null
+            }
+        } catch (_: Exception) { null }
+
+        val suffix = if (entityLabel != null) "${entityLabel}..." else "..."
+        return when (toolName) {
+            "query" -> "正在查询$suffix"
+            "create" -> "正在创建$suffix"
+            "update" -> "正在更新$suffix"
+            "delete" -> "正在删除$suffix"
+            "move" -> "正在移动$suffix"
+            else -> "正在执行操作..."
+        }
+    }
+
+    /**
+     * 在聊天消息列表中插入一条工具执行状态消息（永久保留）。
+     * @param toolCallId 工具调用 ID，用于后续更新
+     * @param text 显示文本，如"正在创建任务..."
+     */
+    private fun appendToolStatusMessage(toolCallId: String, text: String) {
+        messages = messages + ChatMessage(
+            id = "tool_$toolCallId",
+            text = text,
+            isFromUser = false,
+            timestamp = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")),
+            isToolMessage = true,
+        )
+    }
+
+    /**
+     * 更新已有的工具状态消息文本（执行完成后改为结果描述）。
+     * @param toolCallId 工具调用 ID
+     * @param text 新的状态文本
+     */
+    private fun updateToolStatusMessage(toolCallId: String, text: String) {
+        val msgId = "tool_$toolCallId"
+        messages = messages.map { if (it.id == msgId) it.copy(text = text, toolDone = true) else it }
+    }
+
+    /**
+     * 根据工具执行结果生成简短的中文完成描述。
+     * 从 JSON 结果中提取关键数量信息（如"已创建"、"已删除"、"查询到 N 条"）。
+     */
+    private fun toolResultText(toolName: String, argumentsJson: String, result: ToolResult): String {
+        if (!result.success) return "操作失败"
+        return try {
+            val resultJson = JSONObject(result.data)
+            val entityType = try {
+                JSONObject(argumentsJson).optString("entity_type", "")
+            } catch (_: Exception) { "" }
+            val entityLabel = when (entityType) {
+                "task" -> "任务"
+                "checklist" -> "清单"
+                "group" -> "分组"
+                else -> ""
+            }
+            when (toolName) {
+                "query" -> {
+                    // 从结果 JSON 中统计返回的数据条数
+                    val count = if (resultJson.has("checklists")) resultJson.getJSONArray("checklists").length()
+                        else if (resultJson.has("groups")) resultJson.getJSONArray("groups").length()
+                        else if (resultJson.has("tasks")) resultJson.getJSONArray("tasks").length()
+                        else 0
+                    "已查询到 $count 条$entityLabel"
+                }
+                "create" -> {
+                    val name = resultJson.optJSONObject(entityType)?.optString("name", "")
+                        ?: resultJson.optString("name", "")
+                    if (name.isNotEmpty()) "已创建${entityLabel}「$name」"
+                    else "已创建$entityLabel"
+                }
+                "update" -> "已更新$entityLabel"
+                "delete" -> {
+                    val name = resultJson.optJSONObject(entityType)?.optString("name", "")
+                        ?: resultJson.optString("name", "")
+                    if (name.isNotEmpty()) "已删除${entityLabel}「$name」"
+                    else "已删除$entityLabel"
+                }
+                "move" -> "已移动$entityLabel"
+                else -> "操作完成"
+            }
+        } catch (_: Exception) {
+            when (toolName) {
+                "query" -> "查询完成"
+                "create" -> "创建完成"
+                "update" -> "更新完成"
+                "delete" -> "删除完成"
+                "move" -> "移动完成"
+                else -> "操作完成"
+            }
+        }
+    }
+
     private suspend fun runAgentLoop(provider: ProviderConfig, apiKey: String, model: String) {
         var iteration = 0
 
@@ -618,6 +883,7 @@ class CompanionViewModel(
             val timestamp = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
             streamingMessageTimestamp = timestamp
             streamingAssistantText = ""
+            displayedStreamingText = ""
 
             // 发送流式 SSE 请求，onTextDelta 在 IO 线程被调用（mutableState 是线程安全的）
             val result = ChatService.chatStream(
@@ -626,8 +892,10 @@ class CompanionViewModel(
                 model = model,
                 messages = apiMessages,
                 onTextDelta = { delta ->
-                    // 每次收到文本增量时累积到流式状态，UI 自动刷新
+                    // 每次收到文本增量时累积到流式状态
                     streamingAssistantText = (streamingAssistantText ?: "") + delta
+                    // 通知节流协程有新文本到达（CONFLATED 自动丢弃积压信号）
+                    streamingThrottleChannel.trySend(Unit)
                 },
             )
 
@@ -635,6 +903,8 @@ class CompanionViewModel(
                 val err = result.exceptionOrNull()?.message ?: "unknown"
                 Log.e(TAG, "API 失败: $err")
                 streamingAssistantText = null // 清除流式残留
+                displayedStreamingText = null
+                toolExecutionStatus = null
                 appendAssistantMessage("抱歉，出了点问题：$err")
                 break
             }
@@ -650,6 +920,7 @@ class CompanionViewModel(
                     appendAssistantMessage(streamedText, reasoningContent = response.reasoningContent)
                 }
                 streamingAssistantText = null // 清除流式状态，准备下一轮迭代
+                displayedStreamingText = null
 
                 // 追加 assistant tool_calls 到对话历史（含 reasoning_content）
                 appendAssistantToolCallsMessage(response.toolCalls, response.reasoningContent)
@@ -657,10 +928,21 @@ class CompanionViewModel(
                 // 逐个执行工具，结果回传对话历史
                 for (call in response.toolCalls) {
                     Log.d(TAG, "Executing tool: ${call.name} args=${call.arguments.take(200)}")
+                    // 在对话中插入一条持久的工具状态消息，让用户看到伙伴在做什么
+                    val statusText = toolDisplayName(call.name, call.arguments)
+                    toolExecutionStatus = statusText
+                    appendToolStatusMessage(call.id, statusText)
+
                     val toolResult = toolExecutor.execute(call.name, call.arguments)
                     Log.d(TAG, "Tool result: success=${toolResult.success} data=${toolResult.data.take(200)}")
+
+                    // 工具执行完成，更新状态消息为结果描述
+                    val resultText = toolResultText(call.name, call.arguments, toolResult)
+                    updateToolStatusMessage(call.id, resultText)
                     appendToolResultMessage(call.id, toolResult.data)
                 }
+                // 工具执行完毕，清除状态描述
+                toolExecutionStatus = null
 
                 // 继续循环，让 LLM 根据工具结果生成下一步响应
                 continue
@@ -678,11 +960,13 @@ class CompanionViewModel(
                 appendAssistantMessage("（${companionName} 没有回复内容）")
             }
             streamingAssistantText = null
+            displayedStreamingText = null
             break
         }
 
         // 确保迭代结束时流式状态被清除（防止残留的 loading 状态）
         streamingAssistantText = null
+        displayedStreamingText = null
 
         // 达到最大迭代次数，安全退出
         if (iteration >= maxAgentIterations) {
@@ -792,9 +1076,17 @@ class CompanionViewModel(
         val apiMessages = mutableListOf<JSONObject>()
 
         // 系统提示词：注入当前时间，让 LLM 理解时间上下文
+        // 若有用户自定义回复要求，追加在末尾
+        val content = buildString {
+            append(companionPrompt)
+            append("\n\n当前时间：${java.time.LocalDateTime.now()}")
+            if (replyRules.isNotBlank()) {
+                append("\n\n---\n用户回复要求：\n$replyRules")
+            }
+        }
         apiMessages.add(JSONObject().apply {
             put("role", "system")
-            put("content", "$companionPrompt\n\n当前时间：${java.time.LocalDateTime.now()}")
+            put("content", content)
         })
 
         // 追加完整的对话历史（包含工具调用和结果）

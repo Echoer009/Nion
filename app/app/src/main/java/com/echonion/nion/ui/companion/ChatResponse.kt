@@ -33,7 +33,7 @@ data class ChatResponse(
  * 执行完工具后，需要将结果与此 ID 关联回传给 LLM。
  *
  * @property id        工具调用的唯一标识符（如 "call_abc123" 或 "toolu_xyz789"）
- * @property name      要调用的工具名称（如 "create_task"）
+ * @property name      要调用的工具名称（如 "query"、"create"）
  * @property arguments 工具参数的 JSON 字符串（如 `{"title":"买菜","priority":"high"}`）
  */
 data class ToolCall(
