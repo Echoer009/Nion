@@ -1,6 +1,8 @@
 package com.echonion.nion.ui.task
 
 import androidx.compose.ui.graphics.Color
+import java.time.LocalDate
+import java.time.format.DateTimeFormatter
 
 /** 根据优先级字符串返回对应的颜色：高=红，中=橙，低=灰蓝 */
 val String.priorityColor: Color
@@ -17,3 +19,25 @@ val String.priorityLabel: String
         "medium" -> "中"
         else -> "低"
     }
+
+/** ISO 日期字符串（如 "2026-06-01"）格式化为中文显示（如 "6月1日 周一"） */
+fun String?.formatDueDate(): String? {
+    if (this.isNullOrBlank()) return null
+    return try {
+        val date = LocalDate.parse(this, DateTimeFormatter.ISO_LOCAL_DATE)
+        val weekDays = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+        "${date.monthValue}月${date.dayOfMonth}日 ${weekDays[date.dayOfWeek.value - 1]}"
+    } catch (_: Exception) {
+        null
+    }
+}
+
+/** 判断截止日期是否已逾期（早于今天） */
+fun String?.isOverdue(): Boolean {
+    if (this.isNullOrBlank()) return false
+    return try {
+        LocalDate.parse(this, DateTimeFormatter.ISO_LOCAL_DATE) < LocalDate.now()
+    } catch (_: Exception) {
+        false
+    }
+}
