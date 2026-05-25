@@ -75,7 +75,10 @@ if [[ "$(uname)" == Linux ]]; then
 fi
 
 # 验证设备已连接
-DEVICE_COUNT=$("$ADB" devices 2>/dev/null | grep -v 'List of devices' | grep -v '^$' | grep -c . || true)
+DEVICE_OUTPUT=$("$ADB" devices 2>/dev/null)
+# 只统计状态为 "device" 的项（排除 unauthorized、offline 等非 Android 设备）
+DEVICE_LIST=$(echo "$DEVICE_OUTPUT" | grep -E '[[:space:]]+device$' | awk '{print $1}')
+DEVICE_COUNT=$(echo "$DEVICE_LIST" | grep -c . || true)
 if [ "$DEVICE_COUNT" -eq 0 ]; then
     fail "未检测到设备"
     echo "  请检查："
@@ -84,7 +87,12 @@ if [ "$DEVICE_COUNT" -eq 0 ]; then
     echo "    3. 手机上已允许 USB 调试授权弹窗"
     exit 1
 fi
-ok "设备已连接"
+# 多设备时取第一个真机（跳过 emulator）
+TARGET_DEVICE=$(echo "$DEVICE_LIST" | grep -v 'emulator' | head -1)
+if [ -z "$TARGET_DEVICE" ]; then
+    TARGET_DEVICE=$(echo "$DEVICE_LIST" | head -1)
+fi
+ok "设备已连接 ($DEVICE_COUNT 台, 目标: $TARGET_DEVICE)"
 
 # ---------- 2. 构建 APK ----------
 step 2/$TOTAL_STEPS "构建 APK"
@@ -101,19 +109,25 @@ ok "构建完成 ($APK_SIZE)"
 # ---------- 3. 安装并启动 ----------
 step 3/$TOTAL_STEPS "安装到手机"
 
+# 构建 adb 目标参数（多设备时需要 -s 指定）
+ADB_TARGET=()
+if [ "$DEVICE_COUNT" -gt 1 ]; then
+    ADB_TARGET=(-s "$TARGET_DEVICE")
+fi
+
 # 先 force-stop 防止旧 session 导致 install 卡死
-"$ADB" shell am force-stop "$PACKAGE" 2>/dev/null || true
+"$ADB" "${ADB_TARGET[@]}" shell am force-stop "$PACKAGE" 2>/dev/null || true
 
 # 安装 APK，超时 60 秒
-if ! timeout 60 "$ADB" install -r "$APK_PATH" 2>&1 | grep -q "Success"; then
+if ! timeout 60 "$ADB" "${ADB_TARGET[@]}" install -r "$APK_PATH" 2>&1 | grep -q "Success"; then
     # 重试一次：kill-server 后重新连接
     warn "首次安装失败，重试中..."
     "$ADB" kill-server 2>/dev/null || true
     sleep 1
     "$ADB" start-server 2>/dev/null || true
     sleep 2
-    "$ADB" shell am force-stop "$PACKAGE" 2>/dev/null || true
-    if ! timeout 60 "$ADB" install -r "$APK_PATH" 2>&1 | grep -q "Success"; then
+    "$ADB" "${ADB_TARGET[@]}" shell am force-stop "$PACKAGE" 2>/dev/null || true
+    if ! timeout 60 "$ADB" "${ADB_TARGET[@]}" install -r "$APK_PATH" 2>&1 | grep -q "Success"; then
         fail "安装失败，请手动检查"
         exit 1
     fi
@@ -121,7 +135,7 @@ fi
 ok "安装完成"
 
 # 启动应用
-"$ADB" shell am start -n "$ACTIVITY" >/dev/null 2>&1
+"$ADB" "${ADB_TARGET[@]}" shell am start -n "$ACTIVITY" >/dev/null 2>&1
 ok "应用已启动"
 
 echo ""

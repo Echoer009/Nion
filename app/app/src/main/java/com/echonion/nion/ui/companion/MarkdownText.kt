@@ -49,7 +49,6 @@ private const val TAG = "MarkdownText"
  * - 无序列表：`- ` / `* `、有序列表：`1. `
  * - 任务列表：`- [ ]` / `- [x]`（带勾选框样式）
  * - 引用块：`> text`（左侧竖线 + 缩进）
- * - 树形结构：`├──` `│` `└──` box-drawing 字符（转为缩进层级列表）
  * - 表格：`| 列1 | 列2 |` 格式，表头加粗 + 分隔线
  * - 水平分割线：`---` / `***` / `___`
  * - 段落：连续非空行自动合并
@@ -90,7 +89,6 @@ fun MarkdownText(
                 is MdBlock.ListBlock -> ListBlockBlock(block, style, textColor)
                 is MdBlock.TaskListBlock -> TaskListBlockBlock(block, style, textColor)
                 is MdBlock.Blockquote -> BlockquoteBlock(block, style, textColor)
-                is MdBlock.TreeBlock -> TreeBlockBlock(block, style, textColor)
                 is MdBlock.TableBlock -> TableBlockBlock(block, style, textColor)
                 is MdBlock.Paragraph -> ParagraphBlock(block, style, textColor)
                 is MdBlock.HorizontalRule -> HorizontalRuleBlock()
@@ -128,12 +126,6 @@ private sealed class MdBlock {
      */
     data class Blockquote(val lines: List<String>) : MdBlock()
 
-    /**
-     * 树形结构块：items 每项含 depth（层级深度，0=根）和 text（内容）。
-     * 来源于 AI 使用 `├──` `│` `└──` box-drawing 字符构建的树形列表。
-     */
-    data class TreeBlock(val items: List<TreeItem>) : MdBlock()
-
     data class TableBlock(
         val header: List<String>,
         val alignments: List<String>,
@@ -153,110 +145,6 @@ private sealed class MdBlock {
  */
 data class TaskItem(val checked: Boolean, val text: String)
 
-/**
- * 树形结构条目 —— 对应 AI 使用 box-drawing 字符构建的层级列表。
- * @param depth 层级深度，0 = 顶层节点
- * @param text  节点文本（已去除 ├── │ └── 等前缀符号）
- */
-data class TreeItem(val depth: Int, val text: String)
-
-// ──────────── 树形结构检测 ────────────
-
-/** box-drawing 分支字符集，用于检测树形结构行 */
-private val TREE_CHARS = setOf('\u2502', '\u250C', '\u251C', '\u2514', '\u2500')
-// \u2502 = │, \u250C = ┌, \u251C = ├, \u2514 = └, \u2500 = ─
-
-/**
- * 判断一行是否为树形结构的行。
- * 条件：行首（跳过前导空格后）以 ├── │ 或 └── 开头。
- */
-private fun isTreeLine(line: String): Boolean {
-    val trimmed = line.trimStart()
-    if (trimmed.isEmpty()) return false
-    return trimmed.first() in TREE_CHARS
-}
-
-/**
- * 从一行树形文本中提取层级深度和内容文本。
- *
- * 解析规则：
- * - 每个 `│  `（│ + 2空格）或 `   `（3空格）算一级缩进（3字符一组）
- * - `├─ ` 或 `└─ ` 后面的部分为节点文本（单横线）
- * - 也兼容双横线 `├── ` / `└── `
- *
- * @param line 原始行文本
- * @return TreeItem(depth, text) 或 null（如果不是合法的树形节点行）
- */
-private fun parseTreeLine(line: String): TreeItem? {
-    val trimmed = line.trimEnd()
-    if (trimmed.isEmpty()) return null
-
-    var depth = 0
-    var pos = 0
-
-    // 统计前导缩进：每 3 字符（│ + 2空格 或 3空格）为一级
-    while (pos + 3 <= trimmed.length) {
-        val seg = trimmed.substring(pos, pos + 3)
-        if (seg == "\u2502  " || seg == "   ") {
-            depth++
-            pos += 3
-        } else {
-            break
-        }
-    }
-
-    // 跳过分支前缀（兼容单横线 └─ 和双横线 └──），提取文本内容
-    val rest = trimmed.substring(pos)
-    val content = when {
-        // 单横线：├─ 或 └─（后跟空格或直接结尾）
-        rest.startsWith("\u251C\u2500 ") -> rest.removePrefix("\u251C\u2500 ")
-        rest.startsWith("\u2514\u2500 ") -> rest.removePrefix("\u2514\u2500 ")
-        rest.startsWith("\u250C\u2500 ") -> rest.removePrefix("\u250C\u2500 ")
-        // 双横线：├── 或 └──（后跟空格或直接结尾）
-        rest.startsWith("\u251C\u2500\u2500 ") -> rest.removePrefix("\u251C\u2500\u2500 ")
-        rest.startsWith("\u2514\u2500\u2500 ") -> rest.removePrefix("\u2514\u2500\u2500 ")
-        rest.startsWith("\u250C\u2500\u2500 ") -> rest.removePrefix("\u250C\u2500\u2500 ")
-        // 无尾部空格
-        rest.startsWith("\u251C\u2500") -> rest.removePrefix("\u251C\u2500")
-        rest.startsWith("\u2514\u2500") -> rest.removePrefix("\u2514\u2500")
-        rest.startsWith("\u250C\u2500") -> rest.removePrefix("\u250C\u2500")
-        rest.startsWith("\u251C\u2500\u2500") -> rest.removePrefix("\u251C\u2500\u2500")
-        rest.startsWith("\u2514\u2500\u2500") -> rest.removePrefix("\u2514\u2500\u2500")
-        rest.startsWith("\u250C\u2500\u2500") -> rest.removePrefix("\u250C\u2500\u2500")
-        else -> rest
-    }
-
-    return TreeItem(depth = depth, text = content.trim())
-}
-
-/**
- * 判断一段代码文本是否实际上是一个树形结构。
- * 条件：超过一半的非空行以树形字符（├ └ │）或列表标记开头。
- */
-private fun isTreeContent(code: String): Boolean {
-    val lines = code.lines().filter { it.isNotBlank() }
-    if (lines.isEmpty()) return false
-    val treeLines = lines.count { line ->
-        val trimmed = line.trimStart()
-        trimmed.firstOrNull() in TREE_CHARS
-    }
-    // 超过一半的行是树形行，就认为是树形结构
-    return treeLines >= (lines.size * 0.4).toInt().coerceAtLeast(1)
-}
-
-/**
- * 从代码文本中解析出树形结构条目列表。
- * 逐行调用 parseTreeLine，跳过无法解析的行（如纯标题行）。
- */
-private fun parseTreeFromCode(code: String): List<TreeItem> {
-    val items = mutableListOf<TreeItem>()
-    for (line in code.lines()) {
-        if (line.isBlank()) continue
-        val item = parseTreeLine(line)
-        if (item != null) items.add(item)
-    }
-    return items
-}
 
 // ──────────── 块级解析 ────────────
 
@@ -271,9 +159,8 @@ private fun parseTreeFromCode(code: String): List<TreeItem> {
  * 5. 任务列表 `- [ ]` / `- [x]`
  * 6. 无序列表 `- ` / `* `
  * 7. 有序列表 `1. `
- * 8. 树形结构 `├──` `└──` `│`
- * 9. 水平分割线 `---`
- * 10. 段落（兜底）
+ * 8. 水平分割线 `---`
+ * 9. 段落（兜底）
  */
 private fun parseBlocks(markdown: String): List<MdBlock> {
     val blocks = mutableListOf<MdBlock>()
@@ -284,7 +171,7 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
         val line = lines[i]
 
         when {
-            // ── 代码块（最高优先级，但检测树形内容时转为 TreeBlock） ──
+            // ── 代码块 ──
             line.trimStart().startsWith("```") -> {
                 val codeLines = mutableListOf<String>()
                 i++
@@ -298,17 +185,7 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
                     codeLines.removeAt(codeLines.lastIndex)
                 }
                 val codeContent = codeLines.joinToString("\n")
-                // 检测代码块内容是否为树形结构，如果是则按树渲染
-                if (isTreeContent(codeContent)) {
-                    val treeItems = parseTreeFromCode(codeContent)
-                    if (treeItems.isNotEmpty()) {
-                        blocks.add(MdBlock.TreeBlock(treeItems))
-                    } else {
-                        blocks.add(MdBlock.CodeBlock(codeContent))
-                    }
-                } else {
-                    blocks.add(MdBlock.CodeBlock(codeContent))
-                }
+                blocks.add(MdBlock.CodeBlock(codeContent))
                 i++ // 跳过结束的 ```
             }
 
@@ -383,22 +260,6 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
                 blocks.add(MdBlock.ListBlock(ordered = true, items = items))
             }
 
-            // ── 树形结构 ├── │ └── ──
-            isTreeLine(line) -> {
-                val treeItems = mutableListOf<TreeItem>()
-                // 连续收集树形结构行
-                while (i < lines.size && isTreeLine(lines[i])) {
-                    val item = parseTreeLine(lines[i])
-                    if (item != null) {
-                        treeItems.add(item)
-                    }
-                    i++
-                }
-                if (treeItems.isNotEmpty()) {
-                    blocks.add(MdBlock.TreeBlock(treeItems))
-                }
-            }
-
             // ── 水平分割线 ──
             line.matches(Regex("""^[-*_]{3,}\s*$""")) -> {
                 blocks.add(MdBlock.HorizontalRule)
@@ -420,8 +281,7 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
                     !isTableLine(lines[i]) &&
                     !lines[i].trimStart().startsWith(">") &&
                     !lines[i].matches(Regex("""^[-*]\s""")) &&
-                    !lines[i].matches(Regex("""^\d+\.\s""")) &&
-                    !isTreeLine(lines[i])
+                    !lines[i].matches(Regex("""^\d+\.\s"""))
                 ) {
                     paragraphLines.add(lines[i])
                     i++
@@ -671,47 +531,6 @@ private fun BlockquoteBlock(
                 if (index < block.lines.size - 1) {
                     Spacer(modifier = Modifier.height(2.dp))
                 }
-            }
-        }
-    }
-}
-
-/**
- * 渲染树形结构。
- * 每个节点根据 depth（层级深度）添加递增的左缩进（每级 16dp），
- * 并在节点前显示连接符号：顶层用 `•`，非顶层根据是否为末子节点选择 `├` 或 `└`。
- * 节点文本支持内联 Markdown 解析。
- */
-@Composable
-private fun TreeBlockBlock(
-    block: MdBlock.TreeBlock,
-    baseStyle: TextStyle,
-    textColor: androidx.compose.ui.graphics.Color,
-) {
-    Column {
-        for ((index, item) in block.items.withIndex()) {
-            Row(modifier = Modifier.fillMaxWidth()) {
-                // 每级缩进 12dp，形成视觉层级
-                Spacer(modifier = Modifier.width((item.depth * 12).dp))
-                // 连接符号：根据与下一项的关系选择 ├ 或 └
-                val connector = when {
-                    item.depth == 0 -> "\u2022 " // 顶层节点用圆点
-                    // 如果下一项的 depth <= 当前 depth，说明当前是最后一个子节点
-                    index < block.items.size - 1 && block.items[index + 1].depth <= item.depth -> "\u2514\u2500 "
-                    // 如果是整个列表的最后一项，也是末尾节点
-                    index == block.items.size - 1 -> "\u2514\u2500 "
-                    else -> "\u251C\u2500 " // 中间子节点用 ├─
-                }
-                Text(text = connector, style = baseStyle, color = textColor.copy(alpha = 0.5f))
-                Spacer(modifier = Modifier.width(2.dp))
-                Text(
-                    text = parseInline(item.text, baseStyle, textColor),
-                    style = baseStyle,
-                    color = textColor,
-                )
-            }
-            if (index < block.items.size - 1) {
-                Spacer(modifier = Modifier.height(2.dp))
             }
         }
     }
