@@ -646,11 +646,21 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_delete_checklist(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_delete_conversation(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_delete_group(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_delete_task(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_checklists(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_get_conversation(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_get_conversations(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_get_focus_stats(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_get_group(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_groups_by_checklist(
     ): Short
@@ -664,11 +674,15 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_tasks_by_category(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_move_group_to_checklist(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_reorder_checklists(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_reorder_groups(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_reorder_tasks(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_save_conversation(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_set_setting(
     ): Short
@@ -718,11 +732,21 @@ external fun uniffi_nion_core_fn_method_nioncore_create_task(`ptr`: Long,`title`
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_delete_checklist(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
+external fun uniffi_nion_core_fn_method_nioncore_delete_conversation(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
 external fun uniffi_nion_core_fn_method_nioncore_delete_group(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_nion_core_fn_method_nioncore_delete_task(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_nion_core_fn_method_nioncore_get_checklists(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_conversation(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_conversations(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_focus_stats(`ptr`: Long,`days`: Int,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_group(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_get_groups_by_checklist(`ptr`: Long,`checklistId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -736,12 +760,16 @@ external fun uniffi_nion_core_fn_method_nioncore_get_tasks(`ptr`: Long,uniffi_ou
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_get_tasks_by_category(`ptr`: Long,`categoryId`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_move_group_to_checklist(`ptr`: Long,`groupId`: RustBuffer.ByValue,`checklistId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_reorder_checklists(`ptr`: Long,`orderedIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_nion_core_fn_method_nioncore_reorder_groups(`ptr`: Long,`orderedIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_nion_core_fn_method_nioncore_reorder_tasks(`ptr`: Long,`orderedIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_nion_core_fn_method_nioncore_save_conversation(`ptr`: Long,`id`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`messages`: RustBuffer.ByValue,`apiHistory`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_set_setting(`ptr`: Long,`key`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_nion_core_fn_method_nioncore_update_checklist_name(`ptr`: Long,`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -873,7 +901,7 @@ private fun uniffiCheckContractApiVersion(lib: IntegrityCheckingUniffiLib) {
 }
 @Suppress("UNUSED_PARAMETER")
 private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
-    if (lib.uniffi_nion_core_checksum_method_nioncore_add_focus_time() != 5322.toShort()) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_add_focus_time() != 58450.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_create_checklist() != 24825.toShort()) {
@@ -888,6 +916,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_delete_checklist() != 38463.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_delete_conversation() != 42165.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_delete_group() != 55541.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -895,6 +926,18 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_checklists() != 18608.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_conversation() != 49534.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_conversations() != 53404.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_focus_stats() != 25496.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_group() != 39161.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_groups_by_checklist() != 13216.toShort()) {
@@ -915,6 +958,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_tasks_by_category() != 40304.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_move_group_to_checklist() != 57301.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_reorder_checklists() != 62700.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -922,6 +968,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_reorder_tasks() != 60691.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_save_conversation() != 11459.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_set_setting() != 44047.toShort()) {
@@ -1327,7 +1376,7 @@ public object FfiConverterString: FfiConverter<String, RustBuffer.ByValue> {
 public interface NionCoreInterface {
     
     /**
-     * 给指定任务累加专注时长（秒）
+     * 给指定任务累加专注时长（秒），同时写入 focus_sessions 日志
      */
     fun `addFocusTime`(`taskId`: kotlin.String, `seconds`: kotlin.Long)
     
@@ -1343,6 +1392,11 @@ public interface NionCoreInterface {
     fun `deleteChecklist`(`id`: kotlin.String): kotlin.Boolean
     
     /**
+     * 删除对话
+     */
+    fun `deleteConversation`(`id`: kotlin.String): kotlin.Boolean
+    
+    /**
      * 删除分组：不删除组内任务，仅将组内任务的 group_id 置空
      */
     fun `deleteGroup`(`id`: kotlin.String): kotlin.Boolean
@@ -1350,6 +1404,28 @@ public interface NionCoreInterface {
     fun `deleteTask`(`id`: kotlin.String): kotlin.Boolean
     
     fun `getChecklists`(): List<ChecklistData>
+    
+    /**
+     * 获取单个对话，按 ID 查询
+     */
+    fun `getConversation`(`id`: kotlin.String): ConversationData
+    
+    /**
+     * 获取所有对话列表，按更新时间倒序（最近的在前）
+     */
+    fun `getConversations`(): List<ConversationData>
+    
+    /**
+     * 获取近 N 天的专注统计：每日分布 + 任务分布 + 总量
+     *
+     * 参数 days: 查询天数（7=周, 30=月, 365=年）
+     */
+    fun `getFocusStats`(`days`: kotlin.Int): FocusStats
+    
+    /**
+     * 根据 ID 获取单个分组
+     */
+    fun `getGroup`(`id`: kotlin.String): GroupData
     
     /**
      * 获取指定清单下的所有分组，按 sort_order 排序
@@ -1373,6 +1449,11 @@ public interface NionCoreInterface {
      */
     fun `getTasksByCategory`(`categoryId`: kotlin.String?, `groupId`: kotlin.String?): List<TaskData>
     
+    /**
+     * 将分组移动到另一个清单，同时更新组内任务的 category_id
+     */
+    fun `moveGroupToChecklist`(`groupId`: kotlin.String, `checklistId`: kotlin.String): GroupData
+    
     fun `reorderChecklists`(`orderedIds`: List<kotlin.String>)
     
     /**
@@ -1381,6 +1462,11 @@ public interface NionCoreInterface {
     fun `reorderGroups`(`orderedIds`: List<kotlin.String>)
     
     fun `reorderTasks`(`orderedIds`: List<kotlin.String>)
+    
+    /**
+     * 保存对话：如果 id 已存在则更新，否则新建
+     */
+    fun `saveConversation`(`id`: kotlin.String, `title`: kotlin.String, `messages`: kotlin.String, `apiHistory`: kotlin.String): ConversationData
     
     fun `setSetting`(`key`: kotlin.String, `value`: kotlin.String)
     
@@ -1516,7 +1602,7 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
 
     
     /**
-     * 给指定任务累加专注时长（秒）
+     * 给指定任务累加专注时长（秒），同时写入 focus_sessions 日志
      */
     @Throws(NionException::class)override fun `addFocusTime`(`taskId`: kotlin.String, `seconds`: kotlin.Long)
         = 
@@ -1591,6 +1677,23 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
 
     
     /**
+     * 删除对话
+     */
+    @Throws(NionException::class)override fun `deleteConversation`(`id`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_delete_conversation(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * 删除分组：不删除组内任务，仅将组内任务的 group_id 置空
      */
     @Throws(NionException::class)override fun `deleteGroup`(`id`: kotlin.String): kotlin.Boolean {
@@ -1628,6 +1731,76 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     UniffiLib.uniffi_nion_core_fn_method_nioncore_get_checklists(
         it,
         _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 获取单个对话，按 ID 查询
+     */
+    @Throws(NionException::class)override fun `getConversation`(`id`: kotlin.String): ConversationData {
+            return FfiConverterTypeConversationData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_get_conversation(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 获取所有对话列表，按更新时间倒序（最近的在前）
+     */
+    @Throws(NionException::class)override fun `getConversations`(): List<ConversationData> {
+            return FfiConverterSequenceTypeConversationData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_get_conversations(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 获取近 N 天的专注统计：每日分布 + 任务分布 + 总量
+     *
+     * 参数 days: 查询天数（7=周, 30=月, 365=年）
+     */
+    @Throws(NionException::class)override fun `getFocusStats`(`days`: kotlin.Int): FocusStats {
+            return FfiConverterTypeFocusStats.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_get_focus_stats(
+        it,
+        FfiConverterInt.lower(`days`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 根据 ID 获取单个分组
+     */
+    @Throws(NionException::class)override fun `getGroup`(`id`: kotlin.String): GroupData {
+            return FfiConverterTypeGroupData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_get_group(
+        it,
+        FfiConverterString.lower(`id`),_status)
 }
     }
     )
@@ -1729,6 +1902,23 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
 
     
+    /**
+     * 将分组移动到另一个清单，同时更新组内任务的 category_id
+     */
+    @Throws(NionException::class)override fun `moveGroupToChecklist`(`groupId`: kotlin.String, `checklistId`: kotlin.String): GroupData {
+            return FfiConverterTypeGroupData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_move_group_to_checklist(
+        it,
+        FfiConverterString.lower(`groupId`),FfiConverterString.lower(`checklistId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
     @Throws(NionException::class)override fun `reorderChecklists`(`orderedIds`: List<kotlin.String>)
         = 
     callWithHandle {
@@ -1768,6 +1958,23 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
 }
     }
     
+    
+
+    
+    /**
+     * 保存对话：如果 id 已存在则更新，否则新建
+     */
+    @Throws(NionException::class)override fun `saveConversation`(`id`: kotlin.String, `title`: kotlin.String, `messages`: kotlin.String, `apiHistory`: kotlin.String): ConversationData {
+            return FfiConverterTypeConversationData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_save_conversation(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterString.lower(`title`),FfiConverterString.lower(`messages`),FfiConverterString.lower(`apiHistory`),_status)
+}
+    }
+    )
+    }
     
 
     
@@ -1948,6 +2155,169 @@ public object FfiConverterTypeChecklistData: FfiConverterRustBuffer<ChecklistDat
 
 
 /**
+ * 对话记录 —— 存储一次完整的聊天会话
+ */
+data class ConversationData (
+    var `id`: kotlin.String
+    , 
+    var `title`: kotlin.String
+    , 
+    var `messages`: kotlin.String
+    , 
+    var `apiHistory`: kotlin.String
+    , 
+    var `createdAt`: kotlin.String
+    , 
+    var `updatedAt`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeConversationData: FfiConverterRustBuffer<ConversationData> {
+    override fun read(buf: ByteBuffer): ConversationData {
+        return ConversationData(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: ConversationData) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`title`) +
+            FfiConverterString.allocationSize(value.`messages`) +
+            FfiConverterString.allocationSize(value.`apiHistory`) +
+            FfiConverterString.allocationSize(value.`createdAt`) +
+            FfiConverterString.allocationSize(value.`updatedAt`)
+    )
+
+    override fun write(value: ConversationData, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`title`, buf)
+            FfiConverterString.write(value.`messages`, buf)
+            FfiConverterString.write(value.`apiHistory`, buf)
+            FfiConverterString.write(value.`createdAt`, buf)
+            FfiConverterString.write(value.`updatedAt`, buf)
+    }
+}
+
+
+
+/**
+ * 每日专注统计
+ */
+data class DailyFocusStat (
+    var `date`: kotlin.String
+    , 
+    var `totalSeconds`: kotlin.Long
+    , 
+    var `sessionCount`: kotlin.Long
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDailyFocusStat: FfiConverterRustBuffer<DailyFocusStat> {
+    override fun read(buf: ByteBuffer): DailyFocusStat {
+        return DailyFocusStat(
+            FfiConverterString.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: DailyFocusStat) = (
+            FfiConverterString.allocationSize(value.`date`) +
+            FfiConverterLong.allocationSize(value.`totalSeconds`) +
+            FfiConverterLong.allocationSize(value.`sessionCount`)
+    )
+
+    override fun write(value: DailyFocusStat, buf: ByteBuffer) {
+            FfiConverterString.write(value.`date`, buf)
+            FfiConverterLong.write(value.`totalSeconds`, buf)
+            FfiConverterLong.write(value.`sessionCount`, buf)
+    }
+}
+
+
+
+/**
+ * 专注统计汇总：每日分布 + 任务分布 + 总时长
+ */
+data class FocusStats (
+    var `daily`: List<DailyFocusStat>
+    , 
+    var `taskBreakdown`: List<TaskFocusStat>
+    , 
+    var `totalSeconds`: kotlin.Long
+    , 
+    var `totalSessions`: kotlin.Long
+    , 
+    var `days`: kotlin.Int
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeFocusStats: FfiConverterRustBuffer<FocusStats> {
+    override fun read(buf: ByteBuffer): FocusStats {
+        return FocusStats(
+            FfiConverterSequenceTypeDailyFocusStat.read(buf),
+            FfiConverterSequenceTypeTaskFocusStat.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterInt.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: FocusStats) = (
+            FfiConverterSequenceTypeDailyFocusStat.allocationSize(value.`daily`) +
+            FfiConverterSequenceTypeTaskFocusStat.allocationSize(value.`taskBreakdown`) +
+            FfiConverterLong.allocationSize(value.`totalSeconds`) +
+            FfiConverterLong.allocationSize(value.`totalSessions`) +
+            FfiConverterInt.allocationSize(value.`days`)
+    )
+
+    override fun write(value: FocusStats, buf: ByteBuffer) {
+            FfiConverterSequenceTypeDailyFocusStat.write(value.`daily`, buf)
+            FfiConverterSequenceTypeTaskFocusStat.write(value.`taskBreakdown`, buf)
+            FfiConverterLong.write(value.`totalSeconds`, buf)
+            FfiConverterLong.write(value.`totalSessions`, buf)
+            FfiConverterInt.write(value.`days`, buf)
+    }
+}
+
+
+
+/**
  * 任务分组 —— 清单下的二级分类，例如"学习清单"下的"语文"、"英语"
  */
 data class GroupData (
@@ -2101,6 +2471,52 @@ public object FfiConverterTypeTaskData: FfiConverterRustBuffer<TaskData> {
             FfiConverterString.write(value.`updatedAt`, buf)
             FfiConverterOptionalString.write(value.`completedAt`, buf)
             FfiConverterLong.write(value.`focusSeconds`, buf)
+    }
+}
+
+
+
+/**
+ * 任务专注分布
+ */
+data class TaskFocusStat (
+    var `taskId`: kotlin.String
+    , 
+    var `taskTitle`: kotlin.String
+    , 
+    var `seconds`: kotlin.Long
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeTaskFocusStat: FfiConverterRustBuffer<TaskFocusStat> {
+    override fun read(buf: ByteBuffer): TaskFocusStat {
+        return TaskFocusStat(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: TaskFocusStat) = (
+            FfiConverterString.allocationSize(value.`taskId`) +
+            FfiConverterString.allocationSize(value.`taskTitle`) +
+            FfiConverterLong.allocationSize(value.`seconds`)
+    )
+
+    override fun write(value: TaskFocusStat, buf: ByteBuffer) {
+            FfiConverterString.write(value.`taskId`, buf)
+            FfiConverterString.write(value.`taskTitle`, buf)
+            FfiConverterLong.write(value.`seconds`, buf)
     }
 }
 
@@ -2302,6 +2718,62 @@ public object FfiConverterSequenceTypeChecklistData: FfiConverterRustBuffer<List
 /**
  * @suppress
  */
+public object FfiConverterSequenceTypeConversationData: FfiConverterRustBuffer<List<ConversationData>> {
+    override fun read(buf: ByteBuffer): List<ConversationData> {
+        val len = buf.getInt()
+        return List<ConversationData>(len) {
+            FfiConverterTypeConversationData.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<ConversationData>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeConversationData.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<ConversationData>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeConversationData.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeDailyFocusStat: FfiConverterRustBuffer<List<DailyFocusStat>> {
+    override fun read(buf: ByteBuffer): List<DailyFocusStat> {
+        val len = buf.getInt()
+        return List<DailyFocusStat>(len) {
+            FfiConverterTypeDailyFocusStat.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<DailyFocusStat>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeDailyFocusStat.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<DailyFocusStat>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeDailyFocusStat.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceTypeGroupData: FfiConverterRustBuffer<List<GroupData>> {
     override fun read(buf: ByteBuffer): List<GroupData> {
         val len = buf.getInt()
@@ -2348,6 +2820,34 @@ public object FfiConverterSequenceTypeTaskData: FfiConverterRustBuffer<List<Task
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeTaskData.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeTaskFocusStat: FfiConverterRustBuffer<List<TaskFocusStat>> {
+    override fun read(buf: ByteBuffer): List<TaskFocusStat> {
+        val len = buf.getInt()
+        return List<TaskFocusStat>(len) {
+            FfiConverterTypeTaskFocusStat.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<TaskFocusStat>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeTaskFocusStat.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<TaskFocusStat>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeTaskFocusStat.write(it, buf)
         }
     }
 }

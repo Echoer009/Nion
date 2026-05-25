@@ -53,6 +53,14 @@ impl NionCore {
             CREATE TABLE IF NOT EXISTS settings (
                 key TEXT PRIMARY KEY,
                 value TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS chat_conversations (
+                id TEXT PRIMARY KEY,
+                title TEXT NOT NULL,
+                messages TEXT NOT NULL DEFAULT '[]',
+                api_history TEXT NOT NULL DEFAULT '[]',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             );"
         ).map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
@@ -64,6 +72,8 @@ impl NionCore {
         conn.execute_batch("ALTER TABLE tasks ADD COLUMN focus_seconds INTEGER NOT NULL DEFAULT 0").ok();
         // 给旧表添加 group_id 列（如果不存在）
         conn.execute_batch("ALTER TABLE tasks ADD COLUMN group_id TEXT").ok();
+        // 给旧表添加 api_history 列（如果不存在）
+        conn.execute_batch("ALTER TABLE chat_conversations ADD COLUMN api_history TEXT NOT NULL DEFAULT '[]'").ok();
 
         Ok(Self {
             db: Mutex::new(conn),
@@ -341,6 +351,8 @@ impl NionCore {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
         })?;
+        // 先删除关联的专注会话记录
+        db.execute("DELETE FROM focus_sessions WHERE task_id = ?1", params![id]).ok();
         let rows = db
             .execute("DELETE FROM tasks WHERE id = ?1", params![id])
             .map_err(|e| NionError::DatabaseError {
@@ -391,17 +403,101 @@ impl NionCore {
         Ok(())
     }
 
-    /// 给指定任务累加专注时长（秒）
+    /// 给指定任务累加专注时长（秒），同时写入 focus_sessions 日志
     pub fn add_focus_time(&self, task_id: String, seconds: i64) -> Result<(), NionError> {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
         })?;
+        let now = chrono::Utc::now().to_rfc3339();
         db.execute(
             "UPDATE tasks SET focus_seconds = focus_seconds + ?1, updated_at = ?2 WHERE id = ?3",
-            params![seconds, chrono::Utc::now().to_rfc3339(), task_id],
+            params![seconds, now, task_id],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        // 写入专注会话日志，用于后续按日/周/月统计
+        let session_id = Uuid::new_v4().to_string();
+        db.execute(
+            "INSERT INTO focus_sessions (id, task_id, seconds, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![session_id, task_id, seconds, now],
         )
         .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         Ok(())
+    }
+
+    /// 获取近 N 天的专注统计：每日分布 + 任务分布 + 总量
+    ///
+    /// 参数 days: 查询天数（7=周, 30=月, 365=年）
+    pub fn get_focus_stats(&self, days: i32) -> Result<FocusStats, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        let days_param = format!("-{} days", days);
+
+        // 每日汇总：按日期聚合
+        let mut daily_stmt = db
+            .prepare(
+                "SELECT substr(created_at, 1, 10) as d, SUM(seconds) as total, COUNT(*) as cnt
+                 FROM focus_sessions
+                 WHERE created_at >= date('now', ?1)
+                 GROUP BY d
+                 ORDER BY d DESC"
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let daily_rows = daily_stmt
+            .query_map(params![days_param], |row| {
+                Ok(DailyFocusStat {
+                    date: row.get(0)?,
+                    total_seconds: row.get(1)?,
+                    session_count: row.get(2)?,
+                })
+            })
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let mut daily = Vec::new();
+        for r in daily_rows {
+            daily.push(r.map_err(|e| NionError::DatabaseError { msg: e.to_string() })?);
+        }
+
+        // 任务分布：按任务聚合
+        let mut task_stmt = db
+            .prepare(
+                "SELECT s.task_id, COALESCE(t.title, '(已删除)') as title, SUM(s.seconds) as total
+                 FROM focus_sessions s
+                 LEFT JOIN tasks t ON t.id = s.task_id
+                 WHERE s.created_at >= date('now', ?1)
+                 GROUP BY s.task_id
+                 ORDER BY total DESC"
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let task_rows = task_stmt
+            .query_map(params![days_param], |row| {
+                Ok(TaskFocusStat {
+                    task_id: row.get(0)?,
+                    task_title: row.get(1)?,
+                    seconds: row.get(2)?,
+                })
+            })
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let mut task_breakdown = Vec::new();
+        for r in task_rows {
+            task_breakdown.push(r.map_err(|e| NionError::DatabaseError { msg: e.to_string() })?);
+        }
+
+        // 汇总
+        let (total_seconds, total_sessions): (i64, i64) = db
+            .query_row(
+                "SELECT COALESCE(SUM(seconds), 0), COUNT(*) FROM focus_sessions WHERE created_at >= date('now', ?1)",
+                params![days_param],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+
+        Ok(FocusStats {
+            daily,
+            task_breakdown,
+            total_seconds,
+            total_sessions,
+            days,
+        })
     }
 
     pub fn reorder_tasks(&self, ordered_ids: Vec<String>) -> Result<(), NionError> {
@@ -591,6 +687,63 @@ impl NionCore {
         Ok(())
     }
 
+    /// 根据 ID 获取单个分组
+    pub fn get_group(&self, id: String) -> Result<GroupData, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        db.query_row(
+            "SELECT id, name, checklist_id, color, sort_order, created_at FROM task_groups WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(GroupData {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    checklist_id: row.get(2)?,
+                    color: row.get(3)?,
+                    sort_order: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            },
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })
+    }
+
+    /// 将分组移动到另一个清单，同时更新组内任务的 category_id
+    pub fn move_group_to_checklist(&self, group_id: String, checklist_id: String) -> Result<GroupData, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        // 更新分组的 checklist_id
+        db.execute(
+            "UPDATE task_groups SET checklist_id = ?1 WHERE id = ?2",
+            params![checklist_id, group_id],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        // 同步更新组内任务的 category_id，保持数据一致性
+        db.execute(
+            "UPDATE tasks SET category_id = ?1 WHERE group_id = ?2",
+            params![checklist_id, group_id],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        // 返回更新后的分组
+        db.query_row(
+            "SELECT id, name, checklist_id, color, sort_order, created_at FROM task_groups WHERE id = ?1",
+            params![group_id],
+            |row| {
+                Ok(GroupData {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    checklist_id: row.get(2)?,
+                    color: row.get(3)?,
+                    sort_order: row.get(4)?,
+                    created_at: row.get(5)?,
+                })
+            },
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })
+    }
+
     /// 更新任务的分组归属：将任务移到指定分组，或移出分组（group_id = None）
     pub fn update_task_group(&self, task_id: String, group_id: Option<String>) -> Result<(), NionError> {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
@@ -603,6 +756,88 @@ impl NionCore {
         )
         .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         Ok(())
+    }
+
+    // ==================== 对话记录（Conversation）CRUD ====================
+
+    /// 保存对话：如果 id 已存在则更新，否则新建
+    pub fn save_conversation(&self, id: String, title: String, messages: String, api_history: String) -> Result<ConversationData, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        let now = chrono::Utc::now().to_rfc3339();
+        db.execute(
+            "INSERT OR REPLACE INTO chat_conversations (id, title, messages, api_history, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![id, title, messages, api_history, now, now],
+        ).map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        Ok(ConversationData {
+            id,
+            title,
+            messages,
+            api_history,
+            created_at: now.clone(),
+            updated_at: now,
+        })
+    }
+
+    /// 获取所有对话列表，按更新时间倒序（最近的在前）
+    pub fn get_conversations(&self) -> Result<Vec<ConversationData>, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        let mut stmt = db
+            .prepare("SELECT id, title, messages, api_history, created_at, updated_at FROM chat_conversations ORDER BY updated_at DESC")
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(ConversationData {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    messages: row.get(2)?,
+                    api_history: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            })
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let mut result = Vec::new();
+        for row in rows {
+            result.push(row.map_err(|e| NionError::DatabaseError { msg: e.to_string() })?);
+        }
+        Ok(result)
+    }
+
+    /// 获取单个对话，按 ID 查询
+    pub fn get_conversation(&self, id: String) -> Result<ConversationData, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        db.query_row(
+            "SELECT id, title, messages, api_history, created_at, updated_at FROM chat_conversations WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(ConversationData {
+                    id: row.get(0)?,
+                    title: row.get(1)?,
+                    messages: row.get(2)?,
+                    api_history: row.get(3)?,
+                    created_at: row.get(4)?,
+                    updated_at: row.get(5)?,
+                })
+            },
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })
+    }
+
+    /// 删除对话
+    pub fn delete_conversation(&self, id: String) -> Result<bool, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        let rows = db
+            .execute("DELETE FROM chat_conversations WHERE id = ?1", params![id])
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        Ok(rows > 0)
     }
 }
 
@@ -1007,5 +1242,46 @@ mod tests {
         core.update_task_group(task.id.clone(), None).unwrap();
         let updated = core.get_task(task.id.clone()).unwrap();
         assert_eq!(updated.group_id, None);
+    }
+
+    #[test]
+    fn test_get_group() {
+        let core = make_in_memory();
+        let cl = core.create_checklist("学习清单".to_string()).unwrap();
+        let g = core.create_group("语文".to_string(), cl.id.clone(), Some("#FF5722".to_string())).unwrap();
+
+        // 按 ID 查询单个分组
+        let found = core.get_group(g.id.clone()).unwrap();
+        assert_eq!(found.id, g.id);
+        assert_eq!(found.name, "语文");
+        assert_eq!(found.checklist_id, cl.id);
+        assert_eq!(found.color, Some("#FF5722".to_string()));
+
+        // 不存在的 ID 应返回错误
+        let err = core.get_group("nonexistent".to_string());
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn test_move_group_to_checklist() {
+        let core = make_in_memory();
+        let cl1 = core.create_checklist("学习清单".to_string()).unwrap();
+        let cl2 = core.create_checklist("工作清单".to_string()).unwrap();
+        let g = core.create_group("语文".to_string(), cl1.id.clone(), None).unwrap();
+
+        // 在分组下创建任务
+        let task = core.create_task("背单词".to_string(), None, "high".to_string(), None, Some(cl1.id.clone()), None, Some(g.id.clone())).unwrap();
+        assert_eq!(task.category_id, Some(cl1.id.clone()));
+        assert_eq!(task.group_id, Some(g.id.clone()));
+
+        // 将分组从"学习清单"移到"工作清单"
+        let moved = core.move_group_to_checklist(g.id.clone(), cl2.id.clone()).unwrap();
+        assert_eq!(moved.checklist_id, cl2.id);
+        assert_eq!(moved.name, "语文");
+
+        // 组内任务的 category_id 也应同步更新
+        let updated_task = core.get_task(task.id.clone()).unwrap();
+        assert_eq!(updated_task.category_id, Some(cl2.id));
+        assert_eq!(updated_task.group_id, Some(g.id.clone())); // 分组归属不变
     }
 }

@@ -43,3 +43,40 @@ pub struct GroupData {
     pub sort_order: i32,
     pub created_at: String,
 }
+
+/// 每日专注统计
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct DailyFocusStat {
+    pub date: String,
+    pub total_seconds: i64,
+    pub session_count: i64,
+}
+
+/// 任务专注分布
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct TaskFocusStat {
+    pub task_id: String,
+    pub task_title: String,
+    pub seconds: i64,
+}
+
+/// 专注统计汇总：每日分布 + 任务分布 + 总时长
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct FocusStats {
+    pub daily: Vec<DailyFocusStat>,
+    pub task_breakdown: Vec<TaskFocusStat>,
+    pub total_seconds: i64,
+    pub total_sessions: i64,
+    pub days: i32,
+}
+
+/// 对话记录 —— 存储一次完整的聊天会话
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct ConversationData {
+    pub id: String,
+    pub title: String,
+    pub messages: String,
+    pub api_history: String,
+    pub created_at: String,
+    pub updated_at: String,
+}

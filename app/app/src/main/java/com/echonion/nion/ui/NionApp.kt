@@ -16,6 +16,7 @@ import androidx.compose.material3.NavigationBarItem
 import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -35,6 +36,7 @@ import com.echonion.nion.ui.components.DualPanelLayout
 import com.echonion.nion.ui.components.DualPanelState
 import com.echonion.nion.ui.companion.CompanionSidebar
 import com.echonion.nion.ui.focus.FocusScreen
+import com.echonion.nion.ui.focus.FocusStatsPanel
 import com.echonion.nion.ui.schedule.ScheduleScreen
 import com.echonion.nion.ui.settings.SettingsScreen
 import com.echonion.nion.ui.task.SidebarContent
@@ -73,6 +75,10 @@ fun NionApp() {
     val dualState = remember { DualPanelState() }
     val viewModel = taskViewModel()
     val coroutineScope = rememberCoroutineScope()
+
+    /** 从任务详情跳转专注页面时，携带的预选任务信息 */
+    var preselectedFocusTaskId by remember { mutableStateOf<String?>(null) }
+    var preselectedFocusTaskTitle by remember { mutableStateOf<String?>(null) }
 
     NionTheme(colorTheme = colorTheme) {
         val navController = rememberNavController()
@@ -121,33 +127,41 @@ fun NionApp() {
         ) { innerPadding ->
             val currentRoute = currentDestination?.route
             DualPanelLayout(
-                leftPanelWidth = 260.dp,
+                leftPanelWidth = if (currentRoute == "pomodoro") 300.dp else 260.dp,
                 rightPanelWidth = 320.dp,
                 state = dualState,
-                enableLeftSwipe = currentRoute == "tasks",
+                enableLeftSwipe = currentRoute == "tasks" || currentRoute == "pomodoro",
                 modifier = Modifier.padding(innerPadding),
                 leftPanel = { onDrag, onDragStopped, modifier ->
-                    val customCounts = remember(viewModel.checklistCounts) {
-                        viewModel.checklistCounts.mapNotNull { (k, v) -> k?.let { it to v } }.toMap()
+                    if (currentRoute == "pomodoro") {
+                        FocusStatsPanel(
+                            onSidebarDrag = onDrag,
+                            onSidebarDragStopped = onDragStopped,
+                            modifier = modifier,
+                        )
+                    } else {
+                        val customCounts = remember(viewModel.checklistCounts) {
+                            viewModel.checklistCounts.mapNotNull { (k, v) -> k?.let { it to v } }.toMap()
+                        }
+                        SidebarContent(
+                            checklists = viewModel.checklists,
+                            activeChecklistId = viewModel.activeChecklistId,
+                            defaultCounts = viewModel.checklistCounts[null] ?: (0 to 0),
+                            customCounts = customCounts,
+                            onSelectChecklist = {
+                                dualState.closeLeft()
+                                viewModel.setActiveChecklist(it)
+                            },
+                            onAddChecklist = { name ->
+                                viewModel.createChecklist(name)
+                            },
+                            onDeleteChecklist = { viewModel.deleteChecklist(it) },
+                            onReorderChecklists = { viewModel.reorderChecklists(it) },
+                            onSidebarDrag = onDrag,
+                            onSidebarDragStopped = onDragStopped,
+                            modifier = modifier,
+                        )
                     }
-                    SidebarContent(
-                        checklists = viewModel.checklists,
-                        activeChecklistId = viewModel.activeChecklistId,
-                        defaultCounts = viewModel.checklistCounts[null] ?: (0 to 0),
-                        customCounts = customCounts,
-                        onSelectChecklist = {
-                            dualState.closeLeft()
-                            viewModel.setActiveChecklist(it)
-                        },
-                        onAddChecklist = { name ->
-                            viewModel.createChecklist(name)
-                        },
-                        onDeleteChecklist = { viewModel.deleteChecklist(it) },
-                        onReorderChecklists = { viewModel.reorderChecklists(it) },
-                        onSidebarDrag = onDrag,
-                        onSidebarDragStopped = onDragStopped,
-                        modifier = modifier,
-                    )
                 },
                 rightPanel = { onDrag, onDragStopped, modifier ->
                     CompanionSidebar(
@@ -202,6 +216,21 @@ fun NionApp() {
                         TaskScreen(
                             dualState = dualState,
                             viewModel = viewModel,
+                            /** 点击任务详情中的专注按钮：记录预选任务并跳转到专注页 */
+                            onStartFocus = { taskId, taskTitle ->
+                                preselectedFocusTaskId = taskId
+                                preselectedFocusTaskTitle = taskTitle
+                                coroutineScope.launch {
+                                    dualState.closePanel()
+                                    navController.navigate("pomodoro") {
+                                        popUpTo(navController.graph.findStartDestination().id) {
+                                            saveState = true
+                                        }
+                                        launchSingleTop = true
+                                        restoreState = true
+                                    }
+                                }
+                            },
                         )
                     }
                     composable("schedule") {
@@ -212,7 +241,19 @@ fun NionApp() {
                     composable("pomodoro") {
                         FocusScreen(
                             onOpenCompanion = { dualState.openRight() },
+                            preselectedTaskId = preselectedFocusTaskId,
+                            preselectedTaskTitle = preselectedFocusTaskTitle,
                         )
+                        /**
+                         * 预选任务信息在传递给 FocusScreen 后消费掉，
+                         * 避免导航回退时重复预选。
+                         */
+                        LaunchedEffect(preselectedFocusTaskId) {
+                            if (preselectedFocusTaskId != null) {
+                                preselectedFocusTaskId = null
+                                preselectedFocusTaskTitle = null
+                            }
+                        }
                     }
                     composable("settings") {
                         SettingsScreen(
