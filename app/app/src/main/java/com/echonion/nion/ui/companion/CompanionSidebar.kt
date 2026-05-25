@@ -1,14 +1,15 @@
 package com.echonion.nion.ui.companion
 
 import android.util.Log
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
-import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
@@ -79,6 +80,8 @@ import androidx.activity.result.PickVisualMediaRequest
 import androidx.lifecycle.viewmodel.compose.viewModel
 import android.graphics.BitmapFactory
 import android.net.Uri
+import uniffi.nion_core.ConversationData
+import org.json.JSONArray
 
 /**
  * 聊天消息数据类 —— 单条消息的展示模型。
@@ -93,6 +96,10 @@ data class ChatMessage(
     val text: String,
     val isFromUser: Boolean,
     val timestamp: String,
+    /** 是否为工具执行消息（显示为小型状态行而非完整气泡） */
+    val isToolMessage: Boolean = false,
+    /** 工具是否已执行完成（用对勾替换加载图标） */
+    val toolDone: Boolean = false,
 )
 
 /**
@@ -158,64 +165,40 @@ fun CompanionSidebar(
         color = MaterialTheme.colorScheme.surfaceContainer,
         tonalElevation = 2.dp,
     ) {
-        // Box 叠放所有面板，AnimatedVisibility 在树中常驻，动画状态机正确触发
-        Box(Modifier.fillMaxSize()) {
-            // 主区域：聊天 / 设置 / 编辑 —— 从面板返回时从顶部展开
-            val isMainVisible = actualMode != "history" && actualMode != "switch"
-            AnimatedVisibility(
-                visible = isMainVisible,
-                enter = fadeIn(tween(250, easing = FastOutSlowInEasing)) +
-                    expandVertically(expandFrom = Alignment.Top, animationSpec = tween(300)) +
-                    scaleIn(initialScale = 0.95f, animationSpec = tween(300, easing = FastOutSlowInEasing)),
-                exit = fadeOut(tween(200, easing = FastOutSlowInEasing)),
-            ) {
-                // 主区域内即时切换，不包动画
-                when (actualMode) {
-                    "profile" -> ProfileContent(
-                        viewModel = viewModel,
-                        onBack = { panelMode = null },
-                    )
-                    "setup" -> SetupContent(
-                        viewModel = viewModel,
-                        // 设置页只能从切换面板进入，返回按钮始终回到切换面板
-                        onBack = if (hasConfigured) { { panelMode = "switch" } } else null,
-                        onAvatarClick = onAvatarClick,
-                    )
-                    else -> ChatContent(
-                        viewModel = viewModel,
-                        isVisible = isVisible,
-                        onAvatarClick = onAvatarClick,
-                        onHistoryClick = { panelMode = "history" },
-                        onSwitchClick = { panelMode = "switch" },
-                    )
+        /**
+         * 统一 AnimatedContent 替换原来的多个 AnimatedVisibility 堆叠。
+         * 所有面板模式（chat/setup/profile/history/switch）之间用同一套
+         * crossfade 动画过渡，与日程页日历展开/收回的 transitionSpec 一致。
+         */
+        AnimatedContent(
+            targetState = actualMode,
+            transitionSpec = {
+                if (targetState != "chat" && targetState != "setup" && targetState != "profile") {
+                    // 展开子面板（history/switch）：子面板淡入(300ms)，主面板淡出(180ms)
+                    (fadeIn(tween(300, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(180, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                } else {
+                    // 回到主面板：主面板淡入(250ms)，子面板淡出(400ms)
+                    (fadeIn(tween(250, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(400, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
                 }
-            }
-
-            // 历史面板：从顶部向下展开 + 淡入 + 轻微缩放
-            AnimatedVisibility(
-                visible = actualMode == "history",
-                enter = fadeIn(tween(250, easing = FastOutSlowInEasing))
-                    + expandVertically(expandFrom = Alignment.Top, animationSpec = tween(300))
-                    + scaleIn(initialScale = 0.95f, animationSpec = tween(300, easing = FastOutSlowInEasing)),
-                exit = fadeOut(tween(250, easing = FastOutSlowInEasing))
-                    + shrinkVertically(shrinkTowards = Alignment.Top, animationSpec = tween(300)),
-            ) {
-                HistoryPanel(
-                    messages = viewModel.loadArchivedChat(),
+            },
+            label = "panelMode",
+        ) { mode ->
+            when (mode) {
+                "history" -> HistoryPanel(
+                    conversations = viewModel.conversationList,
+                    currentConversationId = viewModel.currentConversationId,
+                    onSelect = { id ->
+                        viewModel.loadConversation(id)
+                        panelMode = null
+                    },
+                    onDelete = { id -> viewModel.deleteConversation(id) },
                     onClose = { panelMode = null },
                 )
-            }
-
-            // 切换面板：从顶部向下展开 + 淡入 + 轻微缩放
-            AnimatedVisibility(
-                visible = actualMode == "switch",
-                enter = fadeIn(tween(250, easing = FastOutSlowInEasing))
-                    + expandVertically(expandFrom = Alignment.Top, animationSpec = tween(300))
-                    + scaleIn(initialScale = 0.95f, animationSpec = tween(300, easing = FastOutSlowInEasing)),
-                exit = fadeOut(tween(250, easing = FastOutSlowInEasing))
-                    + shrinkVertically(shrinkTowards = Alignment.Top, animationSpec = tween(300)),
-            ) {
-                SwitchProviderPanel(
+                "switch" -> SwitchProviderPanel(
                     configs = viewModel.savedConfigs,
                     activeConfigId = viewModel.savedConfigs.find {
                         it.provider == viewModel.currentProvider?.name && it.model == viewModel.modelName
@@ -227,6 +210,25 @@ fun CompanionSidebar(
                     onDelete = { configId -> viewModel.deleteConfig(configId) },
                     onAddNew = { panelMode = "setup" },
                     onClose = { panelMode = null },
+                )
+                "profile" -> ProfileContent(
+                    viewModel = viewModel,
+                    onBack = { panelMode = null },
+                )
+                "setup" -> SetupContent(
+                    viewModel = viewModel,
+                    onBack = if (hasConfigured) { { panelMode = "switch" } } else null,
+                    onAvatarClick = onAvatarClick,
+                )
+                else -> ChatContent(
+                    viewModel = viewModel,
+                    isVisible = isVisible,
+                    onAvatarClick = onAvatarClick,
+                    onNewChat = {
+                        viewModel.startNewConversation()
+                    },
+                    onHistoryClick = { panelMode = "history" },
+                    onSwitchClick = { panelMode = "switch" },
                 )
             }
         }
@@ -368,6 +370,7 @@ private fun ProfileContent(
 ) {
     var name by remember { mutableStateOf(viewModel.companionName) }
     var prompt by remember { mutableStateOf(viewModel.companionPrompt) }
+    var rules by remember { mutableStateOf(viewModel.replyRules) }
 
     // 系统图片选择器：选取头像图片
     val context = LocalContext.current
@@ -389,6 +392,7 @@ private fun ProfileContent(
     // 返回并保存：将当前编辑的内容写回 ViewModel 后返回
     val backAndSave: () -> Unit = {
         viewModel.updateCompanionInfo(name.trim(), prompt.trim())
+        viewModel.updateReplyRules(rules.trim())
         onBack()
     }
 
@@ -397,7 +401,7 @@ private fun ProfileContent(
             .fillMaxSize()
             .padding(vertical = 24.dp, horizontal = 16.dp),
     ) {
-        // 顶部导航栏：返回按钮 + 标题
+        // 顶部导航栏：返回按钮 + 居中占位
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -409,16 +413,6 @@ private fun ProfileContent(
                     modifier = Modifier.size(20.dp),
                 )
             }
-            Spacer(modifier = Modifier.weight(1f))
-            Text(
-                "编辑伙伴信息",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurface,
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            // 右侧占位 Spacer 保持标题视觉居中
-            Spacer(modifier = Modifier.size(40.dp))
         }
 
         Spacer(modifier = Modifier.height(24.dp))
@@ -463,12 +457,19 @@ private fun ProfileContent(
             minLines = 4,
             maxLines = 8,
             modifier = Modifier.fillMaxWidth(),
-            supportingText = {
-                Text(
-                    "定义 AI 伴侣的回复风格和语气。",
-                    style = MaterialTheme.typography.labelSmall,
-                )
-            },
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 回复要求输入框 —— 用户自定义额外规则，追加在系统提示词末尾发送给 LLM
+        OutlinedTextField(
+            value = rules,
+            onValueChange = { rules = it },
+            label = { Text("回复要求") },
+            placeholder = { Text("例如：不要使用 emoji、用聊天的语气说话、不要反问...") },
+            minLines = 2,
+            maxLines = 4,
+            modifier = Modifier.fillMaxWidth(),
         )
     }
 }
@@ -487,6 +488,7 @@ private fun ChatContent(
     viewModel: CompanionViewModel,
     isVisible: Boolean,
     onAvatarClick: () -> Unit,
+    onNewChat: () -> Unit,
     onHistoryClick: () -> Unit,
     onSwitchClick: () -> Unit,
 ) {
@@ -499,7 +501,7 @@ private fun ChatContent(
     val messages = viewModel.messages
     val inputText = viewModel.inputText
     val isLoading = viewModel.isLoading
-    val streamingText = viewModel.streamingAssistantText
+    val streamingText = viewModel.displayedStreamingText
     val streamingTimestamp = viewModel.streamingMessageTimestamp
 
     // 面板被移出组合时保存滚动位置（打开左侧清单、切换子面板等场景）
@@ -564,9 +566,18 @@ private fun ChatContent(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             }
-            // 右侧按钮组：历史记录 + 切换配置
+            // 右侧按钮组：新对话 + 历史记录 + 切换配置
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // 历史记录按钮：查看归档的聊天记录
+                // 新对话按钮：保存当前对话并开始新对话
+                IconButton(onClick = onNewChat) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "新对话",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // 历史记录按钮：查看历史对话列表
                 IconButton(onClick = onHistoryClick) {
                     Icon(
                         Icons.Default.History,
@@ -635,6 +646,9 @@ private fun ChatContent(
             // 加载指示器：仅在等待 AI 回复且尚未收到任何文本时显示转圈
             else if (isLoading) {
                 item {
+                    // 工具执行时显示具体操作（如"正在创建任务..."），否则显示通用"正在思考"
+                    val statusText = viewModel.toolExecutionStatus
+                        ?: "${viewModel.companionName} 正在思考..."
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -647,7 +661,7 @@ private fun ChatContent(
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            "${viewModel.companionName} 正在思考...",
+                            statusText,
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                         )
@@ -737,6 +751,39 @@ private fun ChatContent(
 @Composable
 private fun MessageBubble(message: ChatMessage) {
     val isUser = message.isFromUser
+    // 工具消息：简洁状态行（小字、灰色、左侧图标），不渲染气泡
+    if (message.isToolMessage) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 2.dp, horizontal = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            if (message.toolDone) {
+                // 已完成：显示右箭头
+                Text(
+                    "→",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+            } else {
+                // 执行中：显示加载指示器
+                CircularProgressIndicator(
+                    modifier = Modifier.size(12.dp),
+                    strokeWidth = 1.5.dp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                message.text,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            )
+        }
+        return
+    }
+
     // 用户消息右对齐，AI 消息左对齐
     val alignment = if (isUser) Alignment.End else Alignment.Start
 
@@ -864,14 +911,20 @@ private fun StreamingMessageBubble(
 }
 
 /**
- * 历史记录面板 —— 展示上次归档的聊天记录（只读），风格对齐设置页。
+ * 历史记录面板 —— 展示所有历史对话列表，点击恢复对话。
  *
- * @param messages 归档的消息列表
+ * @param conversations 对话列表（来自数据库，按更新时间倒序）
+ * @param currentConversationId 当前活跃的对话 ID（用于高亮标记）
+ * @param onSelect 点击某个对话时触发，传入对话 ID，用于恢复该对话
+ * @param onDelete 删除某个对话时触发，传入对话 ID
  * @param onClose  关闭面板的回调
  */
 @Composable
 private fun HistoryPanel(
-    messages: List<ChatMessage>,
+    conversations: List<ConversationData>,
+    currentConversationId: String?,
+    onSelect: (String) -> Unit,
+    onDelete: (String) -> Unit,
     onClose: () -> Unit,
 ) {
     Column(
@@ -912,8 +965,8 @@ private fun HistoryPanel(
         }
         Spacer(modifier = Modifier.height(20.dp))
 
-        // 消息列表（只读）
-        if (messages.isEmpty()) {
+        // 对话列表
+        if (conversations.isEmpty()) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
@@ -928,7 +981,7 @@ private fun HistoryPanel(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        "切换 API 配置时，当前聊天记录会自动归档到这里。",
+                        "点击聊天界面的 + 按钮开始新对话，\n当前对话会自动保存到历史记录。",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
                         textAlign = TextAlign.Center,
@@ -939,10 +992,15 @@ private fun HistoryPanel(
         } else {
             LazyColumn(
                 modifier = Modifier.fillMaxSize(),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                items(messages, key = { it.id }) { message ->
-                    HistoryMessageItem(message)
+                items(conversations, key = { it.id }) { conv ->
+                    ConversationItem(
+                        conversation = conv,
+                        isActive = conv.id == currentConversationId,
+                        onSelect = { onSelect(conv.id) },
+                        onDelete = { onDelete(conv.id) },
+                    )
                 }
                 item { Spacer(modifier = Modifier.height(8.dp)) }
             }
@@ -951,48 +1009,67 @@ private fun HistoryPanel(
 }
 
 /**
- * 历史记录中的单条消息项 —— 简化版气泡，只读不可交互。
+ * 对话列表中的单条对话项 —— 显示标题、时间和消息预览。
  */
 @Composable
-private fun HistoryMessageItem(message: ChatMessage) {
-    val isUser = message.isFromUser
-    val alignment = if (isUser) Alignment.End else Alignment.Start
-
-    Column(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = alignment,
+private fun ConversationItem(
+    conversation: ConversationData,
+    isActive: Boolean,
+    onSelect: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable { onSelect() }
+            .background(
+                if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
+                else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f),
+                shape = RoundedCornerShape(12.dp),
+            )
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .background(
-                    if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                    else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.6f),
-                    shape = RoundedCornerShape(
-                        topStart = 16.dp, topEnd = 16.dp,
-                        bottomStart = if (isUser) 16.dp else 3.dp,
-                        bottomEnd = if (isUser) 3.dp else 16.dp,
-                    ),
-                )
-                .padding(horizontal = 14.dp, vertical = 10.dp),
-        ) {
+        Column(modifier = Modifier.weight(1f)) {
             Text(
-                text = message.text.take(200) + if (message.text.length > 200) "…" else "",
-                style = MaterialTheme.typography.bodySmall.copy(
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                ),
-                color = if (isUser) MaterialTheme.colorScheme.onPrimary
-                else MaterialTheme.colorScheme.onSurface,
-                maxLines = 4,
+                conversation.title,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = if (isActive) FontWeight.SemiBold else FontWeight.Normal,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
+            Spacer(modifier = Modifier.height(4.dp))
+            // 显示对话消息数量和更新时间的简短摘要
+            val msgCount = try {
+                JSONArray(conversation.messages).length()
+            } catch (_: Exception) { 0 }
+            Text(
+                "$msgCount 条消息 · ${conversation.updatedAt.take(10)}",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            )
         }
-        Text(
-            message.timestamp,
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
-            modifier = Modifier.padding(top = 2.dp),
-        )
+        if (isActive) {
+            Icon(
+                Icons.Default.Check,
+                contentDescription = "当前对话",
+                modifier = Modifier.size(18.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+        }
+        IconButton(
+            onClick = onDelete,
+            modifier = Modifier.size(28.dp),
+        ) {
+            Icon(
+                Icons.Default.Delete,
+                contentDescription = "删除对话",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+            )
+        }
     }
 }
 
