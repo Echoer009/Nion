@@ -145,6 +145,10 @@ private fun focusSetupViewModel(): FocusSetupViewModel {
 @Composable
 fun FocusScreen(
     onOpenCompanion: () -> Unit = {},
+    /** 从外部（如任务详情）跳转时传入的预选任务 ID，自动选中该任务 */
+    preselectedTaskId: String? = null,
+    /** 预选任务的标题，与 preselectedTaskId 配套使用 */
+    preselectedTaskTitle: String? = null,
 ) {
     // focusMinutes: 用户设置的专注时长（分钟），默认 25
     var focusMinutes by remember { mutableIntStateOf(25) }
@@ -159,6 +163,8 @@ fun FocusScreen(
     var completedSessions by remember { mutableIntStateOf(0) }
     // showTaskPanel: 是否显示任务选择面板
     var showTaskPanel by remember { mutableStateOf(false) }
+    /** elapsedSeconds: 本次专注已进行秒数，用于中断时按 5 分钟规则判断 */
+    var elapsedSeconds by remember { mutableIntStateOf(0) }
     val scope = rememberCoroutineScope()
 
     // 提前获取 core 实例，供倒计时协程使用
@@ -181,16 +187,30 @@ fun FocusScreen(
         )
     }
 
-    // 计时器倒计时协程：每秒 -1，到 0 自动停止并 +1 session，同时累加专注时长
+    /** 如果通过外部（如任务详情页）跳转时提供了预选任务，自动选中该任务 */
+    LaunchedEffect(preselectedTaskId) {
+        if (preselectedTaskId != null) {
+            selectedTaskId = preselectedTaskId
+            selectedTaskTitle = preselectedTaskTitle
+        }
+    }
+
+    /**
+     * 计时器倒计时协程：
+     * - 每秒 -1，同时 elapsedSeconds +1
+     * - 到 0 自动停止并 +1 session，累加完整时长到关联任务
+     * - 使用 elapsedSeconds 记录本次专注的耗时，供中断时判断
+     */
     LaunchedEffect(isRunning) {
         while (isRunning) {
             if (remainingSeconds > 0) {
                 delay(1000)
                 remainingSeconds--
+                elapsedSeconds++
             } else {
                 isRunning = false
                 completedSessions++
-                // 专注结束，累加到关联任务的 focus_seconds
+                // 专注结束，累加到关联任务的 focus_seconds（按设定总时长累加）
                 if (selectedTaskId != null) {
                     withContext(Dispatchers.IO) {
                         try {
@@ -198,6 +218,7 @@ fun FocusScreen(
                         } catch (_: Exception) {}
                     }
                 }
+                elapsedSeconds = 0 // 完成后重置耗时计数
                 break
             }
         }
@@ -482,6 +503,7 @@ fun FocusScreen(
                     ) {
                         IconButton(
                             onClick = {
+                                elapsedSeconds = 0
                                 remainingSeconds = focusMinutes * 60
                                 isRunning = false
                                 scope.launch { animatedProgress.snapTo(1f) }
@@ -528,7 +550,23 @@ fun FocusScreen(
                     ) {
                         IconButton(
                             onClick = {
-                                if (isRunning) completedSessions++
+                                if (isRunning) {
+                                    /**
+                                     * 中断专注的 5 分钟规则：
+                                     * - 专注时长 < 5 分钟（300 秒）→ 不计时
+                                     * - 专注时长 >= 5 分钟 → 按实际耗时累加到关联任务
+                                     */
+                                    if (elapsedSeconds >= 300 && selectedTaskId != null) {
+                                        scope.launch {
+                                            withContext(Dispatchers.IO) {
+                                                try {
+                                                    core.addFocusTime(selectedTaskId!!, elapsedSeconds.toLong())
+                                                } catch (_: Exception) {}
+                                            }
+                                        }
+                                    }
+                                }
+                                elapsedSeconds = 0
                                 remainingSeconds = focusMinutes * 60
                                 isRunning = false
                                 scope.launch { animatedProgress.snapTo(1f) }

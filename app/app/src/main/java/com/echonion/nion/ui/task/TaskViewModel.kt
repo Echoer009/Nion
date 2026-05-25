@@ -36,6 +36,8 @@ data class TaskItem(
     val dueDate: String?,
     val createdAt: String,
     val subtasks: List<TaskItem> = emptyList(),
+    /** 该任务累计专注秒数，来自 Rust 端 focus_seconds 字段 */
+    val focusSeconds: Long = 0,
 )
 
 @Stable
@@ -96,10 +98,20 @@ class TaskViewModel(
 
     val todoTasks: List<TaskItem> by derivedStateOf { tasks.filter { !it.isDone } }
     val doneTasks: List<TaskItem> by derivedStateOf { tasks.filter { it.isDone } }
-    val todoCount: Int by derivedStateOf { todoTasks.size }
-    val doneCount: Int by derivedStateOf { doneTasks.size }
+    /**
+     * 扁平化已完成任务 —— 保持母子分组关系。
+     * 已完成父任务 = 组根；已完成子任务 = 组的成员，通过 depth / isGroupFirst / isGroupLast 渲染连接卡片。
+     */
+    val flatDoneTasks: List<FlatTaskItem> by derivedStateOf {
+        val result = mutableListOf<FlatTaskItem>()
+        addDoneGroups(tasks, baseDepth = 0, result)
+        result
+    }
+    val todoCount: Int by derivedStateOf { flatTodoTasks.size }
+    val doneCount: Int by derivedStateOf { flatDoneTasks.size }
 
-    val flatTodoTasks: List<FlatTaskItem> by derivedStateOf { flattenWithGroupInfo(todoTasks) }
+    /** 扁平化待办任务 —— 遍历全量 tasks，flattenTodoGroup 自行处理已完成父任务下被单独取消的子任务 */
+    val flatTodoTasks: List<FlatTaskItem> by derivedStateOf { flattenWithGroupInfo(tasks) }
 
     val activeChecklistName: String
         get() = if (activeChecklistId == null) "我的任务"
@@ -540,12 +552,27 @@ class TaskViewModel(
 private fun flattenWithGroupInfo(tasks: List<TaskItem>): List<FlatTaskItem> {
     val result = mutableListOf<FlatTaskItem>()
     for (task in tasks) {
+        flattenTodoGroup(task, depth = 0, result)
+    }
+    return result
+}
+
+/**
+ * 递归展开待办任务组。未完成任务作为组根 + 递归子树；
+ * 已完成任务跳过自身但继续深入子树（子任务可能被单独取消完成）。
+ */
+private fun flattenTodoGroup(
+    task: TaskItem,
+    depth: Int,
+    result: MutableList<FlatTaskItem>,
+) {
+    if (!task.isDone) {
         val subItems = mutableListOf<FlatTaskItem>()
-        flattenSubs(task.subtasks, depth = 1, parentId = task.id, subItems)
+        flattenSubs(task.subtasks, depth = depth + 1, parentId = task.id, subItems)
         val hasSubs = subItems.isNotEmpty()
         result.add(FlatTaskItem(
             task = task,
-            depth = 0,
+            depth = depth,
             parentId = null,
             isGroupFirst = true,
             isGroupLast = !hasSubs,
@@ -554,10 +581,15 @@ private fun flattenWithGroupInfo(tasks: List<TaskItem>): List<FlatTaskItem> {
             subItems[subItems.lastIndex] = subItems.last().copy(isGroupLast = true)
             result.addAll(subItems)
         }
+    } else {
+        // 已完成 → 跳过自身，但子任务可能被单独取消完成，继续深入
+        for (sub in task.subtasks) {
+            flattenTodoGroup(sub, depth, result)
+        }
     }
-    return result
 }
 
+/** 递归展开子任务为 FlatTaskItem 列表，跳过已完成项但继续递归其子树（子任务可能被单独取消完成） */
 private fun flattenSubs(
     subs: List<TaskItem>,
     depth: Int,
@@ -565,13 +597,19 @@ private fun flattenSubs(
     result: MutableList<FlatTaskItem>,
 ) {
     for ((index, sub) in subs.withIndex()) {
-        val hasChildSubs = sub.subtasks.isNotEmpty()
+        if (sub.isDone) {
+            // 父已完成但子任务可能被单独取消，仍需递归
+            flattenSubs(sub.subtasks, depth + 1, sub.id, result)
+            continue
+        }
+        val hasChildSubs = sub.subtasks.any { !it.isDone }
+        val isLastInSameParent = index == subs.lastIndex || subs.drop(index + 1).all { it.isDone }
         result.add(FlatTaskItem(
             task = sub,
             depth = depth,
             parentId = parentId,
             isGroupFirst = false,
-            isGroupLast = index == subs.lastIndex && !hasChildSubs,
+            isGroupLast = isLastInSameParent && !hasChildSubs,
         ))
         flattenSubs(sub.subtasks, depth + 1, sub.id, result)
     }
@@ -592,6 +630,68 @@ private fun markAllTodo(task: TaskItem): TaskItem {
     return task.copy(isDone = false, subtasks = task.subtasks.map { markAllTodo(it) })
 }
 
+/**
+ * 递归遍历任务树，将已完成任务按母子分组添加到结果列表。
+ * 已完成的任务作为组根，其已完成的子任务跟随其后、缩进显示。
+ */
+private fun addDoneGroups(
+    tasks: List<TaskItem>,
+    baseDepth: Int,
+    result: MutableList<FlatTaskItem>,
+) {
+    for (task in tasks) {
+        if (task.isDone) {
+            // 已完成项作为组根
+            val subs = mutableListOf<FlatTaskItem>()
+            collectDoneSubs(task.subtasks, depth = baseDepth + 1, parentId = task.id, subs)
+            val hasDoneSubs = subs.isNotEmpty()
+            result.add(FlatTaskItem(
+                task = task,
+                depth = baseDepth,
+                parentId = null,
+                isGroupFirst = true,
+                isGroupLast = !hasDoneSubs,
+            ))
+            if (hasDoneSubs) {
+                subs[subs.lastIndex] = subs.last().copy(isGroupLast = true)
+                result.addAll(subs)
+            }
+        } else {
+            // 未完成，但其子任务中可能有已完成的，继续深入
+            addDoneGroups(task.subtasks, baseDepth, result)
+        }
+    }
+}
+
+/**
+ * 收集已完成父任务下所有已完成的子孙任务，跳过未完成的。
+ * 只收集 isDone=true 的项，保持相对深度。
+ */
+private fun collectDoneSubs(
+    subs: List<TaskItem>,
+    depth: Int,
+    parentId: String,
+    result: MutableList<FlatTaskItem>,
+) {
+    for ((index, sub) in subs.withIndex()) {
+        if (!sub.isDone) {
+            // 未完成的子任务不加入已完成列表，但仍需递归（其孙子可能已完成）
+            collectDoneSubs(sub.subtasks, depth + 1, sub.id, result)
+            continue
+        }
+        val hasDoneSubs = sub.subtasks.any { it.isDone }
+        val isLast = index == subs.lastIndex || subs.drop(index + 1).all { !it.isDone }
+        result.add(FlatTaskItem(
+            task = sub,
+            depth = depth,
+            parentId = parentId,
+            isGroupFirst = false,
+            isGroupLast = isLast && !hasDoneSubs,
+        ))
+        collectDoneSubs(sub.subtasks, depth + 1, sub.id, result)
+    }
+}
+
 private fun collectIds(task: TaskItem): List<String> {
     return listOf(task.id) + task.subtasks.flatMap { collectIds(it) }
 }
@@ -609,6 +709,7 @@ private fun TaskData.toUi(): TaskItem = TaskItem(
     isDone = status == "done",
     dueDate = dueDate,
     createdAt = createdAt,
+    focusSeconds = focusSeconds,
 )
 
 private fun ChecklistData.toUi(): ChecklistItem = ChecklistItem(

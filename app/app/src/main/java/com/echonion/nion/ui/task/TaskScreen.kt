@@ -10,6 +10,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
@@ -27,9 +28,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -49,6 +52,8 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material3.AlertDialog
@@ -90,8 +95,10 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.zIndex
 import com.echonion.nion.ui.components.DualPanelState
 import sh.calvin.reorderable.ReorderableItem
@@ -114,6 +121,8 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 fun TaskScreen(
     dualState: DualPanelState,
     viewModel: TaskViewModel,
+    /** 用户从任务详情点击"开始专注"时触发，传入 (任务ID, 任务标题) */
+    onStartFocus: (taskId: String, taskTitle: String) -> Unit = { _, _ -> },
 ) {
     var showAddSheet by remember { mutableStateOf(false) }
     var expandedTaskId by remember { mutableStateOf<String?>(null) }
@@ -146,9 +155,9 @@ fun TaskScreen(
             targetState = expandedTaskId,
             transitionSpec = {
                 if (targetState != null) {
-                    // 展开：详情浮层快速淡入，任务列表缓慢淡出
-                    (fadeIn(tween(300, easing = FastOutSlowInEasing))
-                        togetherWith fadeOut(tween(180, easing = FastOutSlowInEasing)))
+                    // 展开：详情浮层立即出现（不淡入），只让任务列表淡出
+                    // 避免 detail 分支的 scrim 也在淡入期间透明，导致底层白色列表透出
+                    (EnterTransition.None togetherWith fadeOut(tween(250, easing = FastOutSlowInEasing)))
                         .using(SizeTransform(clip = false))
                 } else {
                     // 收回：任务列表快速淡入，详情浮层缓慢淡出
@@ -173,6 +182,11 @@ fun TaskScreen(
                         },
                         onUpdateDueDate = { date ->
                             viewModel.updateDueDate(taskId, date)
+                        },
+                        /** 点击开始专注：关闭详情层，通知外部切换到专注页面 */
+                        onStartFocus = {
+                            expandedTaskId = null
+                            onStartFocus(task.id, task.title)
                         },
                         sharedElementModifier = Modifier.sharedElement(
                             sharedContentState = rememberSharedContentState("task_detail_$taskId"),
@@ -614,6 +628,98 @@ private fun AddTaskOverlay(
 }
 
 /**
+ * 自适应高度布局 —— 头部固定、中间自适应、底部固定。
+ *
+ * 使用 SubcomposeLayout 分两轮测量：
+ * 1. 第一轮：测量 header 和 footer 的实际高度
+ * 2. 第二轮：根据剩余空间计算 body 的最大高度，再测量 body
+ *
+ * 整体高度跟随内容自适应，不超过 maxHeight。
+ * 当内容总高度超过 maxHeight 时，body（备注输入框）被压缩并内部滚动，
+ * header 和 footer 始终完整显示。
+ *
+ * @param maxHeight 布局的最大高度约束（通常是屏幕高度的 85%）
+ * @param contentPadding 内容区域内边距
+ * @param spacing 子元素之间的间距
+ * @param header 头部内容（标题行），自然高度
+ * @param body 中间自适应内容（备注输入框），接收可用的最大高度参数
+ * @param footer 底部固定内容（专注信息 + 工具栏），自然高度
+ */
+@Composable
+private fun AdaptiveHeightLayout(
+    maxHeight: Dp,
+    contentPadding: Dp = 20.dp,
+    spacing: Dp = 16.dp,
+    header: @Composable () -> Unit,
+    body: @Composable (maxBodyHeight: Dp) -> Unit,
+    footer: @Composable () -> Unit,
+) {
+    val density = LocalDensity.current
+    val spacingPx = with(density) { spacing.roundToPx() }
+    val paddingPx = with(density) { contentPadding.roundToPx() }
+    // body 最小高度：备注输入框至少 120dp
+    val minBodyPx = with(density) { 120.dp.roundToPx() }
+    val maxHeightPx = with(density) { maxHeight.roundToPx() }
+
+    SubcomposeLayout(
+        modifier = Modifier.fillMaxWidth(),
+    ) { constraints ->
+        val width = constraints.maxWidth
+        // 实际最大高度约束：取父约束和 maxHeight 中的较小值
+        val effectiveMaxHeight = minOf(constraints.maxHeight, maxHeightPx)
+
+        // 内容区域的约束（减去左右 padding）
+        val contentConstraints = constraints.copy(
+            minWidth = (width - paddingPx * 2).coerceAtLeast(0),
+            maxWidth = (width - paddingPx * 2).coerceAtLeast(0),
+        )
+
+        // ===== 第一轮：测量头部和底部，获取实际高度 =====
+        val headerPlaceable = subcompose("header", header).first()
+            .measure(contentConstraints)
+        val footerPlaceable = subcompose("footer", footer).first()
+            .measure(contentConstraints)
+
+        // ===== 计算中间区域的最大可用高度 =====
+        // = 总最大高度 - 上下padding - 头部 - 底部 - 2个间距(header↔body, body↔footer)
+        val maxBodyPx = (
+            effectiveMaxHeight
+                - paddingPx * 2
+                - headerPlaceable.height
+                - footerPlaceable.height
+                - spacingPx * 2
+        ).coerceAtLeast(minBodyPx)
+
+        // ===== 第二轮：用计算出的最大高度测量中间内容 =====
+        val bodyConstraints = contentConstraints.copy(
+            minHeight = minBodyPx,
+            maxHeight = maxBodyPx,
+        )
+        val bodyPlaceable = subcompose("body") {
+            body(with(density) { maxBodyPx.toDp() })
+        }.first().measure(bodyConstraints)
+
+        // ===== 计算实际总高度并布局 =====
+        val totalHeight = (
+            paddingPx
+                + headerPlaceable.height + spacingPx
+                + bodyPlaceable.height + spacingPx
+                + footerPlaceable.height
+                + paddingPx
+        ).coerceIn(0, effectiveMaxHeight)
+
+        layout(width, totalHeight) {
+            var y = paddingPx
+            headerPlaceable.place(paddingPx, y)
+            y += headerPlaceable.height + spacingPx
+            bodyPlaceable.place(paddingPx, y)
+            y += bodyPlaceable.height + spacingPx
+            footerPlaceable.place(paddingPx, y)
+        }
+    }
+}
+
+/**
  * 任务详情浮层内部的面板状态：
  * - DETAIL：显示任务详情（备注、工具栏）
  * - ADD_SUBTASK：显示子任务创建表单
@@ -646,6 +752,8 @@ private fun TaskDetailOverlay(
     onUpdateNotes: (String) -> Unit,
     onUpdateDueDate: (String?) -> Unit,
     sharedElementModifier: Modifier,
+    /** 用户点击"开始专注"按钮时触发 */
+    onStartFocus: () -> Unit = {},
 ) {
     // 备注内容：初始值为任务描述，可随时编辑，每次变更自动保存
     var notes by remember(task.id) { mutableStateOf(task.description ?: "") }
@@ -655,10 +763,11 @@ private fun TaskDetailOverlay(
     var subtaskTitle by remember { mutableStateOf("") }
     var subtaskPriority by remember { mutableStateOf("medium") }
 
-    // 全屏透明点击区域（无遮罩）+ 居中卡片
-    Box(
+    // 半透明遮罩 + 点击外部关闭（与 AddTaskOverlay 一致的 scrim 背景，防止交叉淡入淡出期间背景透出）
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -666,12 +775,17 @@ private fun TaskDetailOverlay(
             ),
         contentAlignment = Alignment.Center,
     ) {
+        // maxCardHeight：卡片允许的最大高度 = 屏幕高度的 85%，保证不超出屏幕
+        val maxCardHeight = maxHeight * 0.85f
+
         // 卡片：通过 sharedElementModifier 与触发卡片共享 bounds 动画
         // 无边框，使用 tonalElevation=12dp 形成粗阴影边缘
+        // heightIn 限制最大高度，防止内容过多时扩出屏幕
         Surface(
             modifier = sharedElementModifier
                 .fillMaxWidth()
-                .padding(horizontal = 16.dp),
+                .padding(horizontal = 16.dp)
+                .heightIn(max = maxCardHeight),
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surfaceContainerLowest,
             tonalElevation = 12.dp,
@@ -809,8 +923,12 @@ private fun TaskDetailOverlay(
 
                     DetailPanel.DETAIL -> {
                         // ===== 任务详情 =====
+                        // 用 Column + weight 替代 AdaptiveHeightLayout (SubcomposeLayout)，
+                        // 避免多次 subcompose 导致的"先显示居中标题，后续才出现内容"闪烁。
                         Column(
-                            modifier = Modifier.padding(20.dp),
+                            modifier = Modifier
+                                .heightIn(max = maxCardHeight)
+                                .padding(20.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
                             // 顶部：任务标题 + 日历图标 + 关闭按钮
@@ -860,7 +978,8 @@ private fun TaskDetailOverlay(
                                 }
                             }
 
-                            // 可编辑的备注输入框
+                            // 可编辑的备注输入框 —— weight(1f, fill=false) 占据 header/footer 之外的剩余空间
+                            // 内容少时收缩（最低 120dp），内容多时自动扩展，超出后内部滚动
                             OutlinedTextField(
                                 value = notes,
                                 onValueChange = {
@@ -870,7 +989,8 @@ private fun TaskDetailOverlay(
                                 placeholder = { Text("添加备注...") },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .height(120.dp),
+                                    .weight(1f, fill = false)
+                                    .heightIn(min = 120.dp),
                                 shape = RoundedCornerShape(14.dp),
                                 colors = OutlinedTextFieldDefaults.colors(
                                     focusedBorderColor = MaterialTheme.colorScheme.primary,
@@ -879,54 +999,110 @@ private fun TaskDetailOverlay(
                                 ),
                             )
 
-                            // 工具栏：添加子任务 + 删除
-                            Surface(
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 8.dp, vertical = 4.dp),
-                                    horizontalArrangement = Arrangement.SpaceEvenly,
-                                    verticalAlignment = Alignment.CenterVertically,
+                            // 底部固定区域：专注信息 + 工具栏，始终显示
+                            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                                /**
+                                 * 专注信息行 —— 显示该任务的累计专注时长，并提供"开始专注"入口。
+                                 * 点击右侧播放按钮后，关闭详情浮层并跳转到专注页面，该任务会自动预选。
+                                 */
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    onClick = onStartFocus,
                                 ) {
-                                    // 添加子任务按钮 —— 点击后卡片内容 morph 为子任务创建表单
-                                    TextButton(
-                                        onClick = { panel = DetailPanel.ADD_SUBTASK },
-                                        colors = ButtonDefaults.textButtonColors(
-                                            contentColor = MaterialTheme.colorScheme.primary,
-                                        ),
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
                                     ) {
+                                        // 左侧：计时器图标 + 专注时间
                                         Icon(
-                                            Icons.Default.AddCircleOutline,
+                                            Icons.Default.Timer,
                                             contentDescription = null,
-                                            modifier = Modifier.size(18.dp),
+                                            modifier = Modifier.size(20.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
                                         )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("添加子任务", fontWeight = FontWeight.Medium)
+                                        Spacer(modifier = Modifier.width(10.dp))
+                                        Column(modifier = Modifier.weight(1f)) {
+                                            Text(
+                                                "专注时间",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                            Text(
+                                                formatFocusTime(task.focusSeconds),
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                fontWeight = FontWeight.Medium,
+                                            )
+                                        }
+                                        // 右侧：开始专注按钮
+                                        Surface(
+                                            shape = RoundedCornerShape(12.dp),
+                                            color = MaterialTheme.colorScheme.primaryContainer,
+                                        ) {
+                                            Icon(
+                                                Icons.Default.PlayArrow,
+                                                contentDescription = "开始专注",
+                                                modifier = Modifier
+                                                    .padding(8.dp)
+                                                    .size(20.dp),
+                                                tint = MaterialTheme.colorScheme.primary,
+                                            )
+                                        }
                                     }
-                                    // 分隔圆点
-                                    Text(
-                                        "·",
-                                        style = MaterialTheme.typography.bodyLarge,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
-                                    )
-                                    // 删除按钮
-                                    TextButton(
-                                        onClick = onDelete,
-                                        colors = ButtonDefaults.textButtonColors(
-                                            contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                                        ),
+                                }
+
+                                // 工具栏：添加子任务 + 删除
+                                Surface(
+                                    shape = RoundedCornerShape(16.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    modifier = Modifier.fillMaxWidth(),
+                                ) {
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                                        horizontalArrangement = Arrangement.SpaceEvenly,
+                                        verticalAlignment = Alignment.CenterVertically,
                                     ) {
-                                        Icon(
-                                            Icons.Outlined.DeleteOutline,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(18.dp),
+                                        // 添加子任务按钮 —— 点击后卡片内容 morph 为子任务创建表单
+                                        TextButton(
+                                            onClick = { panel = DetailPanel.ADD_SUBTASK },
+                                            colors = ButtonDefaults.textButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.primary,
+                                            ),
+                                        ) {
+                                            Icon(
+                                                Icons.Default.AddCircleOutline,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("添加子任务", fontWeight = FontWeight.Medium)
+                                        }
+                                        // 分隔圆点
+                                        Text(
+                                            "·",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
                                         )
-                                        Spacer(modifier = Modifier.width(6.dp))
-                                        Text("删除", fontWeight = FontWeight.Medium)
+                                        // 删除按钮
+                                        TextButton(
+                                            onClick = onDelete,
+                                            colors = ButtonDefaults.textButtonColors(
+                                                contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                            ),
+                                        ) {
+                                            Icon(
+                                                Icons.Outlined.DeleteOutline,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp),
+                                            )
+                                            Spacer(modifier = Modifier.width(6.dp))
+                                            Text("删除", fontWeight = FontWeight.Medium)
+                                        }
                                     }
                                 }
                             }
@@ -1113,7 +1289,7 @@ private fun TaskList(
                 ReorderableItem(
                     state = reorderableState,
                     key = flatItem.task.id,
-                    animateItemModifier = if (!isInDraggedGroup) Modifier.animateItem(fadeInSpec = null, fadeOutSpec = null) else Modifier,
+                    animateItemModifier = if (!isInDraggedGroup) Modifier.animateItem() else Modifier,
                 ) { isDragging ->
                     val density = LocalDensity.current
 
@@ -1320,19 +1496,20 @@ private fun TaskList(
             }
         }
 
-        val doneTasks = viewModel.doneTasks
+        val doneTasks = viewModel.flatDoneTasks
         if (doneTasks.isNotEmpty()) {
             item(key = "done_header", contentType = "header") { SectionHeader("已完成", doneTasks.size) }
 
             items(
                 items = doneTasks,
-                key = { it.id },
-                contentType = { "done_task" },
-            ) { task ->
-                val isSelected = task.id in selectedIds
+                key = { it.task.id },
+                contentType = { if (it.depth == 0) "done_main" else "done_sub" },
+            ) { flatItem ->
+                val isSelected = flatItem.task.id in selectedIds
                 val cardShape = remember { RoundedCornerShape(16.dp) }
                 Box(
                     modifier = Modifier
+                        .animateItem()
                         .padding(vertical = 4.dp)
                         .then(
                             if (isSelected) Modifier.border(
@@ -1342,7 +1519,7 @@ private fun TaskList(
                         )
                 ) {
                     FlatTaskRow(
-                        item = FlatTaskItem(task, 0, null, true, true),
+                        item = flatItem,
                         onToggleDone = onToggleDone,
                         onClick = { clickedTask ->
                             if (isSelectionMode) {
@@ -1353,7 +1530,7 @@ private fun TaskList(
                         },
                         isSelected = isSelected,
                         isGroupSelected = isSelected,
-                        sharedElementModifier = taskSharedModifier(task.id),
+                        sharedElementModifier = taskSharedModifier(flatItem.task.id),
                     )
                 }
             }

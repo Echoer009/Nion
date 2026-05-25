@@ -41,3 +41,21 @@ fun String?.isOverdue(): Boolean {
         false
     }
 }
+
+/**
+ * 格式化累计专注时间（秒 → 可读字符串）。
+ *
+ * @param seconds 累计秒数
+ * @return 格式化后的字符串，如 "2h 30m"、"45m"、"暂无专注"
+ */
+fun formatFocusTime(seconds: Long): String {
+    if (seconds <= 0) return "暂无专注"
+    val hours = seconds / 3600
+    val minutes = (seconds % 3600) / 60
+    return when {
+        hours > 0 && minutes > 0 -> "${hours}h ${minutes}m"
+        hours > 0 -> "${hours}h"
+        minutes > 0 -> "${minutes}m"
+        else -> "不到1分钟"
+    }
+}
