@@ -79,6 +79,10 @@ fun NionApp() {
     /** 从任务详情跳转专注页面时，携带的预选任务信息 */
     var preselectedFocusTaskId by remember { mutableStateOf<String?>(null) }
     var preselectedFocusTaskTitle by remember { mutableStateOf<String?>(null) }
+    /** 从任务详情跳转时携带的预选专注时长（分钟），null 表示未设置 */
+    var preselectedFocusDuration by remember { mutableStateOf<Int?>(null) }
+    /** 从任务详情跳转时是否自动启动计时器 */
+    var autoStartFocus by remember { mutableStateOf(false) }
 
     NionTheme(colorTheme = colorTheme) {
         val navController = rememberNavController()
@@ -216,19 +220,23 @@ fun NionApp() {
                         TaskScreen(
                             dualState = dualState,
                             viewModel = viewModel,
-                            /** 点击任务详情中的专注按钮：记录预选任务并跳转到专注页 */
-                            onStartFocus = { taskId, taskTitle ->
+                            /** 点击任务详情中的专注按钮：立即导航到专注页，面板关闭在后台并行 */
+                            onStartFocus = { taskId, taskTitle, durationMinutes ->
                                 preselectedFocusTaskId = taskId
                                 preselectedFocusTaskTitle = taskTitle
+                                preselectedFocusDuration = durationMinutes
+                                autoStartFocus = true
+                                // 先立即导航（同步），避免 closePanel 的 200ms 阻塞导致任务列表闪现
+                                navController.navigate("pomodoro") {
+                                    popUpTo(navController.graph.findStartDestination().id) {
+                                        saveState = true
+                                    }
+                                    launchSingleTop = true
+                                    restoreState = true
+                                }
+                                // 面板关闭在后台并行执行，不阻塞导航
                                 coroutineScope.launch {
                                     dualState.closePanel()
-                                    navController.navigate("pomodoro") {
-                                        popUpTo(navController.graph.findStartDestination().id) {
-                                            saveState = true
-                                        }
-                                        launchSingleTop = true
-                                        restoreState = true
-                                    }
                                 }
                             },
                         )
@@ -243,6 +251,8 @@ fun NionApp() {
                             onOpenCompanion = { dualState.openRight() },
                             preselectedTaskId = preselectedFocusTaskId,
                             preselectedTaskTitle = preselectedFocusTaskTitle,
+                            preselectedDuration = preselectedFocusDuration,
+                            autoStart = autoStartFocus,
                         )
                         /**
                          * 预选任务信息在传递给 FocusScreen 后消费掉，
@@ -252,6 +262,8 @@ fun NionApp() {
                             if (preselectedFocusTaskId != null) {
                                 preselectedFocusTaskId = null
                                 preselectedFocusTaskTitle = null
+                                preselectedFocusDuration = null
+                                autoStartFocus = false
                             }
                         }
                     }

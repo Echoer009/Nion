@@ -1,6 +1,7 @@
 package com.echonion.nion.ui.focus
 
 import android.app.Application
+import androidx.activity.ComponentActivity
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -50,10 +51,8 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -79,7 +78,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.echonion.nion.core
 import com.echonion.nion.ui.theme.NionColors
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.nion_core.NionCore
@@ -115,6 +113,23 @@ class FocusSetupViewModel(private val core: NionCore) : ViewModel() {
     }
 }
 
+/**
+ * 获取 Activity 作用域的 FocusTimerViewModel。
+ *
+ * 通过 viewModelStoreOwner = activity 将 ViewModel 绑定到 Activity 生命周期，
+ * 使得即使用户在导航页之间切换（FocusScreen 被销毁/重建），
+ * ViewModel 中的计时器状态和倒计时协程也不会中断。
+ */
+@Composable
+private fun focusTimerViewModel(): FocusTimerViewModel {
+    val context = LocalContext.current
+    val app = context.applicationContext as Application
+    return viewModel(
+        viewModelStoreOwner = context as ComponentActivity,
+        factory = FocusTimerViewModel.Factory(app),
+    )
+}
+
 @Composable
 private fun focusSetupViewModel(): FocusSetupViewModel {
     val context = LocalContext.current
@@ -139,121 +154,102 @@ private fun focusSetupViewModel(): FocusSetupViewModel {
  *   内部显示任务卡片列表（累计专注越久颜色越深），
  *   选中任务后背景从外围收缩回时钟中心
  *
+ * 所有计时器状态（isRunning、remainingSeconds、focusMinutes 等）存放在
+ * Activity 作用域的 FocusTimerViewModel 中，导航切换不会丢失。
+ *
  * @param onOpenCompanion 点击右上角伙伴图标的回调
+ * @param preselectedTaskId 从外部（如任务详情）跳转时传入的预选任务 ID
+ * @param preselectedTaskTitle 预选任务的标题
+ * @param preselectedDuration 从外部传入的预选专注时长（分钟），覆盖默认 25 分钟
+ * @param autoStart 是否自动启动计时器（从任务详情跳转时为 true）
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun FocusScreen(
     onOpenCompanion: () -> Unit = {},
-    /** 从外部（如任务详情）跳转时传入的预选任务 ID，自动选中该任务 */
     preselectedTaskId: String? = null,
-    /** 预选任务的标题，与 preselectedTaskId 配套使用 */
     preselectedTaskTitle: String? = null,
+    preselectedDuration: Int? = null,
+    autoStart: Boolean = false,
 ) {
-    // focusMinutes: 用户设置的专注时长（分钟），默认 25
-    var focusMinutes by remember { mutableIntStateOf(25) }
-    // selectedTaskId / selectedTaskTitle: 当前关联的任务信息
-    var selectedTaskId by remember { mutableStateOf<String?>(null) }
-    var selectedTaskTitle by remember { mutableStateOf<String?>(null) }
-    // isRunning: 计时器是否正在运行
-    var isRunning by remember { mutableStateOf(false) }
-    // remainingSeconds: 剩余秒数
-    var remainingSeconds by remember { mutableIntStateOf(focusMinutes * 60) }
-    // completedSessions: 已完成的专注次数
-    var completedSessions by remember { mutableIntStateOf(0) }
-    // showTaskPanel: 是否显示任务选择面板
+    // Activity 作用域的 ViewModel，导航切换不丢失计时器状态
+    val vm = focusTimerViewModel()
+
+    // 处理外部传入的预选任务信息（ViewModel 内部通过 consumedPreselectedId 去重，仅应用一次）
+    LaunchedEffect(preselectedTaskId) {
+        vm.applyPreselection(preselectedTaskId, preselectedTaskTitle, preselectedDuration, autoStart)
+    }
+
+    // showTaskPanel: 是否显示任务选择面板（纯 UI 状态，留在 Composable 中）
     var showTaskPanel by remember { mutableStateOf(false) }
-    /** elapsedSeconds: 本次专注已进行秒数，用于中断时按 5 分钟规则判断 */
-    var elapsedSeconds by remember { mutableIntStateOf(0) }
-    val scope = rememberCoroutineScope()
 
-    // 提前获取 core 实例，供倒计时协程使用
-    val context = LocalContext.current
-    val core = remember { (context.applicationContext as Application).core() }
-
-    val totalSeconds = focusMinutes * 60
-    // progress: 剩余时间占总时间的比例
-    val progress = remainingSeconds.toFloat() / totalSeconds.toFloat()
+    val totalSeconds = vm.totalSeconds
+    // progress: 剩余时间占总时间的比例，从 ViewModel 读取
+    val progress = vm.progress
 
     // animatedProgress: 进度的动画值，平滑过渡
     val animatedProgress = remember { Animatable(1f) }
-    LaunchedEffect(progress) {
-        animatedProgress.animateTo(
-            targetValue = progress,
-            animationSpec = tween(
-                durationMillis = 600,
-                easing = androidx.compose.animation.core.FastOutSlowInEasing,
-            ),
-        )
-    }
-
-    /** 如果通过外部（如任务详情页）跳转时提供了预选任务，自动选中该任务 */
-    LaunchedEffect(preselectedTaskId) {
-        if (preselectedTaskId != null) {
-            selectedTaskId = preselectedTaskId
-            selectedTaskTitle = preselectedTaskTitle
+    // 根据 needsProgressSnap 决定是瞬间跳转还是动画过渡
+    LaunchedEffect(progress, vm.needsProgressSnap) {
+        if (vm.needsProgressSnap) {
+            // reset / stopEarly / setDuration 后瞬间重置，不做动画
+            animatedProgress.snapTo(progress)
+            vm.clearProgressSnap()
+        } else {
+            // 正常倒计时：平滑过渡到新进度
+            animatedProgress.animateTo(
+                targetValue = progress,
+                animationSpec = tween(
+                    durationMillis = 600,
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                ),
+            )
         }
     }
 
-    /**
-     * 计时器倒计时协程：
-     * - 每秒 -1，同时 elapsedSeconds +1
-     * - 到 0 自动停止并 +1 session，累加完整时长到关联任务
-     * - 使用 elapsedSeconds 记录本次专注的耗时，供中断时判断
-     */
-    LaunchedEffect(isRunning) {
-        while (isRunning) {
-            if (remainingSeconds > 0) {
-                delay(1000)
-                remainingSeconds--
-                elapsedSeconds++
-            } else {
-                isRunning = false
-                completedSessions++
-                // 专注结束，累加到关联任务的 focus_seconds（按设定总时长累加）
-                if (selectedTaskId != null) {
-                    withContext(Dispatchers.IO) {
-                        try {
-                            core.addFocusTime(selectedTaskId!!, totalSeconds.toLong())
-                        } catch (_: Exception) {}
-                    }
-                }
-                elapsedSeconds = 0 // 完成后重置耗时计数
-                break
-            }
-        }
-    }
-
-    val minutes = remainingSeconds / 60
-    val seconds = remainingSeconds % 60
+    val minutes = vm.remainingSeconds / 60
+    val seconds = vm.remainingSeconds % 60
     val timeText = String.format("%02d:%02d", minutes, seconds)
 
-    // dotFraction: 指示圆点在圆周上的位置比例（0=12点, focusMinutes/120=设定时长对应的角度）
-    val dotFraction = if (isRunning || remainingSeconds < focusMinutes * 60) {
-        // 运行中或暂停：圆点跟随剩余进度
-        (focusMinutes.toFloat() / 120f) * (remainingSeconds.toFloat() / (focusMinutes * 60f))
-    } else {
-        // 初始状态：圆点在设定时长对应位置
-        focusMinutes.toFloat() / 120f
-    }
-    // dotFractionAnim: 指示圆点的平滑动画值，避免圆点瞬时跳动到新位置
-    val dotFractionAnim = remember { Animatable(dotFraction) }
-    LaunchedEffect(dotFraction) {
-        dotFractionAnim.animateTo(
-            targetValue = dotFraction,
-            animationSpec = tween(
-                durationMillis = 600,
-                easing = androidx.compose.animation.core.FastOutSlowInEasing,
-            ),
-        )
+    // isTouchingClock: 用户是否正在触摸表盘（拖拽或点击刻度区域）
+    // 用于控制高亮刻度的显示/隐藏
+    var isTouchingClock by remember { mutableStateOf(false) }
+
+    // highlightFraction: 高亮刻度在圆周上的位置比例（0=12点, 1=回到12点）
+    // 仅在拖拽时有意义，值 = focusMinutes / 120
+    val highlightFraction = vm.focusMinutes.toFloat() / 120f
+
+    // highlightFractionAnim: 高亮刻度的动画位置值
+    // 拖拽中 snapTo 瞬间跟随手指，松手后 animateTo 平滑过渡
+    val highlightFractionAnim = remember { Animatable(highlightFraction) }
+    LaunchedEffect(highlightFraction, isTouchingClock) {
+        if (isTouchingClock) {
+            // 拖拽中：瞬间跳到手指位置，无延迟
+            highlightFractionAnim.snapTo(highlightFraction)
+        } else {
+            // 松手后：平滑过渡到最终位置（配合淡出动画）
+            highlightFractionAnim.animateTo(
+                targetValue = highlightFraction,
+                animationSpec = tween(
+                    durationMillis = 300,
+                    easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                ),
+            )
+        }
     }
 
+    // highlightAlpha: 高亮刻度的透明度，松手后淡出消失
+    val highlightAlpha by animateFloatAsState(
+        targetValue = if (isTouchingClock) 1f else 0f,
+        animationSpec = tween(durationMillis = 300),
+        label = "highlightAlpha",
+    )
+
     val primaryColor = MaterialTheme.colorScheme.primary
-    val onSurfaceColor = MaterialTheme.colorScheme.onSurface
 
     // playScale: 播放按钮缩放动画
     val playScale = remember { Animatable(1f) }
-    LaunchedEffect(isRunning) {
+    LaunchedEffect(vm.isRunning) {
         playScale.animateTo(0.85f, tween(100))
         playScale.animateTo(1f, spring(dampingRatio = 0.4f, stiffness = 400f))
     }
@@ -293,7 +289,7 @@ fun FocusScreen(
                                 fontWeight = FontWeight.Bold,
                             )
                             Text(
-                                if (isRunning) "计时进行中..." else "点击/拖拽刻度设置时长",
+                                if (vm.isRunning) "计时进行中..." else "点击/拖拽刻度设置时长",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -330,79 +326,82 @@ fun FocusScreen(
                 Box(
                     modifier = Modifier
                         .size(timerSize)
-                        .pointerInput(isRunning) {
-                            if (isRunning) return@pointerInput
+                        // 计时器运行时禁用刻度交互
+                        .pointerInput(vm.isRunning) {
+                            if (vm.isRunning) return@pointerInput
                             awaitEachGesture {
-                                val down = awaitFirstDown()
-                                val downPos = down.position
-                                val center = Offset(size.width / 2f, size.height / 2f)
-                                val outerR = kotlin.math.min(size.width, size.height).toFloat() / 2f
-                                // 刻度判断区域：外圈 50% 半径以上为刻度/拖拽区
-                                val tickZoneStart = outerR * 0.5f
+                                // 触摸开始：显示高亮
+                                isTouchingClock = true
+                                try {
+                                    val down = awaitFirstDown()
+                                    val downPos = down.position
+                                    val center = Offset(size.width / 2f, size.height / 2f)
+                                    val outerR = kotlin.math.min(size.width, size.height).toFloat() / 2f
+                                    // 刻度判断区域：外圈 50% 半径以上为刻度/拖拽区
+                                    val tickZoneStart = outerR * 0.5f
 
-                                var dragged = false
+                                    var dragged = false
 
-                                /** 根据触点位置计算对应的分钟数（1~120，未吸附） */
-                                fun minutesFromPosition(pos: Offset): Int {
-                                    val dx = pos.x - center.x
-                                    val dy = pos.y - center.y
-                                    val angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
-                                    var normalized = angle + 90f
-                                    if (normalized < 0) normalized += 360f
-                                    val fraction = (normalized / 360f).coerceIn(0f, 1f)
-                                    return (1 + fraction * 119).roundToInt().coerceIn(1, 120)
-                                }
-
-                                // 等待后续事件，判断是点击还是拖拽
-                                var lastPos = downPos
-                                while (true) {
-                                    val event = awaitPointerEvent()
-                                    val change = event.changes.firstOrNull() ?: break
-                                    // 通过比较当前与上一次触点位置来判断是否发生拖拽
-                                    if (change.position != lastPos) {
-                                        change.consume()
-                                        dragged = true
-                                        lastPos = change.position
-                                        val newMinutes = minutesFromPosition(change.position)
-                                        focusMinutes = newMinutes
-                                        remainingSeconds = newMinutes * 60
+                                    /** 根据触点位置计算对应的分钟数（1~120，未吸附） */
+                                    fun minutesFromPosition(pos: Offset): Int {
+                                        val dx = pos.x - center.x
+                                        val dy = pos.y - center.y
+                                        val angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+                                        var normalized = angle + 90f
+                                        if (normalized < 0) normalized += 360f
+                                        val fraction = (normalized / 360f).coerceIn(0f, 1f)
+                                        return (1 + fraction * 119).roundToInt().coerceIn(1, 120)
                                     }
-                                    if (!change.pressed) {
-                                        // 手指抬起
-                                        change.consume()
-                                        break
-                                    }
-                                }
 
-                                if (dragged) {
-                                    // 拖拽结束：吸附到最近的 5 分钟整数倍
-                                    val snapped = ((focusMinutes + 2) / 5) * 5
-                                    val final = snapped.coerceIn(5, 120)
-                                    focusMinutes = final
-                                    remainingSeconds = final * 60
-                                    scope.launch { animatedProgress.snapTo(1f) }
-                                } else {
-                                    // 点击：根据触点位置判断操作
-                                    val dx = downPos.x - center.x
-                                    val dy = downPos.y - center.y
-                                    val dist = kotlin.math.sqrt(dx * dx + dy * dy)
-                                    if (dist >= tickZoneStart) {
-                                        // 点击刻度区域 → 吸附到最近的 5 分钟刻度
-                                        val rawMinutes = minutesFromPosition(downPos)
-                                        val snapped = ((rawMinutes + 2) / 5) * 5
-                                        val newMinutes = snapped.coerceIn(5, 120)
-                                        focusMinutes = newMinutes
-                                        remainingSeconds = newMinutes * 60
-                                        scope.launch { animatedProgress.snapTo(1f) }
+                                    // 等待后续事件，判断是点击还是拖拽
+                                    var lastPos = downPos
+                                    while (true) {
+                                        val event = awaitPointerEvent()
+                                        val change = event.changes.firstOrNull() ?: break
+                                        // 通过比较当前与上一次触点位置来判断是否发生拖拽
+                                        if (change.position != lastPos) {
+                                            change.consume()
+                                            dragged = true
+                                            lastPos = change.position
+                                            val newMinutes = minutesFromPosition(change.position)
+                                            vm.setDuration(newMinutes)
+                                        }
+                                        if (!change.pressed) {
+                                            // 手指抬起
+                                            change.consume()
+                                            break
+                                        }
+                                    }
+
+                                    if (dragged) {
+                                        // 拖拽结束：吸附到最近的 5 分钟整数倍
+                                        val snapped = ((vm.focusMinutes + 2) / 5) * 5
+                                        val final = snapped.coerceIn(5, 120)
+                                        vm.setDuration(final)
                                     } else {
-                                        // 点击中心区域 → 展开任务面板
-                                        showTaskPanel = true
+                                        // 点击：根据触点位置判断操作
+                                        val dx = downPos.x - center.x
+                                        val dy = downPos.y - center.y
+                                        val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+                                        if (dist >= tickZoneStart) {
+                                            // 点击刻度区域 → 吸附到最近的 5 分钟刻度
+                                            val rawMinutes = minutesFromPosition(downPos)
+                                            val snapped = ((rawMinutes + 2) / 5) * 5
+                                            val newMinutes = snapped.coerceIn(5, 120)
+                                            vm.setDuration(newMinutes)
+                                        } else {
+                                            // 点击中心区域 → 展开任务面板
+                                            showTaskPanel = true
+                                        }
                                     }
+                                } finally {
+                                    // 触摸结束：隐藏高亮（淡出）
+                                    isTouchingClock = false
                                 }
                             }
                         },
-                        contentAlignment = Alignment.Center,
-                    ) {
+                    contentAlignment = Alignment.Center,
+                ) {
                     // 圆角长条刻度 Canvas
                     Canvas(modifier = Modifier.fillMaxSize()) {
                         val cx = size.width / 2f
@@ -411,21 +410,17 @@ fun FocusScreen(
                         // 根据进度计算已点亮的刻度数
                         val litCount = (animatedProgress.value * 60).roundToInt()
 
+                        // 第一层：绘制 60 根基础刻度
                         for (i in 0 until 60) {
                             // 从12点位置开始顺时针
                             val angleDeg = -90.0 + 360.0 * i / 60
-                            val angleRad = Math.toRadians(angleDeg)
                             val isLit = i < litCount
                             // 5 的倍数 = 时刻刻度，更长更宽
                             val isMajor = i % 5 == 0
 
-                            // 刻度长度：时刻刻度更长
                             val tickLength = if (isMajor) 22.dp.toPx() else 12.dp.toPx()
-                            // 刻度宽度：时刻刻度更宽
                             val tickWidth = if (isMajor) 3.5f.dp.toPx() else 2f.dp.toPx()
 
-                            // 用旋转画布的方式绘制圆角矩形刻度
-                            // 旋转到对应角度后，在上方绘制一个水平圆角矩形
                             val tickColor = if (isLit) primaryColor
                                 else primaryColor.copy(alpha = if (isMajor) 0.3f else 0.12f)
                             rotate(angleDeg.toFloat(), pivot = Offset(cx, cy)) {
@@ -436,25 +431,32 @@ fun FocusScreen(
                                         cy - outerRadius,
                                     ),
                                     size = Size(tickWidth, tickLength),
-                                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(tickWidth / 2f),
+                                    cornerRadius = CornerRadius(tickWidth / 2f),
                                 )
                             }
                         }
 
-                        // 指示圆点（在刻度内侧）
-                        // 使用动画后的位置值以产生平滑过渡效果
-                        val dotAngle = -90.0 + 360.0 * dotFractionAnim.value
-                        val dotAngleRad = Math.toRadians(dotAngle)
-                        // 圆点轨道在刻度内侧，离刻度有间距
-                        val dotOrbitRadius = outerRadius - 32.dp.toPx()
-                        val dotX = cx + dotOrbitRadius * cos(dotAngleRad).toFloat()
-                        val dotY = cy + dotOrbitRadius * sin(dotAngleRad).toFloat()
-                        // 用更深的主题色（onPrimary 的暗色版）
-                        drawCircle(
-                            color = onSurfaceColor,
-                            radius = 5.dp.toPx(),
-                            center = Offset(dotX, dotY),
-                        )
+                        // 第二层：高亮刻度（仅在触摸时显示，松手后淡出）
+                        // 使用 highlightFractionAnim 的连续角度值，不截断到整数刻度索引
+                        // 位置精确跟随手指，配合 highlightAlpha 控制淡入淡出
+                        if (highlightAlpha > 0.01f) {
+                            val hlAngleDeg = -90.0 + 360.0 * highlightFractionAnim.value
+                            // 高亮刻度比普通刻度更长更粗，醒目的亮橙色
+                            val hlLength = 26.dp.toPx()
+                            val hlWidth = 4.5f.dp.toPx()
+                            val hlColor = Color(0xFFFF6D00).copy(alpha = highlightAlpha)
+                            rotate(hlAngleDeg.toFloat(), pivot = Offset(cx, cy)) {
+                                drawRoundRect(
+                                    color = hlColor,
+                                    topLeft = Offset(
+                                        cx - hlWidth / 2f,
+                                        cy - outerRadius,
+                                    ),
+                                    size = Size(hlWidth, hlLength),
+                                    cornerRadius = CornerRadius(hlWidth / 2f),
+                                )
+                            }
+                        }
                     }
 
                     // 中间内容：时间文字 + 任务名
@@ -471,9 +473,9 @@ fun FocusScreen(
                             color = MaterialTheme.colorScheme.onSurface,
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        if (selectedTaskTitle != null) {
+                        if (vm.selectedTaskTitle != null) {
                             Text(
-                                selectedTaskTitle!!,
+                                vm.selectedTaskTitle!!,
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -481,7 +483,7 @@ fun FocusScreen(
                             )
                         } else {
                             Text(
-                                "${focusMinutes} 分钟",
+                                "${vm.focusMinutes} 分钟",
                                 style = MaterialTheme.typography.labelLarge,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -495,19 +497,14 @@ fun FocusScreen(
                     horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    // 重置按钮
+                    // 重置按钮：恢复到初始时长，清零已用秒数
                     Surface(
                         shape = CircleShape,
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                         modifier = Modifier.size(52.dp),
                     ) {
                         IconButton(
-                            onClick = {
-                                elapsedSeconds = 0
-                                remainingSeconds = focusMinutes * 60
-                                isRunning = false
-                                scope.launch { animatedProgress.snapTo(1f) }
-                            },
+                            onClick = { vm.reset() },
                             modifier = Modifier.size(52.dp),
                         ) {
                             Icon(
@@ -518,7 +515,7 @@ fun FocusScreen(
                         }
                     }
                     Spacer(modifier = Modifier.width(32.dp))
-                    // 播放/暂停按钮
+                    // 播放/暂停按钮：切换计时器运行状态
                     Surface(
                         shape = CircleShape,
                         color = primaryColor,
@@ -528,56 +525,36 @@ fun FocusScreen(
                             .clickable(
                                 interactionSource = remember { MutableInteractionSource() },
                                 indication = null,
-                                onClick = { isRunning = !isRunning },
+                                onClick = { vm.toggleRunning() },
                             ),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
-                                if (isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (isRunning) "暂停" else "开始",
+                                if (vm.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                                contentDescription = if (vm.isRunning) "暂停" else "开始",
                                 tint = Color.White,
                                 modifier = Modifier.size(36.dp),
                             )
                         }
                     }
                     Spacer(modifier = Modifier.width(32.dp))
-                    // 提前结束按钮
+                    // 提前结束按钮：应用 5 分钟规则后重置
                     Surface(
                         shape = CircleShape,
-                        color = if (isRunning) MaterialTheme.colorScheme.errorContainer
+                        color = if (vm.isRunning) MaterialTheme.colorScheme.errorContainer
                             else MaterialTheme.colorScheme.surfaceContainerHigh,
                         modifier = Modifier.size(52.dp),
                     ) {
                         IconButton(
-                            onClick = {
-                                if (isRunning) {
-                                    /**
-                                     * 中断专注的 5 分钟规则：
-                                     * - 专注时长 < 5 分钟（300 秒）→ 不计时
-                                     * - 专注时长 >= 5 分钟 → 按实际耗时累加到关联任务
-                                     */
-                                    if (elapsedSeconds >= 300 && selectedTaskId != null) {
-                                        scope.launch {
-                                            withContext(Dispatchers.IO) {
-                                                try {
-                                                    core.addFocusTime(selectedTaskId!!, elapsedSeconds.toLong())
-                                                } catch (_: Exception) {}
-                                            }
-                                        }
-                                    }
-                                }
-                                elapsedSeconds = 0
-                                remainingSeconds = focusMinutes * 60
-                                isRunning = false
-                                scope.launch { animatedProgress.snapTo(1f) }
-                            },
+                            onClick = { vm.stopEarly() },
                             modifier = Modifier.size(52.dp),
-                            enabled = isRunning || remainingSeconds < focusMinutes * 60,
+                            // 运行中或已消耗部分时间时才可点击
+                            enabled = vm.isRunning || vm.remainingSeconds < vm.focusMinutes * 60,
                         ) {
                             Icon(
                                 Icons.Default.Stop,
                                 contentDescription = "提前结束",
-                                tint = if (isRunning) MaterialTheme.colorScheme.error
+                                tint = if (vm.isRunning) MaterialTheme.colorScheme.error
                                     else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -591,10 +568,9 @@ fun FocusScreen(
             TaskPanelOverlay(
                 expandFraction = expandFraction,
                 panelAlpha = panelAlpha,
-                selectedTaskId = selectedTaskId,
+                selectedTaskId = vm.selectedTaskId,
                 onSelectTask = { taskId, taskTitle ->
-                    selectedTaskId = taskId
-                    selectedTaskTitle = taskTitle
+                    vm.selectTask(taskId, taskTitle)
                     showTaskPanel = false
                 },
                 onDismiss = {
@@ -778,8 +754,8 @@ private fun TaskCardRow(
     val cardWhite = Color.White
     // 卡片背景：纯白 → 透明（融入米白色背景），专注越久越透明
     val cardColor = lerpColor(
-        cardWhite,                          // colorFraction=0: 纯白卡片
-        cardWhite.copy(alpha = 0f),         // colorFraction=1: 完全透明（透出米白底）
+        cardWhite,
+        cardWhite.copy(alpha = 0f),
         colorFraction,
     )
     // 选中状态：仅描边 + 文字变色 + 打勾，不添加背景色
