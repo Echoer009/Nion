@@ -254,9 +254,11 @@ private fun ScheduleContent(
                 .fillMaxSize()
                 .padding(innerPadding)
                 .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp),
+            // 全局小间距，卡片之间紧密排列；段落间的大间距用显式 Spacer 控制
+            verticalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            item { Spacer(modifier = Modifier.height(4.dp)) }
+            // 顶部留白
+            item { Spacer(modifier = Modifier.height(12.dp)) }
 
             item {
                 MonthHeader(
@@ -269,6 +271,9 @@ private fun ScheduleContent(
                 )
             }
 
+            // MonthHeader 与 WeekDaySelector 之间留较大间距
+            item { Spacer(modifier = Modifier.height(10.dp)) }
+
             item {
                 WeekDaySelector(
                     selectedDate = selectedDate,
@@ -276,6 +281,9 @@ private fun ScheduleContent(
                     onSelect = onSelectedDateChange,
                 )
             }
+
+            // WeekDaySelector 与标题之间留较大间距
+            item { Spacer(modifier = Modifier.height(10.dp)) }
 
             item {
                 Text(
@@ -310,6 +318,9 @@ private fun ScheduleContent(
                     }
                 }
             } else {
+                // 标题与第一张卡片之间的间距
+                item { Spacer(modifier = Modifier.height(6.dp)) }
+
                 items(tasks, key = { it.id }) { task ->
                     // 使用共享任务卡片组件，compact=true 让日程页卡片略紧凑
                     SharedTaskCard(
@@ -319,10 +330,6 @@ private fun ScheduleContent(
                         },
                         compact = true,
                     )
-                    // 扁平卡片之间需要间隔，替代原来的 ElevatedCard 阴影效果
-                    if (task != tasks.last()) {
-                        Spacer(modifier = Modifier.height(2.dp))
-                    }
                 }
             }
 
