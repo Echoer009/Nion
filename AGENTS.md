@@ -103,6 +103,7 @@ Task (任务) ──1:N──> Task (子任务, via parent_id)
 | Rust models/errors | `core/src/models.rs` |
 | Kotlin entry composable | `app/app/src/main/java/com/echonion/nion/ui/NionApp.kt` |
 | Task screen + ViewModel | `app/app/src/main/java/com/echonion/nion/ui/task/` |
+| Memory tool | `app/app/src/main/java/com/echonion/nion/ui/companion/tools/MemoryTool.kt` |
 | UniFFI binding output | `app/app/src/main/java/uniffi/nion_core/nion_core.kt` |
 | Known pitfalls | `docs/pitfalls.md` |
 | Code audit | `docs/code-audit-report.md` |
