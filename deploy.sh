@@ -30,7 +30,7 @@ ok()   { echo -e "${GREEN}  ✓ $1${NC}"; }
 warn() { echo -e "${YELLOW}  ⚠ $1${NC}"; }
 fail() { echo -e "${RED}  ✗ $1${NC}"; }
 
-TOTAL_STEPS=3
+TOTAL_STEPS=4
 
 # ---------- 1. 检查设备 ----------
 step 1/$TOTAL_STEPS "检查设备"
@@ -94,8 +94,25 @@ if [ -z "$TARGET_DEVICE" ]; then
 fi
 ok "设备已连接 ($DEVICE_COUNT 台, 目标: $TARGET_DEVICE)"
 
-# ---------- 2. 构建 APK ----------
-step 2/$TOTAL_STEPS "构建 APK"
+# ---------- 2. 检查 .so 新鲜度 ----------
+step 2/$TOTAL_STEPS "检查 .so 新鲜度"
+
+# 检查 core/src 中是否有比 .so 更新的 .rs 文件
+STALE_SRC=$(find "$PROJECT_DIR/core/src" -name '*.rs' -newer "$PROJECT_DIR/app/app/src/main/jniLibs/arm64-v8a/libnion_core.so" 2>/dev/null | head -1)
+if [ -n "$STALE_SRC" ]; then
+    warn "Rust 源码比 .so 更新，自动重新编译 ..."
+    cd "$PROJECT_DIR" && bash build-android.sh
+    if [ $? -ne 0 ]; then
+        fail "Rust 编译失败，中止部署"
+        exit 1
+    fi
+    ok "Rust 编译完成"
+else
+    ok ".so 文件已是最新"
+fi
+
+# ---------- 3. 构建 APK ----------
+step 3/$TOTAL_STEPS "构建 APK"
 BUILD_OUTPUT=$(cd "$PROJECT_DIR/app" && ./gradlew assembleDebug 2>&1)
 BUILD_EXIT=$?
 if [ $BUILD_EXIT -ne 0 ]; then
@@ -107,7 +124,7 @@ APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
 ok "构建完成 ($APK_SIZE)"
 
 # ---------- 3. 安装并启动 ----------
-step 3/$TOTAL_STEPS "安装到手机"
+step 4/$TOTAL_STEPS "安装到手机"
 
 # 构建 adb 目标参数（多设备时需要 -s 指定）
 ADB_TARGET=()
