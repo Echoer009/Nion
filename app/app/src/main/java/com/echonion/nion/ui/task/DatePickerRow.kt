@@ -33,7 +33,6 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.CalendarToday
-import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -42,11 +41,11 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TimePicker
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
@@ -56,8 +55,14 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import kotlin.math.abs
+import kotlin.math.roundToInt
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
@@ -555,131 +560,144 @@ fun NionCalendar(
 }
 
 /**
- * 可复用的时间选择行 —— 用于新建任务表单或循环设置中。
- * 显示时钟图标 + 时间文字，点击弹出 Material3 TimePicker 对话框。
+ * 单列滚轮选择器 —— 上下滑动选择一项，滚动停止后自动 snap 到最近整数位置。
  *
- * @param time 当前选中的时间，格式 "HH:MM"，null 表示未设置
- * @param onTimeSelected 时间变更回调，传入 "HH:MM" 格式字符串
- * @param label 未设置时间时显示的占位文字
+ * 利用 LazyColumn 实现滚轮效果，前后各加 padding 行让首尾数据项能滚到中心。
+ * 选中项有渐变色、缩放和透明度效果，离中心越远越淡越小，提供流畅的视觉反馈。
+ * graphicsLayer lambda 在绘制阶段读取滚动位置，驱动 scale/alpha 动画而不触发重组。
+ *
+ * @param items 显示的文本列表（如 ["00", "01", ..., "23"]）
+ * @param initialIndex 初始选中项的索引
+ * @param visibleItemCount 可见行数（必须为奇数，中间行为选中行）
+ * @param itemHeight 每行的高度
+ * @param onSelected 选中项变更回调，传入新的索引
+ * @param modifier 外部 modifier，用于控制宽度等布局属性
  */
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun TimePickerRow(
-    time: String?,
-    onTimeSelected: (String) -> Unit,
+fun WheelSpinner(
+    items: List<String>,
+    initialIndex: Int,
+    visibleItemCount: Int,
+    itemHeight: Dp,
+    onSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
-    label: String = "选择时间",
 ) {
-    var showPicker by remember { mutableStateOf(false) }
+    val halfVisibleCount = visibleItemCount / 2
+    val coroutineScope = rememberCoroutineScope()
+    val density = LocalDensity.current
 
-    Row(
-        modifier = modifier.clickable { showPicker = true },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Outlined.Schedule,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-            tint = if (time != null) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = time ?: label,
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            color = if (time != null) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
+    // itemHeight 转换为像素，用于计算连续的中心位置
+    val itemHeightPx = with(density) { itemHeight.toPx() }
 
-    if (showPicker) {
-        TimePickerDialog(
-            initialTime = time,
-            onConfirm = { selected ->
-                onTimeSelected(selected)
-                showPicker = false
-            },
-            onDismiss = { showPicker = false },
-        )
-    }
-}
-
-/**
- * Material3 TimePicker 对话框封装 —— 时:分选择，精确到分钟。
- *
- * 使用 M3 TimePicker + rememberTimePickerState，与 NionDatePickerDialog 样式一致。
- *
- * @param initialTime 初始时间，格式 "HH:MM"
- * @param onConfirm 确认回调，传入 "HH:MM" 格式字符串
- * @param onDismiss 关闭回调
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun TimePickerDialog(
-    initialTime: String?,
-    onConfirm: (String) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val initialHour = remember(initialTime) {
-        initialTime?.substringBefore(":")?.toIntOrNull() ?: 9
-    }
-    val initialMinute = remember(initialTime) {
-        initialTime?.substringAfter(":")?.toIntOrNull() ?: 0
-    }
-
-    val timePickerState = rememberTimePickerState(
-        initialHour = initialHour,
-        initialMinute = initialMinute,
-        is24Hour = true,
+    // 列表状态：firstVisibleItemIndex = 数据索引（padding 行数和中心偏移抵消）
+    val safeInitial = initialIndex.coerceIn(0, items.lastIndex)
+    val listState = rememberLazyListState(
+        initialFirstVisibleItemIndex = safeInitial,
     )
 
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 6.dp,
-    ) {
-        Column(
-            modifier = Modifier.padding(20.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            Text(
-                "选择时间",
-                style = MaterialTheme.typography.titleMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(modifier = Modifier.height(16.dp))
+    // 跟踪上一次上报的索引，避免重复回调
+    var lastReportedIndex by remember { mutableStateOf(safeInitial) }
 
-            TimePicker(
-                state = timePickerState,
-                modifier = Modifier.fillMaxWidth(),
-            )
+    // 连续的中心位置（浮点数），用于计算每个 item 与中心的距离
+    // 公式：firstVisibleItemIndex + 偏移比例（offset / itemHeight）
+    val continuousCenter by remember {
+        derivedStateOf {
+            val offset = if (itemHeightPx > 0f) {
+                listState.firstVisibleItemScrollOffset.toFloat() / itemHeightPx
+            } else 0f
+            listState.firstVisibleItemIndex + offset
+        }
+    }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
+    // 滚动停止后 snap 到最近的整数位置，并回调选中项
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (!listState.isScrollInProgress) {
+            val target = continuousCenter.roundToInt().coerceIn(0, items.lastIndex)
+            // 如果不在整数位置，执行 snap 动画
+            if (listState.firstVisibleItemIndex != target ||
+                listState.firstVisibleItemScrollOffset != 0
             ) {
-                TextButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp),
-                ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
-                Button(
-                    onClick = {
-                        val formatted = "%02d:%02d".format(timePickerState.hour, timePickerState.minute)
-                        onConfirm(formatted)
-                    },
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.weight(1f),
-                ) { Text("确定", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                listState.animateScrollToItem(target)
             }
+            // snap 目标与上次上报不同时，回调通知外部
+            if (target != lastReportedIndex) {
+                lastReportedIndex = target
+                onSelected(target)
+            }
+        }
+    }
+
+    val primaryColor = MaterialTheme.colorScheme.primary
+    val unselectedColor = MaterialTheme.colorScheme.onSurfaceVariant
+
+    LazyColumn(
+        state = listState,
+        modifier = modifier.height(itemHeight * visibleItemCount),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        // 顶部 padding 行：占 halfVisibleCount 行，让第一个数据项能滚到中心
+        items(halfVisibleCount) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(itemHeight),
+                contentAlignment = Alignment.Center,
+            ) {}
+        }
+
+        // 数据行
+        items(items.size) { index ->
+            // 计算与中心的连续距离，驱动渐变色/字重（组合阶段）
+            val absDist = abs(index - continuousCenter)
+            // 渐变色进度：1.0 = 完全选中色，0.0 = 完全未选中色
+            val colorProgress = (1f - absDist * 0.6f).coerceIn(0f, 1f)
+
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(itemHeight)
+                    .graphicsLayer {
+                        // 在绘制阶段读取 continuousCenter，驱动缩放和透明度动画
+                        val distance = index - continuousCenter
+                        val ad = abs(distance)
+                        // 缩放：中心 1.0，每行缩小 6%，最小 0.7
+                        val scale = (1f - ad * 0.06f).coerceIn(0.7f, 1f)
+                        scaleX = scale
+                        scaleY = scale
+                        // 透明度：中心 1.0，向边缘线性衰减，最小 0.15
+                        alpha = (1f - ad * 0.5f).coerceIn(0.15f, 1f)
+                    }
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = {
+                            coroutineScope.launch {
+                                // 点击后动画滚动到被点击的项
+                                listState.animateScrollToItem(index)
+                            }
+                        },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = items[index],
+                    style = MaterialTheme.typography.headlineMedium,
+                    // 距中心 < 0.5 行时显示粗体，过渡更自然
+                    fontWeight = if (absDist < 0.5f) FontWeight.Bold else FontWeight.Normal,
+                    // 颜色在 primary 和 onSurfaceVariant 之间渐变
+                    color = lerp(unselectedColor, primaryColor, colorProgress),
+                )
+            }
+        }
+
+        // 底部 padding 行：占 halfVisibleCount 行，让最后一个数据项能滚到中心
+        items(halfVisibleCount) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(itemHeight),
+                contentAlignment = Alignment.Center,
+            ) {}
         }
     }
 }
