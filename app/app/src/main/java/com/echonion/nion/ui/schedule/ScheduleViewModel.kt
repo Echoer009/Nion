@@ -134,6 +134,12 @@ class ScheduleViewModel(
         }
     }
 
+    /** ViewModel 创建时加载今天的任务和当月日历标记 */
+    init {
+        loadTasksForDate(LocalDate.now())
+        loadCalendarMarkers(LocalDate.now().year, LocalDate.now().monthValue)
+    }
+
     /** 将 Rust 端 DailyTaskStatus 转换为 ScheduleTaskItem */
     private fun DailyTaskStatus.toScheduleItem(): ScheduleTaskItem {
         val isDaily = task.recurrenceRule == "daily"
