@@ -12,7 +12,9 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -38,6 +40,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -79,34 +83,27 @@ import java.util.Locale
  * @param color 事件标记色
  * @param dayOfWeek 所属星期几
  */
-data class ScheduleEvent(
-    val id: String,
-    val title: String,
-    val timeRange: String,
-    val location: String?,
-    val color: Color,
-    val dayOfWeek: DayOfWeek,
-)
-
 val dayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 
 /**
- * 日程主屏幕 —— 显示月/周选择器 + 当日事件列表。
+ * 日程主屏幕 —— 显示月/周选择器 + 当日任务列表。
  *
  * 使用 SharedTransitionLayout + AnimatedContent 在月视图日历弹窗和主界面之间切换，
  * 点击 MonthHeader 弹出日历选择器 overlay。
+ * 接入 ScheduleViewModel，从 Rust 端加载真实任务数据和日历标记。
  *
+ * @param viewModel 日程页面的 ViewModel，提供任务数据和日历标记
  * @param onOpenCompanion 点击顶栏伙伴图标时的回调，用于打开右侧 AI 面板
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
 fun ScheduleScreen(
+    viewModel: ScheduleViewModel = scheduleViewModel(),
     onOpenCompanion: () -> Unit = {},
 ) {
-    var selectedDate by remember { mutableStateOf(LocalDate.now()) }
     var showCalendarPicker by remember { mutableStateOf(false) }
     val today = LocalDate.now()
-    val selectedEvents = emptyList<ScheduleEvent>()
+    val selectedDate = viewModel.selectedDate
     val dayLabel = dayLabels[selectedDate.dayOfWeek.value - 1]
     val yearMonth = YearMonth.from(selectedDate)
 
@@ -132,7 +129,7 @@ fun ScheduleScreen(
                     today = today,
                     onDismiss = { showCalendarPicker = false },
                     onSelect = { date ->
-                        selectedDate = date
+                        viewModel.selectDate(date)
                         showCalendarPicker = false
                     },
                     sharedBoundsModifier = Modifier.sharedElement(
@@ -145,7 +142,6 @@ fun ScheduleScreen(
                             )
                         },
                     ),
-                    // 月份文字的 shared element modifier，让年月文字从 MonthHeader 飞到弹窗 header
                     textSharedModifier = Modifier.sharedElement(
                         sharedContentState = rememberSharedContentState("monthText"),
                         animatedVisibilityScope = this@AnimatedContent,
@@ -156,16 +152,20 @@ fun ScheduleScreen(
                             )
                         },
                     ),
+                    dateMarkers = viewModel.dateMarkers,
                 )
             } else {
                 ScheduleContent(
                     selectedDate = selectedDate,
                     dayLabel = dayLabel,
                     today = today,
-                    selectedEvents = selectedEvents,
-                    onSelectedDateChange = { selectedDate = it },
+                    tasks = viewModel.tasks,
+                    onSelectedDateChange = { viewModel.selectDate(it) },
                     onOpenCalendar = { showCalendarPicker = true },
                     onOpenCompanion = onOpenCompanion,
+                    onToggleDone = { taskId, date, isCompleted ->
+                        viewModel.toggleDailyDone(taskId, date, isCompleted)
+                    },
                     sharedBoundsModifier = Modifier.sharedElement(
                         sharedContentState = rememberSharedContentState("calendar"),
                         animatedVisibilityScope = this@AnimatedContent,
@@ -176,7 +176,6 @@ fun ScheduleScreen(
                             )
                         },
                     ),
-                    // 月份文字的 shared element modifier
                     textSharedModifier = Modifier.sharedElement(
                         sharedContentState = rememberSharedContentState("monthText"),
                         animatedVisibilityScope = this@AnimatedContent,
@@ -194,15 +193,16 @@ fun ScheduleScreen(
 }
 
 /**
- * 日程主界面内容 —— 顶栏 + 月份头部 + 周选择器 + 事件列表。
+ * 日程主界面内容 —— 顶栏 + 月份头部 + 周选择器 + 任务列表。
  *
  * @param selectedDate 当前选中日期
  * @param dayLabel "一"~"日" 的中文标签
  * @param today 今天的日期
- * @param selectedEvents 当日事件列表（当前为 empty）
+ * @param tasks 当日任务列表（含每日任务完成状态）
  * @param onSelectedDateChange 日期变更回调
  * @param onOpenCalendar 点击月份头部时打开日历弹窗
  * @param onOpenCompanion 点击顶栏伙伴图标回调
+ * @param onToggleDone 切换每日任务完成状态
  * @param sharedBoundsModifier shared element 动画 modifier（容器 bounds）
  * @param textSharedModifier shared element 动画 modifier（月份文字）
  */
@@ -212,10 +212,11 @@ private fun ScheduleContent(
     selectedDate: LocalDate,
     dayLabel: String,
     today: LocalDate,
-    selectedEvents: List<ScheduleEvent>,
+    tasks: List<ScheduleTaskItem>,
     onSelectedDateChange: (LocalDate) -> Unit,
     onOpenCalendar: () -> Unit,
     onOpenCompanion: () -> Unit,
+    onToggleDone: (taskId: String, date: LocalDate, isCompleted: Boolean) -> Unit,
     sharedBoundsModifier: Modifier,
     textSharedModifier: Modifier,
 ) {
@@ -287,7 +288,7 @@ private fun ScheduleContent(
                 )
             }
 
-            if (selectedEvents.isEmpty()) {
+            if (tasks.isEmpty()) {
                 item {
                     Box(
                         modifier = Modifier
@@ -311,8 +312,13 @@ private fun ScheduleContent(
                     }
                 }
             } else {
-                items(selectedEvents, key = { it.id }) { event ->
-                    EventCard(event)
+                items(tasks, key = { it.id }) { task ->
+                    ScheduleTaskCard(
+                        task = task,
+                        onToggleDone = {
+                            onToggleDone(task.id, selectedDate, task.isDone)
+                        },
+                    )
                 }
             }
 
@@ -330,6 +336,7 @@ private fun ScheduleContent(
  * @param onSelect 选中日期回调
  * @param sharedBoundsModifier shared element 动画 modifier（容器 bounds）
  * @param textSharedModifier shared element 动画 modifier（月份文字）
+ * @param dateMarkers 日历日期标记数据，用于在日历格子上显示任务指示器
  */
 @Composable
 private fun CalendarPickerOverlay(
@@ -339,6 +346,7 @@ private fun CalendarPickerOverlay(
     onSelect: (LocalDate) -> Unit,
     sharedBoundsModifier: Modifier,
     textSharedModifier: Modifier,
+    dateMarkers: Map<String, uniffi.nion_core.CalendarDateMarker> = emptyMap(),
 ) {
     Box(
         modifier = Modifier
@@ -358,6 +366,7 @@ private fun CalendarPickerOverlay(
             onSelect = onSelect,
             modifier = sharedBoundsModifier,
             textSharedModifier = textSharedModifier,
+            dateMarkers = dateMarkers,
         )
     }
 }
@@ -523,12 +532,22 @@ private fun WeekDaySelector(
 }
 
 /**
- * 日程事件卡片 —— 左侧圆形色块 + 标题 + 时间段 + 可选地点标签。
+ * 日程任务卡片 —— 显示任务标题、优先级色块、每日标签和完成状态。
  *
- * @param event 日程事件数据
+ * @param task 任务数据
+ * @param onToggleDone 点击勾选框时切换完成状态
  */
 @Composable
-private fun EventCard(event: ScheduleEvent) {
+private fun ScheduleTaskCard(
+    task: ScheduleTaskItem,
+    onToggleDone: () -> Unit,
+) {
+    // 优先级对应的颜色
+    val priorityColor = when (task.priority) {
+        "high" -> Color(0xFFE53935)
+        "medium" -> Color(0xFFFFA726)
+        else -> Color(0xFF66BB6A)
+    }
     ElevatedCard(
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
@@ -536,51 +555,70 @@ private fun EventCard(event: ScheduleEvent) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Surface(
-                shape = RoundedCornerShape(6.dp),
-                color = event.color.copy(alpha = 0.15f),
-                modifier = Modifier.size(48.dp),
+            // 勾选框
+            Box(
+                modifier = Modifier
+                    .size(24.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (task.isDone) MaterialTheme.colorScheme.primary else Color.Transparent
+                    )
+                    .border(
+                        BorderStroke(2.dp, if (task.isDone) Color.Transparent else priorityColor),
+                        CircleShape,
+                    )
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onToggleDone,
+                    ),
+                contentAlignment = Alignment.Center,
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Text(
-                        event.title.take(1),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = event.color,
+                if (task.isDone) {
+                    Icon(
+                        androidx.compose.material.icons.Icons.Default.Check,
+                        contentDescription = "已完成",
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                        modifier = Modifier.size(14.dp),
                     )
                 }
             }
-            Spacer(modifier = Modifier.width(16.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+            // 任务信息
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    event.title,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                )
-                Spacer(modifier = Modifier.height(4.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
-                        event.timeRange,
+                        task.title,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (task.isDone) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f, fill = false),
+                    )
+                    // 每日任务：卡片末尾只显示循环图标，不附带文字
+                    if (task.isDaily) {
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Icon(
+                            androidx.compose.material.icons.Icons.Outlined.Repeat,
+                            contentDescription = "每天",
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        )
+                    }
+                }
+                // 提醒时间
+                task.reminderTime?.let { time ->
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        time,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    if (event.location != null) {
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        ) {
-                            Text(
-                                event.location,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
                 }
             }
         }
@@ -609,6 +647,7 @@ private fun CalendarPickerDialog(
     onSelect: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
     textSharedModifier: Modifier = Modifier,
+    dateMarkers: Map<String, uniffi.nion_core.CalendarDateMarker> = emptyMap(),
 ) {
     // START_PAGE 居中，避免用户滑动到边界
     val startPage = Int.MAX_VALUE / 2
@@ -707,6 +746,7 @@ private fun CalendarPickerDialog(
                     yearMonth = month,
                     today = today,
                     onSelect = onSelect,
+                    dateMarkers = dateMarkers,
                 )
             }
 
@@ -745,16 +785,19 @@ private fun CalendarPickerDialog(
  * 单个月的日期网格 —— 渲染指定年月的日历格子。
  *
  * 固定渲染 6 行，空位补齐，避免不同月份行数不同导致高度变化。
+ * 日期下方显示任务指示器小圆点：有任务 = 小圆点，全部完成 = 绿色，有未完成 = 橙色。
  *
  * @param yearMonth 要渲染的年月
  * @param today 今天的日期，用于高亮标记
  * @param onSelect 用户点击某一天时触发，回调传入被点击的 LocalDate
+ * @param dateMarkers 日历日期标记数据
  */
 @Composable
 private fun CalendarMonthGrid(
     yearMonth: YearMonth,
     today: LocalDate,
     onSelect: (LocalDate) -> Unit,
+    dateMarkers: Map<String, uniffi.nion_core.CalendarDateMarker> = emptyMap(),
 ) {
     val firstDay = yearMonth.atDay(1)
     val daysInMonth = yearMonth.lengthOfMonth()
@@ -772,6 +815,9 @@ private fun CalendarMonthGrid(
                     val isValid = day in 1..daysInMonth
                     val date = if (isValid) yearMonth.atDay(day) else null
                     val isToday = date == today
+                    // 日历标记：有任务时显示小圆点
+                    val dateStr = date?.format(DateTimeFormatter.ISO_LOCAL_DATE)
+                    val marker = dateStr?.let { dateMarkers[it] }
 
                     Box(
                         modifier = Modifier
@@ -798,15 +844,35 @@ private fun CalendarMonthGrid(
                         contentAlignment = Alignment.Center,
                     ) {
                         if (isValid) {
-                            Text(
-                                day.toString(),
-                                style = MaterialTheme.typography.bodyMedium,
-                                fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
-                                color = when {
-                                    isToday -> MaterialTheme.colorScheme.primary
-                                    else -> MaterialTheme.colorScheme.onSurface
-                                },
-                            )
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Text(
+                                    day.toString(),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                                    color = when {
+                                        isToday -> MaterialTheme.colorScheme.primary
+                                        else -> MaterialTheme.colorScheme.onSurface
+                                    },
+                                )
+                                // 任务指示器小圆点
+                                if (marker != null && marker.taskCount > 0) {
+                                    Spacer(modifier = Modifier.height(1.dp))
+                                    Box(
+                                        modifier = Modifier
+                                            .size(4.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                when {
+                                                    marker.completedCount >= marker.taskCount -> Color(0xFF4CAF50)
+                                                    marker.hasOverdue -> MaterialTheme.colorScheme.error
+                                                    else -> Color(0xFFFF9800)
+                                                }
+                                            ),
+                                    )
+                                }
+                            }
                         }
                     }
                 }
