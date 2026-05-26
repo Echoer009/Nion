@@ -2,6 +2,9 @@ package com.echonion.nion
 
 import android.app.Application
 import android.util.Log
+import com.echonion.nion.reminder.NotificationHelper
+import com.echonion.nion.reminder.ReminderEvent
+import com.echonion.nion.reminder.ReminderScheduler
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -31,6 +34,23 @@ class NionApp : Application() {
     val dataEvents: SharedFlow<DataChangeEvent> = _dataEvents.asSharedFlow()
 
     /**
+     * 提醒事件总线 —— ReminderReceiver 触发时通过此总线通知 UI 层。
+     *
+     * ReminderOverlay 监听此事件流，收到事件后弹出全局提醒弹窗。
+     * 使用 SharedFlow 确保即使 UI 还没准备好也不会丢失事件。
+     */
+    private val _reminderEvents = MutableSharedFlow<ReminderEvent>(extraBufferCapacity = 4)
+    val reminderEvents: SharedFlow<ReminderEvent> = _reminderEvents.asSharedFlow()
+
+    /**
+     * 发送提醒事件到 UI 层。
+     * 由 ReminderReceiver 在闹钟触发时调用。
+     */
+    fun postReminderEvent(event: ReminderEvent) {
+        _reminderEvents.tryEmit(event)
+    }
+
+    /**
      * 发出数据变更通知。
      *
      * @param type "tasks" 或 "checklists"
@@ -48,6 +68,16 @@ class NionApp : Application() {
             Log.d("NionApp", "NionCore initialized successfully")
         } catch (e: Exception) {
             Log.e("NionApp", "Failed to initialize NionCore", e)
+        }
+
+        // 创建通知渠道（重复调用安全，系统会忽略已存在的渠道）
+        NotificationHelper.createChannel(this)
+
+        // 重调度所有提醒闹钟（App 启动时确保闹钟状态一致）
+        try {
+            ReminderScheduler.rescheduleAll(this, core)
+        } catch (e: Exception) {
+            Log.e("NionApp", "重调度提醒闹钟失败", e)
         }
     }
 }

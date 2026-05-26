@@ -42,6 +42,7 @@ import com.echonion.nion.ui.settings.SettingsScreen
 import com.echonion.nion.ui.task.SidebarContent
 import com.echonion.nion.ui.task.TaskScreen
 import com.echonion.nion.ui.task.TaskViewModel
+import com.echonion.nion.ui.task.ReminderOverlay
 import com.echonion.nion.ui.task.taskViewModel
 import kotlinx.coroutines.launch
 import com.echonion.nion.ui.theme.NionColorTheme
@@ -85,6 +86,9 @@ fun NionApp() {
     var autoStartFocus by remember { mutableStateOf(false) }
 
     NionTheme(colorTheme = colorTheme) {
+        // 全局提醒弹窗，放在导航层之外，确保无论在哪个页面都能弹出
+        ReminderOverlay(app = context.applicationContext as android.app.Application)
+
         val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentDestination = navBackStackEntry?.destination

@@ -12,6 +12,7 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
@@ -60,6 +61,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.Alarm
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material3.AlertDialog
@@ -260,6 +262,9 @@ fun TaskScreen(
                         onRemoveRecurrence = {
                             viewModel.removeRecurrence(taskId)
                         },
+                        onUpdateReminder = { reminder ->
+                            viewModel.updateReminder(taskId, reminder)
+                        },
                         /** 点击开始专注：直接导航到专注页，不关闭详情浮层，避免任务列表闪现 */
                         onStartFocus = { durationMinutes ->
                             onStartFocus(task.id, task.title, durationMinutes)
@@ -360,7 +365,7 @@ fun TaskScreen(
                     ) {
                         AddTaskOverlay(
                             onDismiss = { showAddSheet = false },
-                            onAdd = { title, desc, priority, dueDate, recurrenceRule, recurrenceReminderTime ->
+                            onAdd = { title, desc, priority, dueDate, recurrenceRule, recurrenceReminderTime, reminder ->
                                 val pending = pendingAttachmentData.toList()
                                 viewModel.createTask(
                                     title = title,
@@ -373,6 +378,10 @@ fun TaskScreen(
                                     // 任务创建成功后，批量关联临时附件
                                     if (pending.isNotEmpty()) {
                                         viewModel.commitPendingAttachments(newTaskId, pending)
+                                    }
+                                    // 设置一次性提醒（如果有）
+                                    if (reminder != null) {
+                                        viewModel.updateReminder(newTaskId, reminder)
                                     }
                                 }
                                 showAddSheet = false
@@ -526,8 +535,8 @@ private fun TaskScreenContent(
 @Composable
 private fun AddTaskOverlay(
     onDismiss: () -> Unit,
-    /** 创建回调：title, description, priority, dueDate, recurrenceRule, recurrenceReminderTime */
-    onAdd: (String, String?, String, String?, String?, String?) -> Unit,
+    /** 创建回调：title, description, priority, dueDate, recurrenceRule, recurrenceReminderTime, reminder */
+    onAdd: (String, String?, String, String?, String?, String?, String?) -> Unit,
     sharedBoundsModifier: Modifier,
     /** 当前暂存的附件列表 */
     pendingAttachments: List<AttachmentUiItem> = emptyList(),
@@ -549,6 +558,8 @@ private fun AddTaskOverlay(
     var recurrenceRule by remember { mutableStateOf<String?>(null) }
     // 每日循环提醒时间：HH:MM 格式，默认 "09:00"
     var recurrenceReminderTime by remember { mutableStateOf<String?>(null) }
+    // 一次性提醒时间：YYYY-MM-DDTHH:MM 格式，null 表示未设置
+    var taskReminder by remember { mutableStateOf<String?>(null) }
     // showingDatePicker: true=显示日期选择页，false=显示表单
     var showingDatePicker by remember { mutableStateOf(false) }
 
@@ -763,6 +774,12 @@ private fun AddTaskOverlay(
                     onReminderTimeChanged = { recurrenceReminderTime = it },
                 )
 
+                // 一次性提醒时间选择器（选择日期 + 时间）
+                ReminderTimePicker(
+                    reminder = taskReminder,
+                    onReminderChanged = { taskReminder = it },
+                )
+
                 // 已暂存的附件缩略图列表
                 if (pendingAttachments.isNotEmpty()) {
                     AttachmentList(
@@ -785,7 +802,7 @@ private fun AddTaskOverlay(
                     ) { Text("取消", fontWeight = FontWeight.SemiBold) }
                     Button(
                         onClick = {
-                            if (title.isNotBlank()) onAdd(title.trim(), description.trim().ifBlank { null }, priority, dueDate, recurrenceRule, recurrenceReminderTime)
+                            if (title.isNotBlank()) onAdd(title.trim(), description.trim().ifBlank { null }, priority, dueDate, recurrenceRule, recurrenceReminderTime, taskReminder)
                         },
                         enabled = title.isNotBlank(),
                         shape = RoundedCornerShape(14.dp),
@@ -936,6 +953,8 @@ private fun TaskDetailOverlay(
     onUpdateRecurrence: (String?, String?) -> Unit = { _, _ -> },
     /** 移除每日循环回调 */
     onRemoveRecurrence: () -> Unit = {},
+    /** 更新一次性提醒时间回调，传入 "YYYY-MM-DDTHH:MM" 或 null（清除） */
+    onUpdateReminder: (String?) -> Unit = {},
     sharedElementModifier: Modifier,
     /** 用户点击"开始专注"按钮时触发，传入预选的专注时长（分钟） */
     onStartFocus: (Int) -> Unit = {},
@@ -1325,6 +1344,60 @@ private fun TaskDetailOverlay(
                                     "设置重复",
                                     style = MaterialTheme.typography.labelMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                )
+                            }
+                        }
+
+                        // 提醒时间设置：点击展开内联选择器
+                        var showReminderPicker by remember { mutableStateOf(false) }
+                        // 提醒时间行：显示当前提醒时间或"设置提醒"入口
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = { showReminderPicker = !showReminderPicker },
+                                )
+                                .padding(vertical = 2.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                Icons.Outlined.Alarm,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp),
+                                tint = if (task.reminder != null) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = task.reminder?.let { r ->
+                                    try {
+                                        val ldt = java.time.LocalDateTime.parse(r, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
+                                        "提醒: %d月%d日 %02d:%02d".format(ldt.monthValue, ldt.dayOfMonth, ldt.hour, ldt.minute)
+                                    } catch (_: Exception) { "已设置提醒" }
+                                } ?: "设置提醒",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (task.reminder != null) FontWeight.Medium else FontWeight.Normal,
+                                color = if (task.reminder != null) MaterialTheme.colorScheme.primary
+                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            )
+                        }
+
+                        // 展开的提醒选择器（仅非每日任务时显示完整选择器）
+                        if (showReminderPicker && task.recurrenceRule != "daily") {
+                            var localReminder by remember(task.id) { mutableStateOf(task.reminder) }
+                            AnimatedVisibility(
+                                visible = showReminderPicker,
+                                enter = fadeIn(tween(250)) + expandVertically(tween(300)),
+                                exit = fadeOut(tween(200)) + shrinkVertically(tween(250)),
+                            ) {
+                                ReminderTimePicker(
+                                    reminder = localReminder,
+                                    onReminderChanged = { newReminder ->
+                                        localReminder = newReminder
+                                        onUpdateReminder(newReminder)
+                                    },
                                 )
                             }
                         }

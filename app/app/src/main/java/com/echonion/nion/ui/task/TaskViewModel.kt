@@ -16,6 +16,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.echonion.nion.core
 import com.echonion.nion.dataEvents
+import com.echonion.nion.reminder.ReminderScheduler
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -45,6 +46,8 @@ data class TaskItem(
     val recurrenceRule: String? = null,
     /** 每日循环的提醒时间，格式 "HH:MM"，仅当 recurrenceRule="daily" 时有效 */
     val recurrenceReminderTime: String? = null,
+    /** 一次性提醒时间，格式 "YYYY-MM-DDTHH:MM"，null 表示未设置 */
+    val reminder: String? = null,
     /** 是否为每日循环任务（recurrenceRule == "daily"） */
     val isDaily: Boolean = false,
     /** 当前查看日期的完成状态。每日任务看 completions 表，普通任务看 status */
@@ -327,6 +330,8 @@ class TaskViewModel(
                 val newTask = withContext(Dispatchers.IO) {
                     core.createTask(title, description, priority, dueDate, realCategoryId, null, activeGroupId, recurrenceRule, recurrenceReminderTime)
                 }
+                // 创建成功后调度提醒闹钟
+                scheduleReminderIfNeeded(newTask)
                 tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()
                 onCreated(newTask.id)
@@ -490,9 +495,11 @@ class TaskViewModel(
     fun updateRecurrence(id: String, recurrenceRule: String?, reminderTime: String?) {
         viewModelScope.launch {
             try {
-                withContext(Dispatchers.IO) {
+                val updated = withContext(Dispatchers.IO) {
                     core.setTaskRecurrence(id, recurrenceRule, reminderTime)
                 }
+                // 更新循环设置后重新调度提醒闹钟
+                scheduleReminderIfNeeded(updated)
                 tasks = loadTasksForCurrentView()
             } catch (e: Exception) {
                 onError("更新循环失败: ${e.message}")
@@ -509,6 +516,8 @@ class TaskViewModel(
                 withContext(Dispatchers.IO) {
                     core.removeTaskRecurrence(id)
                 }
+                // 移除循环后取消每日闹钟
+                ReminderScheduler.cancelReminder(app, id)
                 tasks = loadTasksForCurrentView()
             } catch (e: Exception) {
                 onError("移除循环失败: ${e.message}")
@@ -519,6 +528,8 @@ class TaskViewModel(
     fun deleteTask(id: String) {
         val snapshot = tasks
         tasks = removeTaskFromList(tasks, id)
+        // 删除任务时取消提醒闹钟
+        ReminderScheduler.cancelReminder(app, id)
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { core.deleteTask(id) }
@@ -850,6 +861,70 @@ class TaskViewModel(
             }
         }
     }
+
+    // ==================== 提醒调度 ====================
+
+    /**
+     * 根据任务数据调度提醒闹钟。
+     *
+     * 处理两种提醒：
+     * - 每日循环任务（recurrenceRule="daily"）：调度每日重复闹钟
+     * - 普通任务（reminder 字段有值）：调度一次性精确闹钟
+     * 如果任务不需要提醒，取消已有闹钟。
+     */
+    private fun scheduleReminderIfNeeded(task: TaskData) {
+        // 先取消已有闹钟，避免重复
+        ReminderScheduler.cancelReminder(app, task.id)
+
+        // 每日循环任务：解析 HH:MM 并调度每日闹钟
+        if (task.recurrenceRule == "daily" && task.recurrenceReminderTime != null) {
+            val parts = task.recurrenceReminderTime!!.split(":")
+            if (parts.size == 2) {
+                val hour = parts[0].toIntOrNull()
+                val minute = parts[1].toIntOrNull()
+                if (hour != null && minute != null) {
+                    ReminderScheduler.scheduleDailyReminder(app, task.id, hour, minute)
+                }
+            }
+        }
+
+        // 普通任务：解析 reminder 时间戳并调度一次性闹钟
+        if (task.reminder != null) {
+            try {
+                // reminder 格式可能是 "YYYY-MM-DDTHH:MM" 或 RFC 3339
+                val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
+                val ldt = java.time.LocalDateTime.parse(task.reminder, formatter)
+                val millis = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                if (millis > System.currentTimeMillis()) {
+                    ReminderScheduler.scheduleExactReminder(app, task.id, millis)
+                }
+            } catch (_: Exception) {
+                // 解析失败静默忽略
+            }
+        }
+    }
+
+    /**
+     * 更新任务的一次性提醒时间。
+     * 同时调度/取消对应的闹钟。
+     *
+     * @param id 任务 ID
+     * @param reminder 提醒时间字符串（"YYYY-MM-DDTHH:MM"），null 表示清除提醒
+     */
+    fun updateReminder(id: String, reminder: String?) {
+        viewModelScope.launch {
+            try {
+                val updated = withContext(Dispatchers.IO) {
+                    core.updateTask(id, null, null, null, null, null, null, reminder, null, null, null)
+                }
+                // 更新提醒后重新调度闹钟
+                scheduleReminderIfNeeded(updated)
+                tasks = loadTasksForCurrentView()
+            } catch (e: Exception) {
+                onError("更新提醒失败: ${e.message}")
+            }
+        }
+    }
 }
 
 private fun flattenWithGroupInfo(tasks: List<TaskItem>): List<FlatTaskItem> {
@@ -1022,6 +1097,7 @@ private fun DailyTaskStatus.toUi(): TaskItem {
         focusSeconds = task.focusSeconds,
         recurrenceRule = task.recurrenceRule,
         recurrenceReminderTime = task.recurrenceReminderTime,
+        reminder = task.reminder,
         isDaily = isDaily,
         isCompletedForDate = completedForDate,
     )
@@ -1045,6 +1121,7 @@ private fun TaskData.toUi(): TaskItem {
         focusSeconds = focusSeconds,
         recurrenceRule = recurrenceRule,
         recurrenceReminderTime = recurrenceReminderTime,
+        reminder = reminder,
         isDaily = isDaily,
         isCompletedForDate = false,
     )
