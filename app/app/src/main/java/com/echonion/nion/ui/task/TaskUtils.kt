@@ -32,6 +32,25 @@ fun String?.formatDueDate(): String? {
     }
 }
 
+/**
+ * 将一次性提醒字符串（"YYYY-MM-DDTHH:MM"）格式化为卡片显示文本。
+ *
+ * 返回格式示例："6月1日 09:00"。解析失败时返回 null。
+ * 用于 SharedTaskCard 在卡片上显示提醒时间。
+ */
+fun String?.formatReminder(): String? {
+    if (this.isNullOrBlank()) return null
+    return try {
+        val date = LocalDate.parse(substringBefore("T"), DateTimeFormatter.ISO_LOCAL_DATE)
+        val timePart = substringAfter("T")
+        val weekDays = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+        val weekDay = weekDays[date.dayOfWeek.value - 1]
+        "${date.monthValue}月${date.dayOfMonth}日 $weekDay $timePart"
+    } catch (_: Exception) {
+        null
+    }
+}
+
 /** 判断截止日期是否已逾期（早于今天） */
 fun String?.isOverdue(): Boolean {
     if (this.isNullOrBlank()) return false

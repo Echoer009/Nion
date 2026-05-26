@@ -172,6 +172,7 @@ private fun MainTaskRow(
             isDaily = task.isDaily,
             dueDate = task.dueDate,
             reminderTime = task.recurrenceReminderTime,
+            reminder = task.reminder,
         )
     }
 

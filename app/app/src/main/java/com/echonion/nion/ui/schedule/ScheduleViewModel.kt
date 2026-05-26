@@ -36,6 +36,8 @@ data class ScheduleTaskItem(
     val isDaily: Boolean,
     val dueDate: String?,
     val reminderTime: String?,
+    /** 一次性提醒时间，格式 "YYYY-MM-DDTHH:MM"，在卡片上以铃铛图标展示 */
+    val reminder: String? = null,
 )
 
 /**
@@ -152,6 +154,7 @@ class ScheduleViewModel(
             isDaily = isDaily,
             dueDate = task.dueDate,
             reminderTime = task.recurrenceReminderTime,
+            reminder = task.reminder,
         )
     }
 }
@@ -166,6 +169,7 @@ fun ScheduleTaskItem.toCardModel(): TaskCardModel = TaskCardModel(
     isDaily = isDaily,
     dueDate = dueDate,
     reminderTime = reminderTime,
+    reminder = reminder,
 )
 
 @Composable
