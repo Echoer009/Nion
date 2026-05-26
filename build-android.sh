@@ -18,11 +18,11 @@ echo "=== Building Rust core for Android ==="
 echo "[1/4] aarch64-linux-android ..."
 cd "$SCRIPT_DIR"
 cargo build -p nion-core --target aarch64-linux-android --release \
-  --config "target.aarch64-linux-android.rustflags=['-C', 'link-arg=-L$TOOLCHAIN/sysroot/usr/lib/aarch64-linux-android/26']"
+  --config "target.aarch64-linux-android.rustflags=['-C', 'link-arg=-L$TOOLCHAIN/sysroot/usr/lib/aarch64-linux-android/26', '-C', 'link-arg=-Wl,-z,max-page-size=16384', '-C', 'link-arg=-Wl,-z,common-page-size=16384']"
 
 echo "[2/4] x86_64-linux-android ..."
 cargo build -p nion-core --target x86_64-linux-android --release \
-  --config "target.x86_64-linux-android.rustflags=['-C', 'link-arg=-L$TOOLCHAIN/sysroot/usr/lib/x86_64-linux-android/26']"
+  --config "target.x86_64-linux-android.rustflags=['-C', 'link-arg=-L$TOOLCHAIN/sysroot/usr/lib/x86_64-linux-android/26', '-C', 'link-arg=-Wl,-z,max-page-size=16384', '-C', 'link-arg=-Wl,-z,common-page-size=16384']"
 
 echo "[3/4] Generating UniFFI bindings ..."
 cargo run -p uniffi-bindgen-cli \
