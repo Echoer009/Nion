@@ -69,15 +69,15 @@ fun AttachmentButton(
             targetState = expanded,
             transitionSpec = {
                 if (targetState) {
-                    // 展开：图片/文件图标从右侧滑入 + 淡入
-                    (slideInHorizontally(tween(200, easing = FastOutSlowInEasing)) { width -> width }
+                    // 展开：从右侧滑入 + 淡入
+                    (slideInHorizontally(tween(200, easing = FastOutSlowInEasing)) { it }
                         + fadeIn(tween(200, easing = FastOutSlowInEasing)))
-                        .togetherWith fadeOut(tween(100))
+                        .togetherWith(fadeOut(tween(100)))
                         .using(SizeTransform(clip = false))
                 } else {
-                    // 收起：向右滑出 + 淡出
-                    fadeOut(tween(150))
-                        .togetherWith fadeOut(tween(150))
+                    // 收起：淡出
+                    (fadeIn(tween(150, easing = FastOutSlowInEasing)))
+                        .togetherWith(fadeOut(tween(150)))
                         .using(SizeTransform(clip = false))
                 }
             },
