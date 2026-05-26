@@ -6,8 +6,6 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.slideInHorizontally
-import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -64,14 +62,13 @@ fun AttachmentButton(
             )
         }
 
-        // 展开时从右侧滑入图片和文件两个按钮
+        // 展开时淡入图片和文件两个按钮
         AnimatedContent(
             targetState = expanded,
             transitionSpec = {
                 if (targetState) {
-                    // 展开：从右侧滑入 + 淡入
-                    (slideInHorizontally(tween(200, easing = FastOutSlowInEasing)) { it }
-                        + fadeIn(tween(200, easing = FastOutSlowInEasing)))
+                    // 展开：淡入
+                    (fadeIn(tween(200, easing = FastOutSlowInEasing)))
                         .togetherWith(fadeOut(tween(100)))
                         .using(SizeTransform(clip = false))
                 } else {
