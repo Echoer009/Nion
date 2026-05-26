@@ -43,6 +43,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -115,6 +116,9 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.launch
 import com.echonion.nion.ui.components.DualPanelState
+import java.time.LocalDate
+import java.time.YearMonth
+import java.time.format.DateTimeFormatter
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
@@ -915,8 +919,9 @@ private fun AdaptiveHeightLayout(
  * - ADD_SUBTASK：显示子任务创建表单
  * - DATE_PICKER：显示日期选择页面
  * - RECURRENCE：显示循环设置页面
+ * - REMINDER：显示提醒设置页面（日历 + 时间滚轮）
  */
-private enum class DetailPanel { DETAIL, ADD_SUBTASK, DATE_PICKER, RECURRENCE }
+private enum class DetailPanel { DETAIL, ADD_SUBTASK, DATE_PICKER, RECURRENCE, REMINDER }
 
 /**
  * 任务详情浮层 —— 从任务卡片位置 morph 展开为居中的任务详情/子任务表单。
@@ -1236,6 +1241,207 @@ private fun TaskDetailOverlay(
                         }
                     }
 
+                    DetailPanel.REMINDER -> {
+                        // ===== 提醒设置页面 =====
+                        // 与 RECURRENCE 面板结构一致：标题栏 + 日历 + 时间滚轮 + 操作按钮
+                        // 解析现有 reminder 初始值
+                        val reminderDate = remember(task.reminder) {
+                            try {
+                                task.reminder?.substringBefore("T")?.let {
+                                    LocalDate.parse(it, DateTimeFormatter.ISO_LOCAL_DATE)
+                                }
+                            } catch (_: Exception) { null }
+                        }
+                        val reminderHour = remember(task.reminder) {
+                            try {
+                                task.reminder?.substringAfter("T")?.substringBefore(":")?.toIntOrNull() ?: 9
+                            } catch (_: Exception) { 9 }
+                        }
+                        val reminderMinute = remember(task.reminder) {
+                            try {
+                                task.reminder?.substringAfter("T")?.substringAfter(":")?.substringBefore(":")?.toIntOrNull() ?: 0
+                            } catch (_: Exception) { 0 }
+                        }
+                        // 本地编辑状态：日期、小时、分钟
+                        var selectedDate by remember(task.id) { mutableStateOf(reminderDate) }
+                        var selectedHour by remember(task.id) { mutableStateOf(reminderHour) }
+                        var selectedMinute by remember(task.id) { mutableStateOf(reminderMinute) }
+
+                        // 滚轮参数，与 RecurrenceSelector 一致
+                        val visibleItemCount = 5
+                        val itemHeight: Dp = 48.dp
+
+                        Column(
+                            modifier = Modifier
+                                .padding(20.dp)
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(20.dp),
+                        ) {
+                            // 标题栏：图标 + "提醒设置" + 关闭按钮
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(40.dp),
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Outlined.Alarm,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(22.dp),
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Text(
+                                    "提醒设置",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Spacer(modifier = Modifier.weight(1f))
+                                IconButton(onClick = { panel = DetailPanel.DETAIL }) {
+                                    Icon(Icons.Default.Close, contentDescription = "关闭")
+                                }
+                            }
+
+                            // 提示正在为哪个任务设置提醒
+                            Text(
+                                "为「${task.title}」设置提醒时间",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+
+                            // 日历选择区域：选择提醒日期
+                            NionCalendar(
+                                initialYearMonth = selectedDate?.let { YearMonth.from(it) } ?: YearMonth.now(),
+                                today = LocalDate.now(),
+                                selectedDate = selectedDate,
+                                onSelect = { selectedDate = it },
+                            )
+
+                            // 时间滚轮标签行："小时" 和 "分钟"
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    "小时",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(end = 48.dp),
+                                )
+                                Spacer(modifier = Modifier.width(24.dp))
+                                Text(
+                                    "分钟",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(start = 48.dp),
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // 滚轮选择区域：高亮背景 + 小时滚轮 + 冒号 + 分钟滚轮
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(itemHeight * visibleItemCount),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                // 选中行的高亮背景
+                                Surface(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(itemHeight),
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                ) {}
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    // 小时滚轮 (0-23)
+                                    WheelSpinner(
+                                        items = (0..23).map { "%02d".format(it) },
+                                        initialIndex = selectedHour,
+                                        visibleItemCount = visibleItemCount,
+                                        itemHeight = itemHeight,
+                                        onSelected = { selectedHour = it },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                    // 冒号分隔符
+                                    Text(
+                                        ":",
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(horizontal = 8.dp),
+                                    )
+                                    // 分钟滚轮 (0-59)
+                                    WheelSpinner(
+                                        items = (0..59).map { "%02d".format(it) },
+                                        initialIndex = selectedMinute,
+                                        visibleItemCount = visibleItemCount,
+                                        itemHeight = itemHeight,
+                                        onSelected = { selectedMinute = it },
+                                        modifier = Modifier.weight(1f),
+                                    )
+                                }
+                            }
+
+                            // 操作按钮：清除 + 取消 + 确定
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                // 清除提醒按钮（仅当已设置提醒时显示）
+                                if (task.reminder != null) {
+                                    TextButton(
+                                        onClick = {
+                                            onUpdateReminder(null)
+                                            panel = DetailPanel.DETAIL
+                                        },
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = ButtonDefaults.textButtonColors(
+                                            contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                        ),
+                                    ) {
+                                        Text("清除提醒", fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    }
+                                }
+                                TextButton(
+                                    onClick = { panel = DetailPanel.DETAIL },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(14.dp),
+                                ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                                // 确定：拼接日期+时间并回调，未选日期时禁用
+                                Button(
+                                    onClick = {
+                                        if (selectedDate != null) {
+                                            val result = "%sT%02d:%02d".format(
+                                                selectedDate!!.format(DateTimeFormatter.ISO_LOCAL_DATE),
+                                                selectedHour,
+                                                selectedMinute,
+                                            )
+                                            onUpdateReminder(result)
+                                        }
+                                        panel = DetailPanel.DETAIL
+                                    },
+                                    enabled = selectedDate != null,
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("确定", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                            }
+                        }
+                    }
+
                     DetailPanel.DETAIL -> {
                         // ===== 任务详情 =====
                         // 用 Column + weight 替代 AdaptiveHeightLayout (SubcomposeLayout)，
@@ -1293,111 +1499,78 @@ private fun TaskDetailOverlay(
                             }
                         }
 
-                        // 循环信息行：展示当前的每日循环设置，点击进入 RECURRENCE 面板
-                        if (task.recurrenceRule == "daily") {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = { panel = DetailPanel.RECURRENCE },
-                                    )
-                                    .padding(vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    Icons.Outlined.Repeat,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.primary,
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (task.recurrenceReminderTime != null) "每天 ${task.recurrenceReminderTime} 提醒" else "每天提醒",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.primary,
-                                )
-                            }
-                        } else {
-                            // 未设置循环：显示可点击的设置入口
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = { panel = DetailPanel.RECURRENCE },
-                                    )
-                                    .padding(vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    Icons.Outlined.Repeat,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    "设置重复",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                )
-                            }
-                        }
-
-                        // 提醒时间设置：点击展开内联选择器
-                        var showReminderPicker by remember { mutableStateOf(false) }
-                        // 提醒时间行：显示当前提醒时间或"设置提醒"入口
+                        // 循环 + 提醒设置行：左右并排，各自可点击进入对应面板
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable(
-                                    interactionSource = remember { MutableInteractionSource() },
-                                    indication = null,
-                                    onClick = { showReminderPicker = !showReminderPicker },
-                                )
                                 .padding(vertical = 2.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
                         ) {
-                            Icon(
-                                Icons.Outlined.Alarm,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = if (task.reminder != null) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = task.reminder?.let { r ->
-                                    try {
-                                        val ldt = java.time.LocalDateTime.parse(r, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
-                                        "提醒: %d月%d日 %02d:%02d".format(ldt.monthValue, ldt.dayOfMonth, ldt.hour, ldt.minute)
-                                    } catch (_: Exception) { "已设置提醒" }
-                                } ?: "设置提醒",
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (task.reminder != null) FontWeight.Medium else FontWeight.Normal,
-                                color = if (task.reminder != null) MaterialTheme.colorScheme.primary
-                                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                            )
-                        }
-
-                        // 展开的提醒选择器（仅非每日任务时显示完整选择器）
-                        if (showReminderPicker && task.recurrenceRule != "daily") {
-                            var localReminder by remember(task.id) { mutableStateOf(task.reminder) }
-                            AnimatedVisibility(
-                                visible = showReminderPicker,
-                                enter = fadeIn(tween(250)) + expandVertically(tween(300)),
-                                exit = fadeOut(tween(200)) + shrinkVertically(tween(250)),
+                            // 左半区：循环设置入口，点击进入 RECURRENCE 面板
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = { panel = DetailPanel.RECURRENCE },
+                                    )
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                ReminderTimePicker(
-                                    reminder = localReminder,
-                                    onReminderChanged = { newReminder ->
-                                        localReminder = newReminder
-                                        onUpdateReminder(newReminder)
-                                    },
+                                Icon(
+                                    Icons.Outlined.Repeat,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (task.recurrenceRule == "daily") MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (task.recurrenceRule == "daily") {
+                                        if (task.recurrenceReminderTime != null) "每天 ${task.recurrenceReminderTime}"
+                                        else "每天提醒"
+                                    } else "设置重复",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (task.recurrenceRule == "daily") FontWeight.Medium else FontWeight.Normal,
+                                    color = if (task.recurrenceRule == "daily") MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                )
+                            }
+
+                            // 右半区：提醒设置入口，点击进入 REMINDER 面板
+                            Row(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = { panel = DetailPanel.REMINDER },
+                                    )
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Alarm,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = if (task.reminder != null) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = task.reminder?.let { r ->
+                                        try {
+                                            val ldt = java.time.LocalDateTime.parse(
+                                                r, java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
+                                            )
+                                            "%d月%d日 %02d:%02d".format(ldt.monthValue, ldt.dayOfMonth, ldt.hour, ldt.minute)
+                                        } catch (_: Exception) { "已设置提醒" }
+                                    } ?: "设置提醒",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = if (task.reminder != null) FontWeight.Medium else FontWeight.Normal,
+                                    color = if (task.reminder != null) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
                                 )
                             }
                         }

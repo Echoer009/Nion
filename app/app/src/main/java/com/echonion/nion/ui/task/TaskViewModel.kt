@@ -16,7 +16,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.echonion.nion.core
 import com.echonion.nion.dataEvents
+import com.echonion.nion.reminder.NotificationHelper
 import com.echonion.nion.reminder.ReminderScheduler
+import com.echonion.nion.reminder.ReminderStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -439,6 +441,12 @@ class TaskViewModel(
         val newStatus = if (markDone) "done" else "todo"
         val updatedTask = if (markDone) markAllDone(task) else markAllTodo(task)
         tasks = updateTaskInList(tasks, task.id, updatedTask)
+        // 标记完成时取消该任务的提醒闹钟和循环
+        if (markDone) {
+            ReminderStore.resetTriggerCount(app, task.id)
+            ReminderScheduler.cancelReminder(app, task.id)
+            NotificationHelper.dismissNotification(app, task.id)
+        }
         viewModelScope.launch {
             try {
                 val allIds = collectIds(updatedTask)

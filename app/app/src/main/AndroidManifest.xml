@@ -28,6 +28,21 @@
             android:name=".reminder.ReminderReceiver"
             android:exported="false" />
 
+        <!-- 通知栏 Action 按钮点击接收器，处理「开始做了/等5分钟/今天算了」 -->
+        <receiver
+            android:name=".reminder.ReminderActionReceiver"
+            android:exported="false" />
+
+        <!-- 情景问候闹钟触发接收器 -->
+        <receiver
+            android:name=".reminder.GreetingReceiver"
+            android:exported="false" />
+
+        <!-- 批量提醒闹钟触发接收器 -->
+        <receiver
+            android:name=".reminder.BatchReminderTriggerReceiver"
+            android:exported="false" />
+
         <!-- 开机重调度接收器，设备重启后重新注册所有闹钟 -->
         <receiver
             android:name=".reminder.BootReceiver"

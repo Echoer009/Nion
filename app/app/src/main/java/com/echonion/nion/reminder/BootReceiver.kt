@@ -7,10 +7,13 @@ import android.util.Log
 import com.echonion.nion.NionApp
 
 /**
- * 开机重调度接收器 —— 监听 BOOT_COMPLETED 广播，重新注册所有提醒闹钟。
+ * 开机重调度接收器 —— 监听 BOOT_COMPLETED 广播，重新注册所有闹钟。
  *
  * Android 的 AlarmManager 闹钟在设备重启后会被清空，
- * 必须在开机后重新调度所有任务的提醒闹钟。
+ * 必须在开机后重新调度：
+ * 1. 所有任务的提醒闹钟（ReminderScheduler.rescheduleAll）
+ * 2. 情景问候闹钟（GreetingScheduler.rescheduleAll）
+ * 3. 批量提醒闹钟（BatchReminderWorker.scheduleBatchReminders）
  */
 class BootReceiver : BroadcastReceiver() {
 
@@ -21,7 +24,7 @@ class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
 
-        Log.d(TAG, "收到开机广播，开始重调度提醒闹钟")
+        Log.d(TAG, "收到开机广播，开始重调度所有闹钟")
 
         val app = context.applicationContext as? NionApp ?: run {
             Log.w(TAG, "无法获取 NionApp 实例，跳过重调度")
@@ -29,10 +32,27 @@ class BootReceiver : BroadcastReceiver() {
         }
 
         try {
+            // 重调度任务提醒闹钟
             ReminderScheduler.rescheduleAll(context, app.core)
-            Log.d(TAG, "开机重调度完成")
+            Log.d(TAG, "任务提醒重调度完成")
         } catch (e: Exception) {
-            Log.e(TAG, "开机重调度失败", e)
+            Log.e(TAG, "任务提醒重调度失败", e)
+        }
+
+        try {
+            // 重调度情景问候闹钟
+            GreetingScheduler.rescheduleAll(context, app.core)
+            Log.d(TAG, "问候闹钟重调度完成")
+        } catch (e: Exception) {
+            Log.e(TAG, "问候闹钟重调度失败", e)
+        }
+
+        try {
+            // 扫描并调度批量提醒
+            BatchReminderWorker.scheduleBatchReminders(context, app.core)
+            Log.d(TAG, "批量提醒重调度完成")
+        } catch (e: Exception) {
+            Log.e(TAG, "批量提醒重调度失败", e)
         }
     }
 }

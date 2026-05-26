@@ -63,6 +63,9 @@ dependencies {
     // OkHttp —— HTTP 客户端，用于 SSE 流式聊天
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
+    // WorkManager —— 后台提醒任务调度（渐进式循环、LLM 文案生成）
+    implementation("androidx.work:work-runtime-ktx:2.10.0")
+
     // UniFFI - generated bindings will be included as source
     implementation("net.java.dev.jna:jna:5.16.0@aar")
 

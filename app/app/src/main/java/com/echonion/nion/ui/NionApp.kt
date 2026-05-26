@@ -1,5 +1,6 @@
 package com.echonion.nion.ui
 
+import android.app.Application
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
@@ -31,6 +32,7 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
+import com.echonion.nion.MainActivity
 import com.echonion.nion.core
 import com.echonion.nion.ui.components.DualPanelLayout
 import com.echonion.nion.ui.components.DualPanelState
@@ -64,7 +66,8 @@ val bottomNavItems = listOf(
 @Composable
 fun NionApp() {
     val context = LocalContext.current
-    val core = (context.applicationContext as android.app.Application).core()
+    val app = context.applicationContext as Application
+    val core = app.core()
     var colorTheme by remember {
         val saved = try { core.getSetting("color_theme") } catch (_: Exception) { null }
         val initial = saved?.let { name ->
@@ -76,8 +79,9 @@ fun NionApp() {
     val dualState = remember { DualPanelState() }
     val viewModel = taskViewModel()
     val coroutineScope = rememberCoroutineScope()
+    val navController = rememberNavController()
 
-    /** 从任务详情跳转专注页面时，携带的预选任务信息 */
+    /** 从任务详情/通知跳转专注页面时，携带的预选任务信息 */
     var preselectedFocusTaskId by remember { mutableStateOf<String?>(null) }
     var preselectedFocusTaskTitle by remember { mutableStateOf<String?>(null) }
     /** 从任务详情跳转时携带的预选专注时长（分钟），null 表示未设置 */
@@ -85,11 +89,63 @@ fun NionApp() {
     /** 从任务详情跳转时是否自动启动计时器 */
     var autoStartFocus by remember { mutableStateOf(false) }
 
+    // ── 处理来自通知栏的 Intent ──
+    val activity = context as? MainActivity
+    LaunchedEffect(activity?.pendingIntentAction) {
+        activity?.pendingIntentAction?.let { action ->
+            when (action) {
+                // 「开始做了」→ 跳转专注页面
+                "start_focus" -> {
+                    val taskId = activity.pendingTaskId
+                    val taskTitle = activity.pendingTaskTitle ?: ""
+                    if (taskId != null) {
+                        preselectedFocusTaskId = taskId
+                        preselectedFocusTaskTitle = taskTitle
+                        preselectedFocusDuration = null
+                        autoStartFocus = true
+                        // 导航到专注页面
+                        navController.navigate("pomodoro") {
+                            popUpTo(navController.graph.findStartDestination().id) {
+                                saveState = true
+                            }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                    activity.clearPendingIntent()
+                }
+                // 点击通知主体 → 展开伙伴面板
+                "open_companion" -> {
+                    coroutineScope.launch {
+                        dualState.openRight()
+                    }
+                    activity.clearPendingIntent()
+                }
+            }
+        }
+    }
+
     NionTheme(colorTheme = colorTheme) {
         // 全局提醒弹窗，放在导航层之外，确保无论在哪个页面都能弹出
-        ReminderOverlay(app = context.applicationContext as android.app.Application)
+        // onStartFocus 回调：用户在弹窗中点击「开始做了」→ 跳转专注页面
+        ReminderOverlay(
+            app = app,
+            onStartFocus = { taskId, taskTitle ->
+                preselectedFocusTaskId = taskId
+                preselectedFocusTaskTitle = taskTitle
+                preselectedFocusDuration = null
+                autoStartFocus = true
+                // 导航到专注页面
+                navController.navigate("pomodoro") {
+                    popUpTo(navController.graph.findStartDestination().id) {
+                        saveState = true
+                    }
+                    launchSingleTop = true
+                    restoreState = true
+                }
+            },
+        )
 
-        val navController = rememberNavController()
         val navBackStackEntry by navController.currentBackStackEntryAsState()
         val currentDestination = navBackStackEntry?.destination
 

@@ -1,7 +1,11 @@
 package com.echonion.nion
 
+import android.app.Activity
 import android.app.Application
+import android.os.Bundle
 import android.util.Log
+import com.echonion.nion.reminder.BatchReminderWorker
+import com.echonion.nion.reminder.GreetingScheduler
 import com.echonion.nion.reminder.NotificationHelper
 import com.echonion.nion.reminder.ReminderEvent
 import com.echonion.nion.reminder.ReminderScheduler
@@ -24,6 +28,16 @@ class NionApp : Application() {
         private set
 
     /**
+     * App 前后台状态标志。
+     * 通过 ActivityLifecycleCallbacks 在 onActivityResumed/onActivityPaused 中维护。
+     * 用于 ReminderWorker 判断是否需要发送 SharedFlow 事件给 UI 层：
+     * - 前台时发事件 → ReminderOverlay 弹 app 内弹窗 + dismiss 系统通知
+     * - 后台时不发事件 → 只保留系统通知，不被 Overlay 撤掉
+     */
+    var isInForeground: Boolean = false
+        private set
+
+    /**
      * 数据变更事件总线。
      *
      * 任何组件修改了任务或清单数据后，调用 [notifyDataChanged] 发出事件。
@@ -34,7 +48,7 @@ class NionApp : Application() {
     val dataEvents: SharedFlow<DataChangeEvent> = _dataEvents.asSharedFlow()
 
     /**
-     * 提醒事件总线 —— ReminderReceiver 触发时通过此总线通知 UI 层。
+     * 提醒事件总线 —— ReminderWorker 触发时通过此总线通知 UI 层。
      *
      * ReminderOverlay 监听此事件流，收到事件后弹出全局提醒弹窗。
      * 使用 SharedFlow 确保即使 UI 还没准备好也不会丢失事件。
@@ -44,7 +58,7 @@ class NionApp : Application() {
 
     /**
      * 发送提醒事件到 UI 层。
-     * 由 ReminderReceiver 在闹钟触发时调用。
+     * 由 ReminderWorker 在提醒逻辑执行时调用。
      */
     fun postReminderEvent(event: ReminderEvent) {
         _reminderEvents.tryEmit(event)
@@ -79,6 +93,36 @@ class NionApp : Application() {
         } catch (e: Exception) {
             Log.e("NionApp", "重调度提醒闹钟失败", e)
         }
+
+        // 重调度情景问候闹钟
+        try {
+            GreetingScheduler.rescheduleAll(this, core)
+        } catch (e: Exception) {
+            Log.e("NionApp", "重调度问候闹钟失败", e)
+        }
+
+        // 扫描并调度批量提醒（密集时段检测）
+        try {
+            BatchReminderWorker.scheduleBatchReminders(this, core)
+        } catch (e: Exception) {
+            Log.e("NionApp", "调度批量提醒失败", e)
+        }
+
+        // 注册 Activity 生命周期回调，跟踪 app 前后台状态
+        // 供 ReminderWorker 判断是否发送 SharedFlow 事件给 UI 层
+        registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityResumed(activity: Activity) {
+                isInForeground = true
+            }
+            override fun onActivityPaused(activity: Activity) {
+                isInForeground = false
+            }
+            override fun onActivityStarted(activity: Activity) {}
+            override fun onActivityStopped(activity: Activity) {}
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+            override fun onActivityDestroyed(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+        })
     }
 }
 

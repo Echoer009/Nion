@@ -205,6 +205,8 @@ object ReminderScheduler {
      *
      * @return 毫秒时间戳，解析失败返回 null
      */
+    fun parseReminderToMillisPublic(reminder: String): Long? = parseReminderToMillis(reminder)
+
     private fun parseReminderToMillis(reminder: String): Long? {
         return try {
             // 尝试解析为 LocalDateTime（本地时间格式）
