@@ -47,16 +47,30 @@ class DualPanelState {
     /** 侧滑阈值：从关闭拖出此比例→打开，从打开拖回此比例→关闭（对称） */
     private val settleThreshold = 0.20f
 
+    /**
+     * 打开左侧面板。
+     *
+     * 不再检查 offset != 0f —— 允许从任意位置动画到左侧打开位置。
+     * 例如右侧面板打开时（offset<0），可直接跨过 0 点动画到左侧，不会静默失败。
+     */
     fun openLeft() {
         val s = scope ?: return
-        if (offset.value != 0f) return
+        if (isLeftOpen) return
+        android.util.Log.d("DualPanel", "[openLeft] offset=${offset.value} → animateTo($leftWidthPx)")
         isOpen = true
         s.launch { offset.animateTo(leftWidthPx, tween(animationDurationMs)) }
     }
 
+    /**
+     * 打开右侧伙伴面板。
+     *
+     * 不再检查 offset != 0f —— 允许从任意位置动画到右侧打开位置。
+     * 例如左侧面板打开时（offset>0），可直接跨过 0 点动画到右侧，不会静默失败。
+     */
     fun openRight() {
         val s = scope ?: return
-        if (offset.value != 0f) return
+        if (isRightOpen) return
+        android.util.Log.d("DualPanel", "[openRight] offset=${offset.value} → animateTo(${-rightWidthPx})")
         isOpen = true
         s.launch { offset.animateTo(-rightWidthPx, tween(animationDurationMs)) }
     }
