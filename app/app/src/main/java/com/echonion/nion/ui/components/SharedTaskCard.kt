@@ -1,0 +1,246 @@
+package com.echonion.nion.ui.components
+
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
+import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.Repeat
+import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import com.echonion.nion.ui.task.formatDueDate
+import com.echonion.nion.ui.task.isOverdue
+import com.echonion.nion.ui.task.priorityColor
+
+/**
+ * 共享任务卡片 UI 数据模型 —— 统一任务列表和日程页面的卡片数据。
+ *
+ * 两个页面各自的 ViewModel 数据模型（TaskItem / ScheduleTaskItem）
+ * 通过 toCardModel() 扩展函数映射到此类型，供 SharedTaskCard 消费。
+ */
+data class TaskCardModel(
+    val id: String,
+    val title: String,
+    val description: String? = null,
+    val priority: String,
+    val isDone: Boolean,
+    val isDaily: Boolean = false,
+    val dueDate: String? = null,
+    val reminderTime: String? = null,
+)
+
+/**
+ * 共享任务卡片 —— 任务列表和日程页面复用的任务行渲染组件。
+ *
+ * 视觉规范：
+ * - 背景色随完成状态动画切换（surfaceContainerLowest / surfaceContainerLow）
+ * - 勾选框带弹跳动画，未完成时显示 RadioButtonUnchecked 图标（颜色跟随优先级）
+ * - 标题完成时带删除线，每日任务末尾显示循环图标
+ * - 可选显示描述（单行省略）和截止日期/提醒时间行
+ *
+ * @param model 任务卡片数据
+ * @param onToggleDone 勾选框点击回调，切换任务完成状态
+ * @param onClick 卡片整体点击回调，null 表示不可点击（日程页面不需要点击打开详情）
+ * @param shape 卡片圆角形状，用于背景裁切；任务列表在有分组时需要特殊 shape
+ * @param modifier 在 background() 之前注入的 modifier，用于任务列表添加 group border / selection / shared element
+ * @param compact 紧凑模式，true 时缩小内边距（日程页面使用）
+ */
+@Composable
+fun SharedTaskCard(
+    model: TaskCardModel,
+    onToggleDone: () -> Unit,
+    onClick: (() -> Unit)? = null,
+    shape: Shape = MaterialTheme.shapes.medium,
+    modifier: Modifier = Modifier,
+    compact: Boolean = false,
+) {
+    // 背景色动画：已完成 → surfaceContainerLow，未完成 → surfaceContainerLowest
+    val cardColor by animateColorAsState(
+        targetValue = if (model.isDone)
+            MaterialTheme.colorScheme.surfaceContainerLow
+        else
+            MaterialTheme.colorScheme.surfaceContainerLowest,
+        animationSpec = tween(300),
+        label = "cardColor",
+    )
+
+    // 勾选框弹跳动画：从 false → true 时播放 scale 1.0 → 1.3 → 1.0
+    val checkScale = remember { Animatable(1f) }
+    // wasDone 记录上一次 isDone，区分首次 composition 和真正状态变化
+    var wasDone by remember { mutableStateOf(model.isDone) }
+    LaunchedEffect(model.isDone) {
+        if (model.isDone && !wasDone) {
+            checkScale.animateTo(1.3f, tween(120))
+            checkScale.animateTo(1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessHigh))
+        }
+        wasDone = model.isDone
+    }
+
+    // 勾选框背景色动画：完成时 primary，未完成时透明
+    val checkBgColor by animateColorAsState(
+        targetValue = if (model.isDone) MaterialTheme.colorScheme.primary else Color.Transparent,
+        animationSpec = tween(250),
+        label = "checkBg",
+    )
+
+    // 优先级颜色，复用 TaskUtils 的扩展属性
+    val priorityColor = model.priority.priorityColor
+
+    // 紧凑模式下缩小内边距
+    val horizontalPadding = if (compact) 14.dp else 16.dp
+    val verticalPadding = if (compact) 10.dp else 14.dp
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(modifier)
+            .background(cardColor, shape)
+            .then(
+                if (onClick != null) {
+                    Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onClick,
+                    )
+                } else {
+                    Modifier
+                }
+            )
+            .padding(horizontal = horizontalPadding, vertical = verticalPadding),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 勾选框：带弹跳动画的圆形 checkbox
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .scale(checkScale.value)
+                .clip(CircleShape)
+                .background(checkBgColor)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onToggleDone,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (model.isDone) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = "已完成",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(14.dp),
+                )
+            } else {
+                Icon(
+                    Icons.Default.RadioButtonUnchecked,
+                    contentDescription = "未完成",
+                    tint = priorityColor,
+                    modifier = Modifier.size(24.dp),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        // 文字信息列：标题 + 描述 + 截止日期/提醒时间
+        Column(modifier = Modifier.weight(1f)) {
+            // 标题行：任务名 + 每日循环图标
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = model.title,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                    textDecoration = if (model.isDone) TextDecoration.LineThrough else null,
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false),
+                )
+                // 每日任务：卡片末尾只显示循环图标，不附带文字
+                if (model.isDaily) {
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Icon(
+                        Icons.Outlined.Repeat,
+                        contentDescription = "每天",
+                        modifier = Modifier.size(14.dp),
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                    )
+                }
+            }
+            // 描述：单行省略，仅在有内容时显示
+            if (!model.description.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = model.description,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            // 截止日期 + 提醒时间行：日历/时钟图标 + 格式化日期，逾期时文字变红
+            if (!model.dueDate.isNullOrBlank() || !model.reminderTime.isNullOrBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 图标选择：有日期用日历图标，只有时间用时钟图标
+                    Icon(
+                        if (!model.dueDate.isNullOrBlank()) Icons.Outlined.CalendarToday
+                        else Icons.Outlined.Schedule,
+                        contentDescription = null,
+                        modifier = Modifier.size(12.dp),
+                        tint = if (model.dueDate.isOverdue()) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                    )
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = buildString {
+                            model.dueDate.formatDueDate()?.let { append(it) }
+                            if (!model.dueDate.isNullOrBlank() && !model.reminderTime.isNullOrBlank()) {
+                                append(" ")
+                            }
+                            model.reminderTime?.let { append(it) }
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (model.dueDate.isOverdue()) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+    }
+}

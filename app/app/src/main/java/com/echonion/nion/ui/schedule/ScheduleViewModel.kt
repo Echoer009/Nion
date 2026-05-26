@@ -13,6 +13,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.echonion.nion.core
+import com.echonion.nion.ui.components.TaskCardModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
@@ -29,6 +30,7 @@ import java.time.format.DateTimeFormatter
 data class ScheduleTaskItem(
     val id: String,
     val title: String,
+    val description: String? = null,
     val priority: String,
     val isDone: Boolean,
     val isDaily: Boolean,
@@ -138,6 +140,7 @@ class ScheduleViewModel(
         return ScheduleTaskItem(
             id = task.id,
             title = task.title,
+            description = task.description,
             priority = task.priority,
             isDone = if (isDaily) completedForDate else (task.status == "done"),
             isDaily = isDaily,
@@ -145,13 +148,19 @@ class ScheduleViewModel(
             reminderTime = task.recurrenceReminderTime,
         )
     }
-
-    init {
-        // 初始化加载今天的任务和当前月的日历标记
-        loadTasksForDate(LocalDate.now())
-        loadCalendarMarkers(LocalDate.now().year, LocalDate.now().monthValue)
-    }
 }
+
+/** 将 ScheduleTaskItem 映射为共享任务卡片数据模型 */
+fun ScheduleTaskItem.toCardModel(): TaskCardModel = TaskCardModel(
+    id = id,
+    title = title,
+    description = description,
+    priority = priority,
+    isDone = isDone,
+    isDaily = isDaily,
+    dueDate = dueDate,
+    reminderTime = reminderTime,
+)
 
 @Composable
 fun scheduleViewModel(): ScheduleViewModel {

@@ -12,7 +12,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -40,9 +39,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.outlined.Repeat
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -66,6 +62,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.echonion.nion.ui.components.SharedTaskCard
+import com.echonion.nion.ui.components.TaskCardModel
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -313,12 +311,18 @@ private fun ScheduleContent(
                 }
             } else {
                 items(tasks, key = { it.id }) { task ->
-                    ScheduleTaskCard(
-                        task = task,
+                    // 使用共享任务卡片组件，compact=true 让日程页卡片略紧凑
+                    SharedTaskCard(
+                        model = task.toCardModel(),
                         onToggleDone = {
                             onToggleDone(task.id, selectedDate, task.isDone)
                         },
+                        compact = true,
                     )
+                    // 扁平卡片之间需要间隔，替代原来的 ElevatedCard 阴影效果
+                    if (task != tasks.last()) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                    }
                 }
             }
 
@@ -537,94 +541,6 @@ private fun WeekDaySelector(
  * @param task 任务数据
  * @param onToggleDone 点击勾选框时切换完成状态
  */
-@Composable
-private fun ScheduleTaskCard(
-    task: ScheduleTaskItem,
-    onToggleDone: () -> Unit,
-) {
-    // 优先级对应的颜色
-    val priorityColor = when (task.priority) {
-        "high" -> Color(0xFFE53935)
-        "medium" -> Color(0xFFFFA726)
-        else -> Color(0xFF66BB6A)
-    }
-    ElevatedCard(
-        modifier = Modifier.fillMaxWidth(),
-        shape = MaterialTheme.shapes.medium,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // 勾选框
-            Box(
-                modifier = Modifier
-                    .size(24.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (task.isDone) MaterialTheme.colorScheme.primary else Color.Transparent
-                    )
-                    .border(
-                        BorderStroke(2.dp, if (task.isDone) Color.Transparent else priorityColor),
-                        CircleShape,
-                    )
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = onToggleDone,
-                    ),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (task.isDone) {
-                    Icon(
-                        androidx.compose.material.icons.Icons.Default.Check,
-                        contentDescription = "已完成",
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(14.dp),
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.width(12.dp))
-            // 任务信息
-            Column(modifier = Modifier.weight(1f)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        task.title,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.SemiBold,
-                        color = if (task.isDone) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                            else MaterialTheme.colorScheme.onSurface,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false),
-                    )
-                    // 每日任务：卡片末尾只显示循环图标，不附带文字
-                    if (task.isDaily) {
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Icon(
-                            androidx.compose.material.icons.Icons.Outlined.Repeat,
-                            contentDescription = "每天",
-                            modifier = Modifier.size(14.dp),
-                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                        )
-                    }
-                }
-                // 提醒时间
-                task.reminderTime?.let { time ->
-                    Spacer(modifier = Modifier.height(2.dp))
-                    Text(
-                        time,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-    }
-}
-
 /**
  * 日历选择对话框 —— 显示月视图日历，支持左右滑动切换月份。
  *

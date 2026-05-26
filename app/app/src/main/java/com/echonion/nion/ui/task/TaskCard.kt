@@ -1,10 +1,6 @@
 package com.echonion.nion.ui.task
 
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.Animatable
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -12,11 +8,9 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,33 +19,26 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.outlined.CalendarToday
-import androidx.compose.material.icons.outlined.Repeat
-import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.echonion.nion.ui.components.SharedTaskCard
+import com.echonion.nion.ui.components.TaskCardModel
 
 /**
  * 扁平任务行 —— 根据 depth 分发到主任务行或子任务行。
@@ -149,7 +136,8 @@ private fun Modifier.groupBorder(
 }
 
 /**
- * 主任务行 —— 显示主任务标题、描述、完成状态。
+ * 主任务行 —— 委托 SharedTaskCard 渲染，在此基础上添加任务列表特有的
+ * group border / selection border / shared element 动画 modifier。
  *
  * @param sharedElementModifier shared element 动画 modifier，用于任务详情展开时的 morph 动画
  */
@@ -166,36 +154,34 @@ private fun MainTaskRow(
     modifier: Modifier = Modifier,
     sharedElementModifier: Modifier = Modifier,
 ) {
+    // 分组最后一行用 medium 圆角，否则仅顶部圆角（底部与子任务相连）
     val shape = if (isGroupLast) MaterialTheme.shapes.medium
         else RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 0.dp, bottomEnd = 0.dp)
 
-    val checkScale = remember { Animatable(1f) }
-    /**
-     * 记录上一次 render 时的 isDone 状态，用于区分：
-     * - 首次进入 composition（isDone 本来就是 true）→ 跳过动画
-     * - 真正的状态变化（isDone 从 false 变为 true）→ 播放弹跳动画
-     */
-    var wasDone by remember { mutableStateOf(task.isDone) }
-    LaunchedEffect(task.isDone) {
-        if (task.isDone && !wasDone) {
-            checkScale.animateTo(1.3f, tween(120))
-            checkScale.animateTo(1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessHigh))
-        }
-        wasDone = task.isDone
+    val borderColor = MaterialTheme.colorScheme.primary
+    val borderWidth = with(LocalDensity.current) { 2.dp.toPx() }
+
+    // 将 TaskItem 映射为共享数据模型
+    val cardModel = remember(task) {
+        TaskCardModel(
+            id = task.id,
+            title = task.title,
+            description = task.description,
+            priority = task.priority,
+            isDone = task.isDone,
+            isDaily = task.isDaily,
+            dueDate = task.dueDate,
+            reminderTime = task.recurrenceReminderTime,
+        )
     }
 
-    val checkBgColor by animateColorAsState(
-        targetValue = if (task.isDone) MaterialTheme.colorScheme.primary else Color.Transparent,
-        animationSpec = tween(250),
-        label = "checkBg",
-    )
-
-    val borderColor = MaterialTheme.colorScheme.primary
-    val borderWidth = with(androidx.compose.ui.platform.LocalDensity.current) { 2.dp.toPx() }
-
-    Row(
+    // 在 SharedTaskCard 的 background() 之前注入 group border / selection / shared element
+    SharedTaskCard(
+        model = cardModel,
+        onToggleDone = { onToggleDone(task) },
+        onClick = { onClick(task) },
+        shape = shape,
         modifier = modifier
-            .fillMaxWidth()
             .then(sharedElementModifier)
             .then(
                 when {
@@ -203,102 +189,8 @@ private fun MainTaskRow(
                     isSelected -> Modifier.border(BorderStroke(2.dp, borderColor), shape)
                     else -> Modifier
                 }
-            )
-            .background(cardColor, shape)
-            .clickable(
-                interactionSource = remember { MutableInteractionSource() },
-                indication = null,
-                onClick = { onClick(task) },
-            )
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .size(24.dp)
-                .scale(checkScale.value)
-                .clip(CircleShape)
-                .background(checkBgColor)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = { onToggleDone(task) },
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (task.isDone) {
-                Icon(Icons.Default.Check, contentDescription = "已完成", tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(14.dp))
-            } else {
-                Icon(Icons.Default.RadioButtonUnchecked, contentDescription = "未完成", tint = priorityColor, modifier = Modifier.size(24.dp))
-            }
-        }
-        Spacer(modifier = Modifier.width(14.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            // 标题行：任务名 + 每日标签
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = task.title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                    textDecoration = if (task.isDone) TextDecoration.LineThrough else null,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
-                )
-                // 每日任务：卡片末尾只显示循环图标，不附带文字
-                if (task.isDaily) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Icon(
-                        Icons.Outlined.Repeat,
-                        contentDescription = "每天",
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
-                    )
-                }
-            }
-            if (!task.description.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = task.description,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
-            // 截止日期 + 时间显示：日历图标 + 格式化日期，逾期时文字变红；有时间则追加显示
-            if (!task.dueDate.isNullOrBlank() || !task.recurrenceReminderTime.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // 图标选择：有日期用日历图标，只有时间用时钟图标
-                    Icon(
-                        if (!task.dueDate.isNullOrBlank()) Icons.Outlined.CalendarToday
-                            else Icons.Outlined.Schedule,
-                        contentDescription = null,
-                        modifier = Modifier.size(12.dp),
-                        tint = if (task.dueDate.isOverdue()) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(
-                        text = buildString {
-                            task.dueDate.formatDueDate()?.let { append(it) }
-                            if (!task.dueDate.isNullOrBlank() && !task.recurrenceReminderTime.isNullOrBlank()) {
-                                append(" ")
-                            }
-                            task.recurrenceReminderTime?.let { append(it) }
-                        },
-                        style = MaterialTheme.typography.bodySmall,
-                        color = if (task.dueDate.isOverdue()) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
-        }
-    }
+            ),
+    )
 }
 
 /**

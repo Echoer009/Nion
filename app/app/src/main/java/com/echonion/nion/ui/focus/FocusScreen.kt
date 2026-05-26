@@ -6,6 +6,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
@@ -51,8 +52,10 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,6 +81,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.echonion.nion.core
 import com.echonion.nion.ui.theme.NionColors
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import uniffi.nion_core.NionCore
@@ -211,36 +215,40 @@ fun FocusScreen(
     val seconds = vm.remainingSeconds % 60
     val timeText = String.format("%02d:%02d", minutes, seconds)
 
-    // isTouchingClock: 用户是否正在触摸表盘（拖拽或点击刻度区域）
-    // 用于控制高亮刻度的显示/隐藏
-    var isTouchingClock by remember { mutableStateOf(false) }
+    // ---- 高亮刻度状态 ----
 
-    // highlightFraction: 高亮刻度在圆周上的位置比例（0=12点, 1=回到12点）
-    // 仅在拖拽时有意义，值 = focusMinutes / 120
+    // highlightVisible: 高亮刻度是否可见（由触摸手势控制）
+    // 手指按下后设 true，松手后延迟一小段时间再设 false（让用户看到点击反馈）
+    var highlightVisible by remember { mutableStateOf(false) }
+
+    // touchGeneration: 触摸代际计数器，防止快速连续触摸时旧的延迟协程错误关闭高亮
+    var touchGeneration by remember { mutableIntStateOf(0) }
+    val scope = rememberCoroutineScope()
+
+    // isDragging: 是否正在拖拽刻度盘，控制高亮动画速度
+    // 拖拽中用 snap() 瞬间跟随手指，松手后用 tween(400ms) 缓动到吸附位置
+    var isDragging by remember { mutableStateOf(false) }
+
+    // highlightFraction: 高亮刻度在圆周上的目标位置比例（0=12点, 1=回到12点）
+    // 始终跟踪 focusMinutes，无论是否可见
     val highlightFraction = vm.focusMinutes.toFloat() / 120f
 
-    // highlightFractionAnim: 高亮刻度的动画位置值
-    // 拖拽中 snapTo 瞬间跟随手指，松手后 animateTo 平滑过渡
-    val highlightFractionAnim = remember { Animatable(highlightFraction) }
-    LaunchedEffect(highlightFraction, isTouchingClock) {
-        if (isTouchingClock) {
-            // 拖拽中：瞬间跳到手指位置，无延迟
-            highlightFractionAnim.snapTo(highlightFraction)
-        } else {
-            // 松手后：平滑过渡到最终位置（配合淡出动画）
-            highlightFractionAnim.animateTo(
-                targetValue = highlightFraction,
-                animationSpec = tween(
-                    durationMillis = 300,
-                    easing = androidx.compose.animation.core.FastOutSlowInEasing,
-                ),
-            )
-        }
-    }
+    // highlightPos: 高亮刻度的动画位置值
+    // 拖拽时 snap() 瞬间跟随手指位置，松手后 tween(400ms) 缓动过渡到吸附位置
+    // 不可见时动画也在后台运行，这样下次触摸时位置已经在最新值
+    val highlightPos by animateFloatAsState(
+        targetValue = highlightFraction,
+        animationSpec = if (isDragging) snap() else tween(
+            durationMillis = 400,
+            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+        ),
+        label = "highlightPos",
+    )
 
-    // highlightAlpha: 高亮刻度的透明度，松手后淡出消失
+    // highlightAlpha: 高亮刻度的透明度
+    // 触摸时淡入（300ms），松手后延迟 300ms 再淡出（300ms）
     val highlightAlpha by animateFloatAsState(
-        targetValue = if (isTouchingClock) 1f else 0f,
+        targetValue = if (highlightVisible) 1f else 0f,
         animationSpec = tween(durationMillis = 300),
         label = "highlightAlpha",
     )
@@ -330,73 +338,77 @@ fun FocusScreen(
                         .pointerInput(vm.isRunning) {
                             if (vm.isRunning) return@pointerInput
                             awaitEachGesture {
-                                // 触摸开始：显示高亮
-                                isTouchingClock = true
-                                try {
-                                    val down = awaitFirstDown()
-                                    val downPos = down.position
-                                    val center = Offset(size.width / 2f, size.height / 2f)
-                                    val outerR = kotlin.math.min(size.width, size.height).toFloat() / 2f
-                                    // 刻度判断区域：外圈 50% 半径以上为刻度/拖拽区
-                                    val tickZoneStart = outerR * 0.5f
+                                val down = awaitFirstDown()
+                                val downPos = down.position
+                                val center = Offset(size.width / 2f, size.height / 2f)
+                                val outerR = kotlin.math.min(size.width, size.height).toFloat() / 2f
+                                // 刻度判断区域：外圈 50% 半径以上为刻度/拖拽区
+                                val tickZoneStart = outerR * 0.5f
 
-                                    var dragged = false
+                                var dragged = false
 
-                                    /** 根据触点位置计算对应的分钟数（1~120，未吸附） */
-                                    fun minutesFromPosition(pos: Offset): Int {
-                                        val dx = pos.x - center.x
-                                        val dy = pos.y - center.y
-                                        val angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
-                                        var normalized = angle + 90f
-                                        if (normalized < 0) normalized += 360f
-                                        val fraction = (normalized / 360f).coerceIn(0f, 1f)
-                                        return (1 + fraction * 119).roundToInt().coerceIn(1, 120)
+                                /** 根据触点位置计算对应的分钟数（1~120，未吸附） */
+                                fun minutesFromPosition(pos: Offset): Int {
+                                    val dx = pos.x - center.x
+                                    val dy = pos.y - center.y
+                                    val angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+                                    var normalized = angle + 90f
+                                    if (normalized < 0) normalized += 360f
+                                    val fraction = (normalized / 360f).coerceIn(0f, 1f)
+                                    return (1 + fraction * 119).roundToInt().coerceIn(1, 120)
+                                }
+
+                                // 等待后续事件，判断是点击还是拖拽
+                                var lastPos = downPos
+                                while (true) {
+                                    val event = awaitPointerEvent()
+                                    val change = event.changes.firstOrNull() ?: break
+                                    if (change.position != lastPos) {
+                                        change.consume()
+                                        dragged = true
+                                        lastPos = change.position
+                                        val newMinutes = minutesFromPosition(change.position)
+                                        // 先更新时长再显示高亮，确保高亮出现在正确位置
+                                        vm.setDuration(newMinutes)
+                                        highlightVisible = true
                                     }
-
-                                    // 等待后续事件，判断是点击还是拖拽
-                                    var lastPos = downPos
-                                    while (true) {
-                                        val event = awaitPointerEvent()
-                                        val change = event.changes.firstOrNull() ?: break
-                                        // 通过比较当前与上一次触点位置来判断是否发生拖拽
-                                        if (change.position != lastPos) {
-                                            change.consume()
-                                            dragged = true
-                                            lastPos = change.position
-                                            val newMinutes = minutesFromPosition(change.position)
-                                            vm.setDuration(newMinutes)
-                                        }
-                                        if (!change.pressed) {
-                                            // 手指抬起
-                                            change.consume()
-                                            break
-                                        }
+                                    if (!change.pressed) {
+                                        change.consume()
+                                        break
                                     }
+                                }
 
-                                    if (dragged) {
-                                        // 拖拽结束：吸附到最近的 5 分钟整数倍
-                                        val snapped = ((vm.focusMinutes + 2) / 5) * 5
-                                        val final = snapped.coerceIn(5, 120)
-                                        vm.setDuration(final)
+                                if (dragged) {
+                                    // 拖拽结束：吸附到最近的 5 分钟整数倍
+                                    val snapped = ((vm.focusMinutes + 2) / 5) * 5
+                                    val final = snapped.coerceIn(5, 120)
+                                    vm.setDuration(final)
+                                } else {
+                                    // 点击：根据触点位置判断操作
+                                    val dx = downPos.x - center.x
+                                    val dy = downPos.y - center.y
+                                    val dist = kotlin.math.sqrt(dx * dx + dy * dy)
+                                    if (dist >= tickZoneStart) {
+                                        val rawMinutes = minutesFromPosition(downPos)
+                                        val snapped = ((rawMinutes + 2) / 5) * 5
+                                        val newMinutes = snapped.coerceIn(5, 120)
+                                        vm.setDuration(newMinutes)
+                                        // 点击刻度：短暂显示高亮反馈
+                                        highlightVisible = true
                                     } else {
-                                        // 点击：根据触点位置判断操作
-                                        val dx = downPos.x - center.x
-                                        val dy = downPos.y - center.y
-                                        val dist = kotlin.math.sqrt(dx * dx + dy * dy)
-                                        if (dist >= tickZoneStart) {
-                                            // 点击刻度区域 → 吸附到最近的 5 分钟刻度
-                                            val rawMinutes = minutesFromPosition(downPos)
-                                            val snapped = ((rawMinutes + 2) / 5) * 5
-                                            val newMinutes = snapped.coerceIn(5, 120)
-                                            vm.setDuration(newMinutes)
-                                        } else {
-                                            // 点击中心区域 → 展开任务面板
-                                            showTaskPanel = true
-                                        }
+                                        // 点击中心区域 → 展开任务面板
+                                        showTaskPanel = true
                                     }
-                                } finally {
-                                    // 触摸结束：隐藏高亮（淡出）
-                                    isTouchingClock = false
+                                }
+
+                                // 松手后延迟关闭高亮：
+                                // 使用 touchGeneration 防止旧的延迟协程被新的触摸误关
+                                val myGen = ++touchGeneration
+                                scope.launch {
+                                    delay(300)
+                                    if (touchGeneration == myGen) {
+                                        highlightVisible = false
+                                    }
                                 }
                             }
                         },
@@ -413,7 +425,9 @@ fun FocusScreen(
                         // 第一层：绘制 60 根基础刻度
                         for (i in 0 until 60) {
                             // 从12点位置开始顺时针
-                            val angleDeg = -90.0 + 360.0 * i / 60
+                            // 基础刻度在 Canvas 中初始位置就是 12 点方向，无需 -90° 偏移
+                            // rotate(0°) = 留在 12 点，rotate(90°) = 顺时针到 3 点
+                            val angleDeg = 360.0 * i / 60
                             val isLit = i < litCount
                             // 5 的倍数 = 时刻刻度，更长更宽
                             val isMajor = i % 5 == 0
@@ -436,11 +450,11 @@ fun FocusScreen(
                             }
                         }
 
-                        // 第二层：高亮刻度（仅在触摸时显示，松手后淡出）
-                        // 使用 highlightFractionAnim 的连续角度值，不截断到整数刻度索引
-                        // 位置精确跟随手指，配合 highlightAlpha 控制淡入淡出
+                        // 第二层：高亮刻度（触摸时淡入，松手后延迟 300ms 淡出）
+                        // 使用 highlightPos 的连续角度值，精确跟随手指位置
                         if (highlightAlpha > 0.01f) {
-                            val hlAngleDeg = -90.0 + 360.0 * highlightFractionAnim.value
+                            // 高亮刻度角度与触摸计算的角度体系一致：0°=12点，顺时针递增
+                            val hlAngleDeg = 360.0 * highlightPos
                             // 高亮刻度比普通刻度更长更粗，醒目的亮橙色
                             val hlLength = 26.dp.toPx()
                             val hlWidth = 4.5f.dp.toPx()
