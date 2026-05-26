@@ -35,6 +35,7 @@ import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.unit.Dp
 import androidx.compose.material.icons.Icons
@@ -47,6 +48,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SwapHoriz
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -85,6 +87,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import uniffi.nion_core.ConversationData
 import org.json.JSONArray
+import com.echonion.nion.ui.companion.tools.MemoryTool
 
 /**
  * 聊天消息数据类 —— 单条消息的展示模型。
@@ -141,6 +144,7 @@ fun CompanionSidebar(
         panelMode == "setup" -> "setup"
         panelMode == "history" -> "history"
         panelMode == "switch" -> "switch"
+        panelMode == "memories" -> "memories"
         viewModel.currentProvider != null && viewModel.apiKey != null -> "chat"
         else -> "setup"
     }
@@ -177,7 +181,7 @@ fun CompanionSidebar(
             targetState = actualMode,
             transitionSpec = {
                 if (targetState != "chat" && targetState != "setup" && targetState != "profile") {
-                    // 展开子面板（history/switch）：子面板淡入(300ms)，主面板淡出(180ms)
+                    // 展开子面板（history/switch/memories）：子面板淡入(300ms)，主面板淡出(180ms)
                     (fadeIn(tween(300, easing = FastOutSlowInEasing))
                         togetherWith fadeOut(tween(180, easing = FastOutSlowInEasing)))
                         .using(SizeTransform(clip = false))
@@ -218,6 +222,10 @@ fun CompanionSidebar(
                     viewModel = viewModel,
                     onBack = { panelMode = null },
                 )
+                "memories" -> MemoriesPanel(
+                    viewModel = viewModel,
+                    onClose = { panelMode = null },
+                )
                 "setup" -> SetupContent(
                     viewModel = viewModel,
                     onBack = if (hasConfigured) { { panelMode = "switch" } } else null,
@@ -232,6 +240,7 @@ fun CompanionSidebar(
                     },
                     onHistoryClick = { panelMode = "history" },
                     onSwitchClick = { panelMode = "switch" },
+                    onMemoriesClick = { panelMode = "memories" },
                 )
             }
         }
@@ -711,6 +720,7 @@ private fun ChatContent(
     onNewChat: () -> Unit,
     onHistoryClick: () -> Unit,
     onSwitchClick: () -> Unit,
+    onMemoriesClick: () -> Unit,
 ) {
     // 用 ViewModel 保存的滚动位置初始化 LazyListState
     // 当面板因打开左侧清单被移出组合再重新进入时，自动恢复到上次位置
@@ -786,8 +796,17 @@ private fun ChatContent(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             }
-            // 右侧按钮组：新对话 + 历史记录 + 切换配置
+            // 右侧按钮组：记忆 + 新对话 + 历史记录 + 切换配置
             Row(verticalAlignment = Alignment.CenterVertically) {
+                // 记忆按钮：查看 Nion 记住的关于用户的信息
+                IconButton(onClick = onMemoriesClick) {
+                    Icon(
+                        Icons.Outlined.AutoAwesome,
+                        contentDescription = "记忆",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
                 // 新对话按钮：保存当前对话并开始新对话
                 IconButton(onClick = onNewChat) {
                     Icon(
@@ -1463,4 +1482,306 @@ private fun ConfigItem(
             )
         }
     }
+}
+
+/**
+ * 记忆管理面板 —— 展示 Nion 记住的关于用户的所有事实性信息。
+ *
+ * 以分类标签 + 内容列表的形式展示记忆，支持按分类筛选和逐条删除。
+ * 记忆由 AI 在对话中主动调用 memory 工具记录，用户可在此查看和管理。
+ *
+ * @param viewModel 伙伴 ViewModel，提供 userMemories 数据和 removeMemory 方法
+ * @param onClose 关闭面板的回调，返回聊天界面
+ */
+@Composable
+private fun MemoriesPanel(
+    viewModel: CompanionViewModel,
+    onClose: () -> Unit,
+) {
+    // 当前筛选的分类，null 表示显示全部
+    var filterCategory by remember { mutableStateOf<String?>(null) }
+
+    // 所有有效的记忆分类列表，用于生成筛选标签
+    val allCategories = MemoryTool.categoryLabels
+
+    // 记忆数量统计文本
+    val memories = viewModel.userMemories
+    val totalCount = memories.length()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(vertical = 24.dp, horizontal = 16.dp),
+    ) {
+        // 顶部导航栏：返回按钮 + 标题
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(
+                    Icons.Default.ArrowBack,
+                    contentDescription = "返回",
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            Column {
+                Text(
+                    "${viewModel.companionName}的笔记本",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    if (totalCount == 0) "暂无记忆" else "共 $totalCount 条记忆",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 说明文本
+        Text(
+            "AI 会在对话中主动记录关于你的信息，你也可以在这里管理这些记忆",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 分类筛选标签 —— 横向可滚动的分类标签行
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            // "全部"标签
+            val isAll = filterCategory == null
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = if (isAll) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.clickable { filterCategory = null },
+            ) {
+                Text(
+                    "全部",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isAll) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+            // 各分类标签 —— 仅显示有记忆的分类
+            allCategories.forEach { (key, label) ->
+                val count = countMemoriesByCategory(memories, key)
+                if (count > 0) {
+                    val isSelected = filterCategory == key
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isSelected) MemoryItemColors[key] ?: MaterialTheme.colorScheme.primary
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.clickable { filterCategory = key },
+                    ) {
+                        Text(
+                            "$label ($count)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isSelected) Color.White
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 记忆列表
+        if (totalCount == 0) {
+            // 空状态：居中提示
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(
+                    Icons.Outlined.AutoAwesome,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "还没有任何记忆",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "和 ${viewModel.companionName} 聊天时，AI 会自动记住关于你的信息",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                )
+            }
+        } else {
+            // 按筛选条件过滤后的记忆列表
+            val filteredMemories = filterMemories(memories, filterCategory)
+            if (filteredMemories.isEmpty()) {
+                // 该分类下无记忆
+                Text(
+                    "该分类下暂无记忆",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.padding(vertical = 16.dp),
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(filteredMemories.size) { index ->
+                        val mem = filteredMemories[index]
+                        MemoryItem(
+                            mem = mem,
+                            onDelete = { viewModel.removeMemory(mem.getString("id")) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 记忆分类 → 显示颜色的映射，用于标签和卡片的视觉区分。
+ */
+private val MemoryItemColors = mapOf(
+    "identity" to Color(0xFF6750A4),
+    "study" to Color(0xFF1565C0),
+    "work" to Color(0xFF2E7D32),
+    "hobby" to Color(0xFFE65100),
+    "habit" to Color(0xFF6A1B9A),
+    "health" to Color(0xFFC62828),
+    "emotion" to Color(0xFFAD1457),
+    "goal" to Color(0xFF00838F),
+    "schedule" to Color(0xFF4527A0),
+    "social" to Color(0xFF1B5E20),
+    "location" to Color(0xFF37474F),
+    "pet" to Color(0xFF4E342E),
+    "context" to Color(0xFFEF6C00),
+    "other" to Color(0xFF757575),
+)
+
+/**
+ * 单条记忆卡片 —— 显示分类标签 + 记忆内容 + 删除按钮。
+ *
+ * @param mem 记忆 JSON 对象，包含 id/content/category/created_at/updated_at/expires_hint?
+ * @param onDelete 点击删除按钮时触发
+ */
+@Composable
+private fun MemoryItem(
+    mem: org.json.JSONObject,
+    onDelete: () -> Unit,
+) {
+    val category = mem.optString("category", "other")
+    val label = MemoryTool.categoryLabels[category] ?: "其他"
+    val color = MemoryItemColors[category] ?: Color(0xFF757575)
+
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 分类标签 —— 圆角小色块
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = color.copy(alpha = 0.15f),
+                modifier = Modifier.padding(end = 8.dp),
+            ) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = color,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+
+            // 记忆内容
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    mem.getString("content"),
+                    style = MaterialTheme.typography.bodySmall,
+                )
+                // 如果有过期提示，显示日期
+                val expiresHint = mem.optString("expires_hint", "")
+                if (expiresHint.isNotEmpty()) {
+                    Text(
+                        "预期至 $expiresHint",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    )
+                }
+            }
+
+            // 删除按钮
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(24.dp),
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "删除记忆",
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 统计指定分类下的记忆数量。
+ *
+ * @param memories 记忆 JSONArray
+ * @param category 要统计的分类键
+ * @return 该分类下的记忆条数
+ */
+private fun countMemoriesByCategory(memories: JSONArray, category: String): Int {
+    var count = 0
+    for (i in 0 until memories.length()) {
+        if (memories.getJSONObject(i).optString("category", "other") == category) {
+            count++
+        }
+    }
+    return count
+}
+
+/**
+ * 按分类筛选记忆列表，返回过滤后的列表。
+ *
+ * @param memories 完整的记忆 JSONArray
+ * @param category 要筛选的分类键，null 表示返回全部
+ * @return 过滤后的 JSONObject 列表
+ */
+private fun filterMemories(memories: JSONArray, category: String?): List<org.json.JSONObject> {
+    val result = mutableListOf<org.json.JSONObject>()
+    for (i in 0 until memories.length()) {
+        val mem = memories.getJSONObject(i)
+        if (category == null || mem.optString("category", "other") == category) {
+            result.add(mem)
+        }
+    }
+    return result
 }

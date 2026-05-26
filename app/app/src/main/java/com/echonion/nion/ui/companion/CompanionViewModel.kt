@@ -14,6 +14,7 @@ import com.echonion.nion.NionApp
 import com.echonion.nion.core
 import com.echonion.nion.ui.companion.tools.ToolExecutor
 import com.echonion.nion.ui.companion.tools.ToolResult
+import com.echonion.nion.ui.companion.tools.MemoryTool
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -149,6 +150,13 @@ class CompanionViewModel(
     var userPreferences by mutableStateOf<JSONArray>(JSONArray())
         private set
 
+    /**
+     * 用户记忆列表 —— AI 主动记录的关于用户的事实性信息，每次对话都注入系统提示词。
+     * 数据结构：JSONArray of {id, content, category, created_at, updated_at, expires_hint?}
+     */
+    var userMemories by mutableStateOf<JSONArray>(JSONArray())
+        private set
+
     /** 伙伴头像 URI，从系统图片选择器选取后保存，null 表示使用默认首字母头像 */
     var companionAvatarUri by mutableStateOf<String?>(null)
         private set
@@ -192,14 +200,23 @@ class CompanionViewModel(
     private val defaultCompanionPrompt = """
 你是 Nion，一个温暖友好的 AI 伴侣，同时也是用户的私人任务管理助手。
 
-你有 7 个工具可用（均支持批量操作，减少往返次数）：
+你有 8 个工具可用（均支持批量操作，减少往返次数）：
 1. query：查询任务、清单、分组数据
 2. create：创建任务、清单、分组。批量：传 items 数组
 3. update：更新任务属性（标题/优先级/状态等）、清单名称、分组名称/颜色。批量：传 ids 数组，所有实体应用相同变更
 4. delete：删除任务、清单、分组。批量：传 ids 数组
 5. move：移动任务到其他清单/分组，移动分组到其他清单（保留专注时长等数据）。批量：传 ids 数组
 6. manage：通用操作（设置/移除每日循环等非 CRUD 操作）
-7. remember：记住用户偏好。当用户表达不满、提出习惯性要求、或希望你记住某条规则时，调用 add 操作记录下来。当用户说"不用遵守 xxx 了"时，调用 remove 删除。你应主动识别用户意图并调用此工具，而非等到用户明确说"记住这个"
+7. remember：记住用户偏好规则。当用户表达不满、提出习惯性要求、或希望你记住某条规则时，调用 add 操作记录下来。当用户说"不用遵守 xxx 了"时，调用 remove 删除。你应主动识别用户意图并调用此工具，而非等到用户明确说"记住这个"
+8. memory：主动记录关于用户的事实性信息。与 remember（偏好规则）不同，此工具记录的是描述性知识。在以下场景主动调用：
+   - 用户首次提到自己的姓名、身份、职业 → identity
+   - 用户说"最近在忙 XXX"、"正在准备 XXX" → context
+   - 用户表达情绪（"我好累"、"太开心了"） → emotion
+   - 用户提到兴趣爱好 → hobby
+   - 用户提到固定安排（"每周三有课"） → schedule
+   - 用户提到学习/工作相关情况 → study / work
+   - 用户提到其他值得记住的信息 → 对应分类
+   记忆去重：同类别下已有相关记忆时，用 update 而非新增（如"正在备考"→"考完了"）
 
 行为准则：
 - 当用户要求创建/更新/删除/移动多项时，尽量在一次工具调用中批量完成
@@ -208,6 +225,7 @@ class CompanionViewModel(
 - 确认重要操作：删除等不可逆操作前，先向用户确认
 - 移动优先：用户要移动任务/分组时，用 move 工具而非删除+重建，避免丢失专注时长
 - 记住偏好：用户表达不满或提出偏好时，主动用 remember 工具记录，后续必须遵守
+- 主动记忆：从对话中发现有价值的信息时，主动用 memory 工具记录，让后续对话更个性化
 - 用中文回复，语气温暖简洁
 
 回复格式要求：
@@ -313,6 +331,14 @@ class CompanionViewModel(
             val prefsJson = core.getSetting("companion_user_preferences")
             if (!prefsJson.isNullOrEmpty()) {
                 userPreferences = JSONArray(prefsJson)
+            }
+        } catch (_: Exception) {}
+
+        // 加载用户记忆列表（AI 通过 memory 工具主动记录的关于用户的事实性信息）
+        try {
+            val memoriesJson = core.getSetting(MemoryTool.SETTING_KEY)
+            if (!memoriesJson.isNullOrEmpty()) {
+                userMemories = JSONArray(memoriesJson)
             }
         } catch (_: Exception) {}
 
@@ -707,6 +733,40 @@ class CompanionViewModel(
     }
 
     /**
+     * 刷新用户记忆列表 —— 从 Rust 层重新加载最新数据。
+     * 在 memory 工具执行成功后调用，确保 UI 显示最新记忆，以及后续系统提示词注入最新记忆。
+     */
+    fun refreshMemories() {
+        try {
+            val memoriesJson = core.getSetting(MemoryTool.SETTING_KEY)
+            userMemories = if (!memoriesJson.isNullOrEmpty()) {
+                JSONArray(memoriesJson)
+            } else {
+                JSONArray()
+            }
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * 删除一条用户记忆，同时持久化到 Rust 层 settings 表。
+     * 供 UI 管理界面调用。
+     *
+     * @param id 要删除的记忆条目 ID
+     */
+    fun removeMemory(id: String) {
+        val memories = userMemories
+        val newArr = JSONArray()
+        for (i in 0 until memories.length()) {
+            val mem = memories.getJSONObject(i)
+            if (mem.getString("id") != id) {
+                newArr.put(mem)
+            }
+        }
+        userMemories = newArr
+        try { MemoryTool.saveMemories(core, newArr) } catch (_: Exception) {}
+    }
+
+    /**
      * 更新伙伴头像 URI，同时持久化到 Rust 层 settings 表。
      * 传入 null 表示清除头像，恢复默认首字母头像。
      *
@@ -841,6 +901,7 @@ class CompanionViewModel(
             "move" -> "正在移动$suffix"
             "manage" -> "正在管理设置..."
             "remember" -> "正在记录偏好..."
+            "memory" -> "$companionName 记住了一些事情..."
             else -> "正在执行操作..."
         }
     }
@@ -911,6 +972,7 @@ class CompanionViewModel(
                 }
                 "move" -> "已移动$entityLabel"
                 "remember" -> resultJson.optString("message", "偏好已更新")
+                "memory" -> resultJson.optString("message", "记忆已更新")
                 else -> "操作完成"
             }
         } catch (_: Exception) {
@@ -921,6 +983,7 @@ class CompanionViewModel(
                 "delete" -> "删除完成"
                 "move" -> "移动完成"
                 "remember" -> "记忆偏好中"
+                "memory" -> "$companionName 记住了一些事情"
                 else -> "操作完成"
             }
         }
@@ -1005,6 +1068,12 @@ class CompanionViewModel(
                 val hasRememberTool = response.toolCalls.any { it.name == "remember" }
                 if (hasRememberTool) {
                     refreshPreferences()
+                }
+
+                // 如果有 memory 工具被调用，刷新记忆列表确保 UI 和后续提示词同步
+                val hasMemoryTool = response.toolCalls.any { it.name == "memory" }
+                if (hasMemoryTool) {
+                    refreshMemories()
                 }
 
                 // 继续循环，让 LLM 根据工具结果生成下一步响应
@@ -1139,21 +1208,31 @@ class CompanionViewModel(
     private fun buildApiMessages(): List<JSONObject> {
         val apiMessages = mutableListOf<JSONObject>()
 
-        // 系统提示词（稳定前缀）：系统提示词 + 用户偏好记录
+        // 系统提示词（稳定前缀）：系统提示词 + 用户偏好记录 + 用户记忆
         // 不包含当前时间等可变内容，确保前缀在连续请求间完全一致，命中 DeepSeek 缓存
         val stableContent = buildString {
             append(companionPrompt)
             // 注入用户偏好记录（AI 通过 remember 工具和 UI 手动添加的偏好）
             if (userPreferences.length() > 0) {
                 append("\n\n---\n用户偏好记录（必须始终遵守）：")
-                val categoryLabels = mapOf(
+                val prefCategoryLabels = mapOf(
                     "style" to "风格", "behavior" to "行为",
                     "format" to "格式", "other" to "其他",
                 )
                 for (i in 0 until userPreferences.length()) {
                     val pref = userPreferences.getJSONObject(i)
-                    val label = categoryLabels[pref.optString("category", "other")] ?: "其他"
+                    val label = prefCategoryLabels[pref.optString("category", "other")] ?: "其他"
                     append("\n- [$label] ${pref.getString("content")}")
+                }
+            }
+            // 注入用户记忆（AI 通过 memory 工具主动记录的关于用户的事实性信息）
+            if (userMemories.length() > 0) {
+                val memoryCategoryLabels = MemoryTool.categoryLabels
+                append("\n\n---\n关于用户的记忆（${companionName}的笔记本）：")
+                for (i in 0 until userMemories.length()) {
+                    val mem = userMemories.getJSONObject(i)
+                    val label = memoryCategoryLabels[mem.optString("category", "other")] ?: "其他"
+                    append("\n- [$label] ${mem.getString("content")}")
                 }
             }
         }

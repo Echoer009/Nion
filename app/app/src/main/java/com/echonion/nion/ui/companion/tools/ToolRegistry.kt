@@ -7,7 +7,7 @@ import org.json.JSONObject
  * 工具注册中心 —— 自动加载并管理所有 Agent 可用工具。
  *
  * 设计原则：
- * - **统一接口**：7 个工具按操作维度划分，entity_type / action 作为路由键
+ * - **统一接口**：8 个工具按操作维度划分，entity_type / action 作为路由键
  *   - query：查询（合并原 6 个 get_* 工具）
  *   - create：创建（合并原 create_task / create_checklist / create_group）
  *   - update：更新（合并原 update_task / update_checklist_name / update_group）
@@ -15,6 +15,7 @@ import org.json.JSONObject
  *   - move：移动（新增，保留专注时长等数据）
  *   - manage：通用操作（设置/移除每日循环等非 CRUD 操作）
  *   - remember：记住用户偏好（add/list/remove）
+ *   - memory：主动记录关于用户的事实性信息（add/list/update/remove）
  * - **多格式适配**：自动将内部 Schema 转换为 OpenAI 和 Anthropic 的 tools 格式
  *
  * 使用方式：
@@ -30,7 +31,7 @@ object ToolRegistry {
 
     /**
      * 所有已注册的工具列表。
-     * 7 个工具按 CRUD + Move + Manage + Remember 维度划分，每个工具通过 entity_type/action 参数路由到具体操作。
+     * 8 个工具按 CRUD + Move + Manage + Remember + Memory 维度划分，每个工具通过 entity_type/action 参数路由到具体操作。
      */
     val all: List<Tool> = listOf(
         QueryTool,
@@ -40,6 +41,7 @@ object ToolRegistry {
         MoveTool,
         ManageTool,
         RememberTool,
+        MemoryTool,
     )
 
     /** 按名称索引的查找表，O(1) 查询 */
