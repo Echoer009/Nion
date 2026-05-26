@@ -3,11 +3,15 @@ package com.echonion.nion.ui.focus
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.togetherWith
-import androidx.compose.foundation.ExperimentalFoundationApi
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -18,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -25,9 +30,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -35,14 +38,21 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -50,7 +60,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.viewmodel.compose.viewModel
 
 /**
- * 专注统计侧边面板 —— 从番茄钟界面右滑呼出。
+ * 统计周期配置 —— 用于 Tab 切换的数据模型。
+ *
+ * @property days 查询天数：1=今天, 7=近一周, 30=近一月
+ * @property label 显示标签（"日"/"周"/"月"）
+ */
+private data class Period(val days: Int, val label: String)
+
+/**
+ * 专注统计侧边面板 —— 从番茄钟界面左滑呼出。
  *
  * 复用 DualPanelLayout 的左侧面板槽位，遵循与 SidebarContent 相同的模式：
  * - 接收 onSidebarDrag / onSidebarDragStopped 实现滑回关闭
@@ -61,7 +79,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
  * @param onSidebarDragStopped 拖拽结束回调，传递给 DualPanelLayout 的 settle
  * @param modifier 由 DualPanelLayout 传入的 modifier（含宽度等约束）
  */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun FocusStatsPanel(
     onSidebarDrag: (Float) -> Unit,
@@ -74,16 +91,17 @@ fun FocusStatsPanel(
     )
     val state = vm.state
 
-    /**
-     * 统计周期配置：用于 Tab 切换
-     */
-    data class Period(val days: Int, val label: String)
+    // 周期选项列表，顺序为 日→周→月
+    val periods = remember {
+        listOf(
+            Period(1, "日"),
+            Period(7, "周"),
+            Period(30, "月"),
+        )
+    }
 
-    val periods = listOf(
-        Period(1, "日"),
-        Period(7, "周"),
-        Period(30, "月"),
-    )
+    // 当前选中周期的索引，用于计算指示器位置
+    val selectedIndex = periods.indexOfFirst { it.days == vm.selectedDays }.coerceAtLeast(0)
 
     Surface(
         modifier = modifier.draggable(
@@ -127,62 +145,48 @@ fun FocusStatsPanel(
 
             Spacer(modifier = Modifier.height(16.dp))
 
-            // ===== 统计周期 Tab =====
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(MaterialTheme.colorScheme.surfaceContainerHighest),
-                horizontalArrangement = Arrangement.SpaceEvenly,
-            ) {
-                periods.forEach { period ->
-                    val isSelected = vm.selectedDays == period.days
-                    val tabBg by animateColorAsState(
-                        targetValue = if (isSelected) MaterialTheme.colorScheme.primary
-                        else Color.Transparent,
-                        animationSpec = tween(250),
-                        label = "tabBg",
-                    )
-                    val tabContent by animateColorAsState(
-                        targetValue = if (isSelected) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        animationSpec = tween(250),
-                        label = "tabContent",
-                    )
-
-                    Surface(
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
-                        color = tabBg,
-                        onClick = { vm.selectPeriod(period.days) },
-                    ) {
-                        Text(
-                            period.label,
-                            modifier = Modifier.padding(vertical = 10.dp),
-                            style = MaterialTheme.typography.labelLarge,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                            color = tabContent,
-                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                        )
-                    }
-                }
-            }
+            // ===== 统计周期 Tab（带底部滑动指示器） =====
+            PeriodTabRow(
+                periods = periods,
+                selectedIndex = selectedIndex,
+                onSelectPeriod = { vm.selectPeriod(it) },
+            )
 
             Spacer(modifier = Modifier.height(20.dp))
 
             /**
-             * 统计内容区 —— AnimatedContent 按 period key 切换，实现日/周/月切换的淡入淡出动画。
-             * key 为 vm.selectedDays，切换时旧数据淡出、新数据淡入。
-             * 加载指示器仅在首次加载（无缓存数据）时显示，避免切换闪白。
+             * 统计内容区 —— AnimatedContent 按 selectedDays 切换，带水平滑动 + 淡入淡出动画。
+             *
+             * 切换方向规则：
+             * - 新周期天数 > 旧周期天数（日→周、日→月、周→月）：新内容从右滑入，旧内容向左滑出
+             * - 新周期天数 < 旧周期天数（月→周、月→日、周→日）：新内容从左滑入，旧内容向右滑出
+             *
+             * 加载指示器仅在首次加载（无缓存数据）时显示，避免切换时闪白。
              */
             AnimatedContent(
                 targetState = vm.selectedDays,
                 transitionSpec = {
-                    (fadeIn(tween(250)) togetherWith fadeOut(tween(200)))
-                        .using(SizeTransform(clip = false))
+                    // 根据新旧周期天数的大小关系决定滑动方向
+                    // direction > 0 表示向更大的周期切换（日→周→月），新内容从右侧进入
+                    // direction < 0 表示向更小的周期切换（月→周→日），新内容从左侧进入
+                    val direction = if (targetState > initialState) 1 else -1
+
+                    (
+                        // 新内容滑入 + 淡入：initialOffsetX 返回的是"初始偏移量占自身宽度的比例"
+                        slideInHorizontally(
+                            animationSpec = tween(300, easing = FastOutSlowInEasing),
+                            initialOffsetX = { fullWidth -> direction * fullWidth / 3 },
+                        ) + fadeIn(tween(200, delayMillis = 50))
+                    ) togetherWith (
+                        // 旧内容滑出 + 淡出：targetOffsetX 返回的是"目标偏移量占自身宽度的比例"
+                        slideOutHorizontally(
+                            animationSpec = tween(300, easing = FastOutSlowInEasing),
+                            targetOffsetX = { fullWidth -> -direction * fullWidth / 3 },
+                        ) + fadeOut(tween(150))
+                    ) using SizeTransform(clip = false)
                 },
                 label = "periodContent",
-            ) {
+            ) { targetDays ->
                 if (state.isLoading && state.daily.isEmpty()) {
                     Box(
                         modifier = Modifier.fillMaxWidth().weight(1f),
@@ -205,7 +209,7 @@ fun FocusStatsPanel(
                             SummaryCard(
                                 totalSeconds = state.totalSeconds,
                                 totalSessions = state.totalSessions,
-                                periodLabel = periods.find { it.days == vm.selectedDays }?.label ?: "日",
+                                periodLabel = periods.find { it.days == targetDays }?.label ?: "日",
                             )
                         }
 
@@ -253,6 +257,103 @@ fun FocusStatsPanel(
                             }
                         }
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 日/周/月切换 Tab 栏 —— 带底部滑动指示器。
+ *
+ * 布局结构：
+ * - 底层：圆角背景容器（surfaceContainerHighest）
+ * - 中层：三个等宽可点击文本按钮（透明背景）
+ * - 底层：彩色指示条（primary 色），跟随选中项平滑滑动
+ *
+ * @param periods 周期选项列表
+ * @param selectedIndex 当前选中项索引
+ * @param onSelectPeriod 点击回调，传递选中周期的 days 值
+ */
+@Composable
+private fun PeriodTabRow(
+    periods: List<Period>,
+    selectedIndex: Int,
+    onSelectPeriod: (Int) -> Unit,
+) {
+    val density = LocalDensity.current
+
+    // 记录 Tab 栏的总宽度（像素），用于计算每个 Tab 的宽度和指示器位置
+    var tabRowWidthPx by remember { mutableIntStateOf(0) }
+
+    // 单个 Tab 的宽度（dp），三个 Tab 等宽
+    val tabWidthDp = with(density) { (tabRowWidthPx / periods.size).toDp() }
+
+    // 指示器偏移量动画：根据 selectedIndex 平滑滑动到对应 Tab 位置
+    // 使用 FastOutSlowInEasing 缓动曲线，先快后慢，符合 Material 动画规范
+    val indicatorOffsetDp: Dp by animateDpAsState(
+        targetValue = tabWidthDp * selectedIndex,
+        animationSpec = tween(
+            durationMillis = 300,
+            easing = FastOutSlowInEasing,
+        ),
+        label = "indicatorOffset",
+    )
+
+    // 指示器宽度，略窄于 Tab 宽度，左右各留 8dp 边距，形成"悬浮"效果
+    val indicatorWidthDp = tabWidthDp - 16.dp * 2
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            // 记录总宽度，用于后续计算
+            .onSizeChanged { tabRowWidthPx = it.width },
+    ) {
+        // ===== 底部滑动指示器 =====
+        // 位于 Tab 栏底部，跟随选中项水平移动
+        if (tabRowWidthPx > 0) {
+            Box(
+                modifier = Modifier
+                    .offset(x = 16.dp + indicatorOffsetDp)
+                    .align(Alignment.BottomStart)
+                    .padding(bottom = 4.dp)
+                    .width(indicatorWidthDp)
+                    .height(3.dp)
+                    .clip(RoundedCornerShape(1.5.dp))
+                    .background(MaterialTheme.colorScheme.primary),
+            )
+        }
+
+        // ===== Tab 按钮行 =====
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+        ) {
+            periods.forEachIndexed { index, period ->
+                val isSelected = index == selectedIndex
+
+                // 文字颜色动画：选中时用 primary 色，未选中时用 onSurfaceVariant
+                val textColor by animateColorAsState(
+                    targetValue = if (isSelected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    animationSpec = tween(300),
+                    label = "tabTextColor",
+                )
+
+                Surface(
+                    modifier = Modifier.weight(1f),
+                    color = Color.Transparent,
+                    onClick = { onSelectPeriod(period.days) },
+                ) {
+                    Text(
+                        period.label,
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        color = textColor,
+                        textAlign = TextAlign.Center,
+                    )
                 }
             }
         }
@@ -341,7 +442,7 @@ private fun DailyBarRow(
     ) {
         // 日期标签
         Text(
-            if (isToday) "今天" else date.takeLast(5), // "MM-DD"
+            if (isToday) "今天" else date.takeLast(5),
             style = MaterialTheme.typography.bodySmall,
             fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
             color = if (isToday) MaterialTheme.colorScheme.primary

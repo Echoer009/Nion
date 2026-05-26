@@ -80,6 +80,12 @@ impl NionCore {
                 file_size INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL,
                 FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+            );
+            CREATE TABLE IF NOT EXISTS focus_sessions (
+                id TEXT PRIMARY KEY,
+                task_id TEXT NOT NULL,
+                seconds INTEGER NOT NULL,
+                created_at TEXT NOT NULL
             );"
         ).map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
