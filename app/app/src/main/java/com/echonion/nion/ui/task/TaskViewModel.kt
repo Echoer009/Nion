@@ -38,6 +38,10 @@ data class TaskItem(
     val subtasks: List<TaskItem> = emptyList(),
     /** 该任务累计专注秒数，来自 Rust 端 focus_seconds 字段 */
     val focusSeconds: Long = 0,
+    /** 循环规则：null 或 "none" 表示不循环，"daily" 表示每日循环 */
+    val recurrenceRule: String? = null,
+    /** 每日循环的提醒时间，格式 "HH:MM"，仅当 recurrenceRule="daily" 时有效 */
+    val recurrenceReminderTime: String? = null,
 )
 
 @Stable
@@ -73,13 +77,22 @@ class TaskViewModel(
     private val app: android.app.Application,
 ) : ViewModel() {
 
+    companion object {
+        /**
+         * "今天"视图的虚拟清单 ID。
+         * 不是真实存储在 DB 中的清单，而是 App 启动默认显示的跨清单聚合视图。
+         */
+        const val TODAY_ID = "today"
+    }
+
     var tasks by mutableStateOf<List<TaskItem>>(emptyList())
         private set
 
     var checklists by mutableStateOf<List<ChecklistItem>>(emptyList())
         private set
 
-    var activeChecklistId by mutableStateOf<String?>(null)
+    /** 当前活跃清单 ID。null = "我的任务"（未分配），"today" = "今天"视图，其他 = 真实清单 ID */
+    var activeChecklistId by mutableStateOf<String?>(TODAY_ID)
         private set
 
     /** 当前清单下的分组列表 */
@@ -114,8 +127,11 @@ class TaskViewModel(
     val flatTodoTasks: List<FlatTaskItem> by derivedStateOf { flattenWithGroupInfo(tasks) }
 
     val activeChecklistName: String
-        get() = if (activeChecklistId == null) "我的任务"
-            else checklists.find { it.id == activeChecklistId }?.name ?: "我的任务"
+        get() = when (activeChecklistId) {
+            TODAY_ID -> "今天"
+            null -> "我的任务"
+            else -> checklists.find { it.id == activeChecklistId }?.name ?: "我的任务"
+        }
 
     private var countsJob: Job? = null
 
@@ -186,8 +202,8 @@ class TaskViewModel(
                 onError("加载清单失败: ${e.message}")
             }
             try {
-                // 刷新当前清单下的分组
-                groups = if (activeChecklistId != null) {
+                // 刷新当前清单下的分组（"今天"和"我的任务"视图无分组）
+                groups = if (activeChecklistId != null && activeChecklistId != TODAY_ID) {
                     withContext(Dispatchers.IO) {
                         core.getGroupsByChecklist(activeChecklistId!!).map { it.toUi() }
                     }
@@ -197,7 +213,12 @@ class TaskViewModel(
             } catch (_: Exception) { }
             try {
                 val loadedTasks = withContext(Dispatchers.IO) {
-                    loadTasksWithSubtasks(activeChecklistId, activeGroupId)
+                    // "今天"视图使用跨清单聚合查询
+                    if (activeChecklistId == TODAY_ID) {
+                        loadTodayTasks()
+                    } else {
+                        loadTasksWithSubtasks(activeChecklistId, activeGroupId)
+                    }
                 }
                 tasks = loadedTasks
             } catch (e: Exception) {
@@ -210,6 +231,8 @@ class TaskViewModel(
     /**
      * 切换活跃清单，同时加载该清单下的分组列表，并重置分组筛选。
      * groupId = null 表示显示该清单下所有任务。
+     * id = "today" 切换至"今天"视图（跨清单聚合今日任务）。
+     * id = null 切换至"我的任务"（未分配清单的孤儿任务）。
      */
     fun setActiveChecklist(id: String?) {
         viewModelScope.launch {
@@ -217,8 +240,8 @@ class TaskViewModel(
                 // 切换清单时重置分组选择
                 activeGroupId = null
                 activeChecklistId = id
-                // 加载新清单下的分组
-                groups = if (id != null) {
+                // "今天"和"我的任务"视图不加载分组，真实清单才加载
+                groups = if (id != null && id != TODAY_ID) {
                     withContext(Dispatchers.IO) {
                         core.getGroupsByChecklist(id).map { it.toUi() }
                     }
@@ -226,7 +249,11 @@ class TaskViewModel(
                     emptyList()
                 }
                 val loadedTasks = withContext(Dispatchers.IO) {
-                    loadTasksWithSubtasks(id, null)
+                    if (id == TODAY_ID) {
+                        loadTodayTasks()
+                    } else {
+                        loadTasksWithSubtasks(id, null)
+                    }
                 }
                 tasks = loadedTasks
                 scheduleRefreshCounts()
@@ -256,14 +283,27 @@ class TaskViewModel(
 
     /**
      * 创建任务。自动关联到当前活跃清单和活跃分组。
+     * 在"今天"视图中创建时，category_id 为 null（不属于任何清单）。
+     *
+     * @param recurrenceRule 循环规则：null/"none" 不循环，"daily" 每日循环
+     * @param recurrenceReminderTime 每日循环提醒时间，格式 "HH:MM"
      */
-    fun createTask(title: String, description: String?, priority: String, dueDate: String? = null) {
+    fun createTask(
+        title: String,
+        description: String?,
+        priority: String,
+        dueDate: String? = null,
+        recurrenceRule: String? = null,
+        recurrenceReminderTime: String? = null,
+    ) {
         viewModelScope.launch {
             try {
+                // "今天"不是真实清单，创建任务时 category_id 设为 null
+                val realCategoryId = if (activeChecklistId == TODAY_ID) null else activeChecklistId
                 withContext(Dispatchers.IO) {
-                    core.createTask(title, description, priority, dueDate, activeChecklistId, null, activeGroupId)
+                    core.createTask(title, description, priority, dueDate, realCategoryId, null, activeGroupId, recurrenceRule, recurrenceReminderTime)
                 }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
+                tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("创建任务失败: ${e.message}")
@@ -279,10 +319,11 @@ class TaskViewModel(
             try {
                 // 子任务继承父任务的分组归属
                 val parentGroup = activeGroupId
+                val realCategoryId = if (activeChecklistId == TODAY_ID) null else activeChecklistId
                 withContext(Dispatchers.IO) {
-                    core.createTask(title, null, priority, null, activeChecklistId, parentId, parentGroup)
+                    core.createTask(title, null, priority, null, realCategoryId, parentId, parentGroup, null, null)
                 }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
+                tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("创建子任务失败: ${e.message}")
@@ -300,12 +341,12 @@ class TaskViewModel(
                 val allIds = collectIds(updatedTask)
                 withContext(Dispatchers.IO) {
                     for (id in allIds) {
-                        core.updateTask(id, null, null, null, newStatus, null, null, null, null)
+                        core.updateTask(id, null, null, null, newStatus, null, null, null, null, null, null)
                     }
                 }
             } catch (e: Exception) {
                 onError("更新失败: ${e.message}")
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
+                tasks = loadTasksForCurrentView()
             }
         }
     }
@@ -318,9 +359,9 @@ class TaskViewModel(
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    core.updateTask(id, title, description, priority, null, null, null, null, null)
+                    core.updateTask(id, title, description, priority, null, null, null, null, null, null, null)
                 }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
+                tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("更新任务失败: ${e.message}")
@@ -333,11 +374,46 @@ class TaskViewModel(
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    core.updateTask(id, null, null, null, null, dueDate, null, null, null)
+                    core.updateTask(id, null, null, null, null, dueDate, null, null, null, null, null)
                 }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
+                tasks = loadTasksForCurrentView()
             } catch (e: Exception) {
                 onError("更新日期失败: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 更新任务的每日循环设置。
+     *
+     * @param recurrenceRule 循环规则：null/"none" 不循环，"daily" 每日循环
+     * @param reminderTime 提醒时间，格式 "HH:MM"
+     */
+    fun updateRecurrence(id: String, recurrenceRule: String?, reminderTime: String?) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    core.setTaskRecurrence(id, recurrenceRule, reminderTime)
+                }
+                tasks = loadTasksForCurrentView()
+            } catch (e: Exception) {
+                onError("更新循环失败: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 移除任务的每日循环（将 recurrence_rule 和 recurrence_reminder_time 设为 NULL）。
+     */
+    fun removeRecurrence(id: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    core.removeTaskRecurrence(id)
+                }
+                tasks = loadTasksForCurrentView()
+            } catch (e: Exception) {
+                onError("移除循环失败: ${e.message}")
             }
         }
     }
@@ -374,8 +450,8 @@ class TaskViewModel(
             try {
                 withContext(Dispatchers.IO) { core.deleteChecklist(id) }
                 if (activeChecklistId == id) {
-                    activeChecklistId = null
-                    tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(null, null) }
+                    activeChecklistId = TODAY_ID
+                    tasks = withContext(Dispatchers.IO) { loadTodayTasks() }
                 }
                 checklists = withContext(Dispatchers.IO) { core.getChecklists().map { it.toUi() } }
                 scheduleRefreshCounts()
@@ -394,7 +470,7 @@ class TaskViewModel(
                         core.reorderTasks(siblingIds)
                     }
                 }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
+                tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("移动任务失败: ${e.message}")
@@ -408,7 +484,7 @@ class TaskViewModel(
                 withContext(Dispatchers.IO) {
                     core.updateTaskParent(taskId, newParentId)
                 }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
+                tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("移动任务失败: ${e.message}")
@@ -420,7 +496,7 @@ class TaskViewModel(
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { core.reorderTasks(orderedIds) }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
+                tasks = loadTasksForCurrentView()
             } catch (e: Exception) {
                 onError("排序失败: ${e.message}")
             }
@@ -443,10 +519,17 @@ class TaskViewModel(
         val currentTasks = tasks
         val counts = withContext(Dispatchers.IO) {
             val result = mutableMapOf<String?, Pair<Int, Int>>()
+            // 当前视图的计数（可能是 "today", null, 或清单 ID）
             result[currentActiveId] = countItems(currentTasks)
+            // "今天"视图计数（如果不是当前视图则单独计算）
+            if (currentActiveId != TODAY_ID) {
+                result[TODAY_ID] = countItems(loadTodayTasks())
+            }
+            // "我的任务"计数（如果不是当前视图则单独计算）
             if (currentActiveId != null) {
                 result[null] = countItems(loadTasksWithSubtasks(null, null))
             }
+            // 各清单计数
             for (cl in currentChecklists) {
                 if (cl.id != currentActiveId) {
                     result[cl.id] = countItems(loadTasksWithSubtasks(cl.id, null))
@@ -487,6 +570,37 @@ class TaskViewModel(
         }
     }
 
+    /**
+     * 加载今日任务：due_date = 今天 或 每日循环且未过期。
+     * 调用 Rust 端 getTasksDueToday 进行跨清单聚合查询。
+     * 子任务递归加载，不单独筛选。
+     */
+    private fun loadTodayTasks(): List<TaskItem> {
+        val todayStr = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+        fun loadChildren(parentId: String): List<TaskItem> {
+            return core.getSubtasks(parentId).map { task ->
+                val subs = loadChildren(task.id)
+                task.toUi().copy(subtasks = subs)
+            }
+        }
+        return core.getTasksDueToday(todayStr).map { task ->
+            val subs = loadChildren(task.id)
+            task.toUi().copy(subtasks = subs)
+        }
+    }
+
+    /**
+     * 根据当前活跃视图加载任务数据。
+     * "today" → 今日聚合查询；null → 未分配查询；其他 → 指定清单查询。
+     */
+    private suspend fun loadTasksForCurrentView(): List<TaskItem> = withContext(Dispatchers.IO) {
+        if (activeChecklistId == TODAY_ID) {
+            loadTodayTasks()
+        } else {
+            loadTasksWithSubtasks(activeChecklistId, activeGroupId)
+        }
+    }
+
     // ==================== 分组操作 ====================
 
     /**
@@ -524,7 +638,7 @@ class TaskViewModel(
                 if (activeGroupId == groupId) {
                     activeGroupId = null
                 }
-                tasks = withContext(Dispatchers.IO) { loadTasksWithSubtasks(activeChecklistId, activeGroupId) }
+                tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("删除分组失败: ${e.message}")
@@ -710,6 +824,8 @@ private fun TaskData.toUi(): TaskItem = TaskItem(
     dueDate = dueDate,
     createdAt = createdAt,
     focusSeconds = focusSeconds,
+    recurrenceRule = recurrenceRule,
+    recurrenceReminderTime = recurrenceReminderTime,
 )
 
 private fun ChecklistData.toUi(): ChecklistItem = ChecklistItem(

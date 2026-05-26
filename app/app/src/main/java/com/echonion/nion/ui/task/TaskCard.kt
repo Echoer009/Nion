@@ -26,13 +26,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -124,16 +127,16 @@ private fun Modifier.groupBorder(
     if (isGroupFirst) {
         path.moveTo(half, sh)
         path.lineTo(half, r)
-        path.quadraticBezierTo(half, half, r, half)
+        path.quadraticTo(half, half, r, half)
         path.lineTo(sw - r, half)
-        path.quadraticBezierTo(sw - half, half, sw - half, r)
+        path.quadraticTo(sw - half, half, sw - half, r)
         path.lineTo(sw - half, sh)
     } else if (isGroupLast) {
         path.moveTo(half, 0f)
         path.lineTo(half, sh - r)
-        path.quadraticBezierTo(half, sh - half, r, sh - half)
+        path.quadraticTo(half, sh - half, r, sh - half)
         path.lineTo(sw - r, sh - half)
-        path.quadraticBezierTo(sw - half, sh - half, sw - half, sh - r)
+        path.quadraticTo(sw - half, sh - half, sw - half, sh - r)
         path.lineTo(sw - half, 0f)
     } else {
         path.moveTo(half, 0f)
@@ -166,11 +169,18 @@ private fun MainTaskRow(
         else RoundedCornerShape(topStart = 12.dp, topEnd = 12.dp, bottomStart = 0.dp, bottomEnd = 0.dp)
 
     val checkScale = remember { Animatable(1f) }
+    /**
+     * 记录上一次 render 时的 isDone 状态，用于区分：
+     * - 首次进入 composition（isDone 本来就是 true）→ 跳过动画
+     * - 真正的状态变化（isDone 从 false 变为 true）→ 播放弹跳动画
+     */
+    var wasDone by remember { mutableStateOf(task.isDone) }
     LaunchedEffect(task.isDone) {
-        if (task.isDone) {
+        if (task.isDone && !wasDone) {
             checkScale.animateTo(1.3f, tween(120))
             checkScale.animateTo(1f, spring(Spring.DampingRatioMediumBouncy, Spring.StiffnessHigh))
         }
+        wasDone = task.isDone
     }
 
     val checkBgColor by animateColorAsState(
@@ -242,12 +252,14 @@ private fun MainTaskRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            // 截止日期显示：日历图标 + 格式化日期，逾期时文字变红
-            if (!task.dueDate.isNullOrBlank()) {
+            // 截止日期 + 时间显示：日历图标 + 格式化日期，逾期时文字变红；有时间则追加显示
+            if (!task.dueDate.isNullOrBlank() || !task.recurrenceReminderTime.isNullOrBlank()) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    // 图标选择：有日期用日历图标，只有时间用时钟图标
                     Icon(
-                        Icons.Outlined.CalendarToday,
+                        if (!task.dueDate.isNullOrBlank()) Icons.Outlined.CalendarToday
+                            else Icons.Outlined.Schedule,
                         contentDescription = null,
                         modifier = Modifier.size(12.dp),
                         tint = if (task.dueDate.isOverdue()) MaterialTheme.colorScheme.error
@@ -255,7 +267,13 @@ private fun MainTaskRow(
                     )
                     Spacer(modifier = Modifier.width(4.dp))
                     Text(
-                        text = task.dueDate.formatDueDate() ?: "",
+                        text = buildString {
+                            task.dueDate.formatDueDate()?.let { append(it) }
+                            if (!task.dueDate.isNullOrBlank() && !task.recurrenceReminderTime.isNullOrBlank()) {
+                                append(" ")
+                            }
+                            task.recurrenceReminderTime?.let { append(it) }
+                        },
                         style = MaterialTheme.typography.bodySmall,
                         color = if (task.dueDate.isOverdue()) MaterialTheme.colorScheme.error
                             else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),

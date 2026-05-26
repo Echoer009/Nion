@@ -40,6 +40,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -47,7 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircleOutline
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.automirrored.filled.Chat
@@ -56,6 +57,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -85,6 +87,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
@@ -126,6 +129,10 @@ fun TaskScreen(
 ) {
     var showAddSheet by remember { mutableStateOf(false) }
     var expandedTaskId by remember { mutableStateOf<String?>(null) }
+
+    // 提升到 AnimatedContent 外部，跨过渡保留滚动位置和拖拽状态
+    val listState = rememberLazyListState()
+    val reorderableItems = remember { mutableStateListOf<FlatTaskItem>() }
 
     // backdropBlur: 展开时模糊任务列表，收回时恢复清晰
     // 同时感知 FAD 展开和任务详情展开
@@ -182,6 +189,12 @@ fun TaskScreen(
                         },
                         onUpdateDueDate = { date ->
                             viewModel.updateDueDate(taskId, date)
+                        },
+                        onUpdateRecurrence = { rule, time ->
+                            viewModel.updateRecurrence(taskId, rule, time)
+                        },
+                        onRemoveRecurrence = {
+                            viewModel.removeRecurrence(taskId)
                         },
                         /** 点击开始专注：关闭详情层，通知外部切换到专注页面 */
                         onStartFocus = {
@@ -259,6 +272,8 @@ fun TaskScreen(
                                     ) { Icon(Icons.Default.Add, contentDescription = "添加任务") }
                                 }
                             },
+                            listState = listState,
+                            reorderableItems = reorderableItems,
                         )
                     } // end blur Box
 
@@ -270,8 +285,8 @@ fun TaskScreen(
                     ) {
                         AddTaskOverlay(
                             onDismiss = { showAddSheet = false },
-                            onAdd = { title, desc, priority, dueDate ->
-                                viewModel.createTask(title, desc, priority, dueDate)
+                            onAdd = { title, desc, priority, dueDate, recurrenceRule, recurrenceReminderTime ->
+                                viewModel.createTask(title, desc, priority, dueDate, recurrenceRule, recurrenceReminderTime)
                                 showAddSheet = false
                             },
                             sharedBoundsModifier = Modifier.sharedBounds(
@@ -312,6 +327,9 @@ private fun TaskScreenContent(
     onTaskClick: (TaskItem) -> Unit,
     taskSharedModifier: @Composable (String) -> Modifier,
     fab: @Composable () -> Unit,
+    /** 外部传入，跨 AnimatedContent 过渡保留 */
+    listState: LazyListState,
+    reorderableItems: SnapshotStateList<FlatTaskItem>,
 ) {
     Scaffold(
         contentWindowInsets = WindowInsets.statusBars,
@@ -357,7 +375,7 @@ private fun TaskScreenContent(
         floatingActionButton = fab,
     ) { innerPadding ->
         // 分组标签栏：选中清单时始终显示（即使没有分组也能新建）
-        val showGroupBar = viewModel.activeChecklistId != null
+        val showGroupBar = viewModel.activeChecklistId != null && viewModel.activeChecklistId != TaskViewModel.TODAY_ID
         Column(modifier = Modifier.padding(innerPadding)) {
             if (showGroupBar) {
                 /**
@@ -382,6 +400,8 @@ private fun TaskScreenContent(
                     onTaskClick = onTaskClick,
                     taskSharedModifier = taskSharedModifier,
                     modifier = Modifier.weight(1f),
+                    listState = listState,
+                    reorderableItems = reorderableItems,
                 )
             }
         }
@@ -400,7 +420,8 @@ private fun TaskScreenContent(
 @Composable
 private fun AddTaskOverlay(
     onDismiss: () -> Unit,
-    onAdd: (String, String?, String, String?) -> Unit,
+    /** 创建回调：title, description, priority, dueDate, recurrenceRule, recurrenceReminderTime */
+    onAdd: (String, String?, String, String?, String?, String?) -> Unit,
     sharedBoundsModifier: Modifier,
 ) {
     var title by remember { mutableStateOf("") }
@@ -408,6 +429,10 @@ private fun AddTaskOverlay(
     var priority by remember { mutableStateOf("medium") }
     // 截止日期：ISO 格式字符串，null 表示未设置
     var dueDate by remember { mutableStateOf<String?>(null) }
+    // 循环规则：null 表示不循环，"daily" 表示每日循环
+    var recurrenceRule by remember { mutableStateOf<String?>(null) }
+    // 每日循环提醒时间：HH:MM 格式，默认 "09:00"
+    var recurrenceReminderTime by remember { mutableStateOf<String?>(null) }
     // showingDatePicker: true=显示日期选择页，false=显示表单
     var showingDatePicker by remember { mutableStateOf(false) }
 
@@ -474,7 +499,7 @@ private fun AddTaskOverlay(
                         // 标题栏
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             IconButton(onClick = { showingDatePicker = false }) {
-                                Icon(Icons.Default.ArrowBack, contentDescription = "返回", modifier = Modifier.size(20.dp))
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回", modifier = Modifier.size(20.dp))
                             }
                             Spacer(modifier = Modifier.width(4.dp))
                             Text(
@@ -599,6 +624,15 @@ private fun AddTaskOverlay(
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+
+                // 循环规则 + 提醒时间选择器
+                RecurrenceSelector(
+                    recurrenceRule = recurrenceRule,
+                    reminderTime = recurrenceReminderTime,
+                    onRecurrenceChanged = { recurrenceRule = it },
+                    onReminderTimeChanged = { recurrenceReminderTime = it },
+                )
+
                 // 操作按钮
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -612,7 +646,7 @@ private fun AddTaskOverlay(
                     ) { Text("取消", fontWeight = FontWeight.SemiBold) }
                     Button(
                         onClick = {
-                            if (title.isNotBlank()) onAdd(title.trim(), description.trim().ifBlank { null }, priority, dueDate)
+                            if (title.isNotBlank()) onAdd(title.trim(), description.trim().ifBlank { null }, priority, dueDate, recurrenceRule, recurrenceReminderTime)
                         },
                         enabled = title.isNotBlank(),
                         shape = RoundedCornerShape(14.dp),
@@ -725,7 +759,7 @@ private fun AdaptiveHeightLayout(
  * - ADD_SUBTASK：显示子任务创建表单
  * - DATE_PICKER：显示日期选择页面
  */
-private enum class DetailPanel { DETAIL, ADD_SUBTASK, DATE_PICKER }
+private enum class DetailPanel { DETAIL, ADD_SUBTASK, DATE_PICKER, RECURRENCE }
 
 /**
  * 任务详情浮层 —— 从任务卡片位置 morph 展开为居中的任务详情/子任务表单。
@@ -741,6 +775,8 @@ private enum class DetailPanel { DETAIL, ADD_SUBTASK, DATE_PICKER }
  * @param onCreateSubtask 创建子任务回调，传入 (标题, 优先级)
  * @param onUpdateNotes 备注内容变更时触发，自动保存到数据库
  * @param onUpdateDueDate 截止日期变更回调，传入 ISO 格式日期字符串或 null
+ * @param onUpdateRecurrence 循环设置变更回调，传入 (recurrenceRule, reminderTime)
+ * @param onRemoveRecurrence 移除循环回调
  * @param sharedElementModifier shared element 动画 modifier（与触发卡片共享 key）
  */
 @Composable
@@ -751,6 +787,10 @@ private fun TaskDetailOverlay(
     onCreateSubtask: (String, String) -> Unit,
     onUpdateNotes: (String) -> Unit,
     onUpdateDueDate: (String?) -> Unit,
+    /** 更新每日循环设置回调，传入 (recurrenceRule, reminderTime) */
+    onUpdateRecurrence: (String?, String?) -> Unit = { _, _ -> },
+    /** 移除每日循环回调 */
+    onRemoveRecurrence: () -> Unit = {},
     sharedElementModifier: Modifier,
     /** 用户点击"开始专注"按钮时触发 */
     onStartFocus: () -> Unit = {},
@@ -921,6 +961,97 @@ private fun TaskDetailOverlay(
                         )
                     }
 
+                    DetailPanel.RECURRENCE -> {
+                        // ===== 循环设置页面 =====
+                        // 使用 RecurrenceSelector，与新建任务表单中的样式一致
+                        var localRule by remember(task.id) { mutableStateOf(task.recurrenceRule) }
+                        var localTime by remember(task.id) { mutableStateOf(task.recurrenceReminderTime) }
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            verticalArrangement = Arrangement.spacedBy(20.dp),
+                        ) {
+                            // 标题栏：图标 + "重复设置" + 关闭按钮
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.size(40.dp),
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            Icons.Outlined.Repeat,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(22.dp),
+                                        )
+                                    }
+                                }
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Text(
+                                    "重复设置",
+                                    style = MaterialTheme.typography.headlineMedium,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Spacer(modifier = Modifier.weight(1f))
+                                IconButton(onClick = { panel = DetailPanel.DETAIL }) {
+                                    Icon(Icons.Default.Close, contentDescription = "关闭")
+                                }
+                            }
+
+                            // 提示正在为哪个任务设置循环
+                            Text(
+                                "为「${task.title}」设置每日循环",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+
+                            // 循环选择器：不重复 / 每天 + 提醒时间
+                            RecurrenceSelector(
+                                recurrenceRule = localRule,
+                                reminderTime = localTime,
+                                onRecurrenceChanged = { localRule = it },
+                                onReminderTimeChanged = { localTime = it },
+                            )
+
+                            // 操作按钮：取消 + 保存 + 移除循环
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                // 移除循环按钮（仅当已设置循环时显示）
+                                if (task.recurrenceRule == "daily") {
+                                    TextButton(
+                                        onClick = {
+                                            onRemoveRecurrence()
+                                            panel = DetailPanel.DETAIL
+                                        },
+                                        shape = RoundedCornerShape(14.dp),
+                                        colors = ButtonDefaults.textButtonColors(
+                                            contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                        ),
+                                    ) {
+                                        Text("移除循环", fontWeight = FontWeight.SemiBold, maxLines = 1)
+                                    }
+                                }
+                                TextButton(
+                                    onClick = { panel = DetailPanel.DETAIL },
+                                    modifier = Modifier.weight(1f),
+                                    shape = RoundedCornerShape(14.dp),
+                                ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                                Button(
+                                    onClick = {
+                                        onUpdateRecurrence(localRule, localTime)
+                                        panel = DetailPanel.DETAIL
+                                    },
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                                    modifier = Modifier.weight(1f),
+                                ) { Text("保存", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                            }
+                        }
+                    }
+
                     DetailPanel.DETAIL -> {
                         // ===== 任务详情 =====
                         // 用 Column + weight 替代 AdaptiveHeightLayout (SubcomposeLayout)，
@@ -973,12 +1104,67 @@ private fun TaskDetailOverlay(
                                         )
                                     }
                                 }
-                                IconButton(onClick = onDismiss) {
-                                    Icon(Icons.Default.Close, contentDescription = "关闭")
-                                }
+                            IconButton(onClick = onDismiss) {
+                                Icon(Icons.Default.Close, contentDescription = "关闭")
                             }
+                        }
 
-                            // 可编辑的备注输入框 —— weight(1f, fill=false) 占据 header/footer 之外的剩余空间
+                        // 循环信息行：展示当前的每日循环设置，点击进入 RECURRENCE 面板
+                        if (task.recurrenceRule == "daily") {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = { panel = DetailPanel.RECURRENCE },
+                                    )
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Repeat,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.primary,
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (task.recurrenceReminderTime != null) "每天 ${task.recurrenceReminderTime} 提醒" else "每天提醒",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Medium,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        } else {
+                            // 未设置循环：显示可点击的设置入口
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = { panel = DetailPanel.RECURRENCE },
+                                    )
+                                    .padding(vertical = 2.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.Outlined.Repeat,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    "设置重复",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                )
+                            }
+                        }
+
+                        // 可编辑的备注输入框 —— weight(1f, fill=false) 占据 header/footer 之外的剩余空间
                             // 内容少时收缩（最低 120dp），内容多时自动扩展，超出后内部滚动
                             OutlinedTextField(
                                 value = notes,
@@ -1130,9 +1316,11 @@ private fun TaskList(
     onTaskClick: (TaskItem) -> Unit,
     taskSharedModifier: @Composable (String) -> Modifier,
     modifier: Modifier = Modifier,
+    /** 外部传入的列表滚动状态，提升到 AnimatedContent 外以保留跨过渡的滚动位置 */
+    listState: LazyListState = rememberLazyListState(),
+    /** 外部传入的可重排项列表，提升到 AnimatedContent 外以保留跨过渡的拖拽状态 */
+    reorderableItems: SnapshotStateList<FlatTaskItem> = remember { mutableStateListOf() },
 ) {
-    val listState = rememberLazyListState()
-    val reorderableItems = remember { mutableStateListOf<FlatTaskItem>() }
     val haptic = LocalHapticFeedback.current
     val isSelectionMode = viewModel.isSelectionMode
     val selectedIds = viewModel.selectedTaskIds

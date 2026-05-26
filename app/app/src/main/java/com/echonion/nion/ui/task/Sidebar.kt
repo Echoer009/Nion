@@ -153,13 +153,13 @@ fun SidebarContent(
                 verticalArrangement = Arrangement.spacedBy(4.dp),
                 modifier = Modifier.weight(1f),
             ) {
-                item(key = "default") {
+                item(key = "today") {
                     SidebarChecklistItem(
-                        name = "我的任务",
+                        name = "今天",
                         taskCount = defaultCounts.first,
                         subtaskCount = defaultCounts.second,
-                        isActive = activeChecklistId == null,
-                        onClick = { onSelectChecklist(null) },
+                        isActive = activeChecklistId == TaskViewModel.TODAY_ID,
+                        onClick = { onSelectChecklist(TaskViewModel.TODAY_ID) },
                         showDelete = false,
                         onDelete = {},
                     )

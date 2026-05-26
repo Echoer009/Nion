@@ -146,7 +146,7 @@ fun NionApp() {
                         SidebarContent(
                             checklists = viewModel.checklists,
                             activeChecklistId = viewModel.activeChecklistId,
-                            defaultCounts = viewModel.checklistCounts[null] ?: (0 to 0),
+                            defaultCounts = viewModel.checklistCounts[TaskViewModel.TODAY_ID] ?: (0 to 0),
                             customCounts = customCounts,
                             onSelectChecklist = {
                                 dualState.closeLeft()

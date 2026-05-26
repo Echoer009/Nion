@@ -33,6 +33,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.CalendarToday
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -41,6 +42,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.TimePicker
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.rememberTimePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.mutableStateOf
@@ -545,6 +549,136 @@ fun NionCalendar(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 可复用的时间选择行 —— 用于新建任务表单或循环设置中。
+ * 显示时钟图标 + 时间文字，点击弹出 Material3 TimePicker 对话框。
+ *
+ * @param time 当前选中的时间，格式 "HH:MM"，null 表示未设置
+ * @param onTimeSelected 时间变更回调，传入 "HH:MM" 格式字符串
+ * @param label 未设置时间时显示的占位文字
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TimePickerRow(
+    time: String?,
+    onTimeSelected: (String) -> Unit,
+    modifier: Modifier = Modifier,
+    label: String = "选择时间",
+) {
+    var showPicker by remember { mutableStateOf(false) }
+
+    Row(
+        modifier = modifier.clickable { showPicker = true },
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Outlined.Schedule,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = if (time != null) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = time ?: label,
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = if (time != null) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+
+    if (showPicker) {
+        TimePickerDialog(
+            initialTime = time,
+            onConfirm = { selected ->
+                onTimeSelected(selected)
+                showPicker = false
+            },
+            onDismiss = { showPicker = false },
+        )
+    }
+}
+
+/**
+ * Material3 TimePicker 对话框封装 —— 时:分选择，精确到分钟。
+ *
+ * 使用 M3 TimePicker + rememberTimePickerState，与 NionDatePickerDialog 样式一致。
+ *
+ * @param initialTime 初始时间，格式 "HH:MM"
+ * @param onConfirm 确认回调，传入 "HH:MM" 格式字符串
+ * @param onDismiss 关闭回调
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun TimePickerDialog(
+    initialTime: String?,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    val initialHour = remember(initialTime) {
+        initialTime?.substringBefore(":")?.toIntOrNull() ?: 9
+    }
+    val initialMinute = remember(initialTime) {
+        initialTime?.substringAfter(":")?.toIntOrNull() ?: 0
+    }
+
+    val timePickerState = rememberTimePickerState(
+        initialHour = initialHour,
+        initialMinute = initialMinute,
+        is24Hour = true,
+    )
+
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp),
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        tonalElevation = 6.dp,
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
+            Text(
+                "选择时间",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.height(16.dp))
+
+            TimePicker(
+                state = timePickerState,
+                modifier = Modifier.fillMaxWidth(),
+            )
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(14.dp),
+                ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+                Button(
+                    onClick = {
+                        val formatted = "%02d:%02d".format(timePickerState.hour, timePickerState.minute)
+                        onConfirm(formatted)
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.weight(1f),
+                ) { Text("确定", fontWeight = FontWeight.SemiBold, maxLines = 1) }
             }
         }
     }
