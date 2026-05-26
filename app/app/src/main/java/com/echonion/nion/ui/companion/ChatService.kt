@@ -3,6 +3,8 @@ package com.echonion.nion.ui.companion
 import android.util.Log
 import com.echonion.nion.ui.companion.tools.ToolRegistry
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -122,6 +124,140 @@ object ChatService {
             .connectTimeout(30, TimeUnit.SECONDS)
             .readTimeout(120, TimeUnit.SECONDS)
             .build()
+    }
+
+    /**
+     * 向 LLM API 发送简单的纯文本聊天请求（不带工具）。
+     *
+     * 用于只需要纯文本回复的场景（如生成提醒文案、问候语），
+     * 不附带 tools 参数，节省 token 开销。
+     *
+     * @param provider Provider 配置
+     * @param apiKey   API 密钥
+     * @param model    模型名称
+     * @param messages 消息列表
+     * @return 成功时返回文本内容，失败时返回异常
+     */
+    suspend fun chatSimple(
+        provider: ProviderConfig,
+        apiKey: String,
+        model: String,
+        messages: List<JSONObject>,
+    ): Result<String> = withContext(Dispatchers.IO) {
+        try {
+            val text = when (provider.apiType) {
+                ApiType.OPENAI_COMPATIBLE -> chatOpenAISimple(provider.baseUrl, apiKey, model, messages)
+                ApiType.ANTHROPIC -> chatAnthropicSimple(provider.baseUrl, apiKey, model, messages)
+            }
+            Result.success(text)
+        } catch (e: Exception) {
+            Result.failure(Exception("简单聊天请求异常: ${e.message}", e))
+        }
+    }
+
+    /**
+     * OpenAI 格式的简单聊天（不带工具）。
+     */
+    private fun chatOpenAISimple(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        messages: List<JSONObject>,
+    ): String {
+        val url = URL("$baseUrl/chat/completions")
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("Authorization", "Bearer $apiKey")
+            doOutput = true
+            connectTimeout = 30_000
+            readTimeout = 60_000
+        }
+
+        val requestBody = JSONObject().apply {
+            put("model", model)
+            put("messages", JSONArray().apply {
+                for (msg in messages) put(msg)
+            })
+        }
+
+        connection.outputStream.use { os ->
+            os.write(requestBody.toString().toByteArray(Charsets.UTF_8))
+        }
+
+        val responseCode = connection.responseCode
+        if (responseCode !in 200..299) {
+            val errorBody = connection.errorStream?.bufferedReader()?.readText() ?: "未知错误"
+            throw Exception("API 请求失败 (HTTP $responseCode): $errorBody")
+        }
+
+        val responseText = connection.inputStream.bufferedReader()?.readText()
+            ?: throw Exception("响应体为空")
+        val json = JSONObject(responseText)
+        return json.getJSONArray("choices")
+            .getJSONObject(0)
+            .getJSONObject("message")
+            .optString("content", "")
+    }
+
+    /**
+     * Anthropic 格式的简单聊天（不带工具）。
+     */
+    private fun chatAnthropicSimple(
+        baseUrl: String,
+        apiKey: String,
+        model: String,
+        messages: List<JSONObject>,
+    ): String {
+        val url = URL("$baseUrl/messages")
+        val connection = (url.openConnection() as HttpURLConnection).apply {
+            requestMethod = "POST"
+            setRequestProperty("Content-Type", "application/json")
+            setRequestProperty("x-api-key", apiKey)
+            setRequestProperty("anthropic-version", "2023-06-01")
+            doOutput = true
+            connectTimeout = 30_000
+            readTimeout = 60_000
+        }
+
+        val systemPrompt = messages
+            .firstOrNull { it.optString("role") == "system" }
+            ?.optString("content", "") ?: ""
+        val conversationMessages = JSONArray().apply {
+            for (msg in messages) {
+                if (msg.optString("role") != "system") put(msg)
+            }
+        }
+
+        val requestBody = JSONObject().apply {
+            put("model", model)
+            put("max_tokens", 1024)
+            if (systemPrompt.isNotEmpty()) put("system", systemPrompt)
+            put("messages", conversationMessages)
+        }
+
+        connection.outputStream.use { os ->
+            os.write(requestBody.toString().toByteArray(Charsets.UTF_8))
+        }
+
+        val responseCode = connection.responseCode
+        if (responseCode !in 200..299) {
+            val errorBody = connection.errorStream?.bufferedReader()?.readText() ?: "未知错误"
+            throw Exception("API 请求失败 (HTTP $responseCode): $errorBody")
+        }
+
+        val responseText = connection.inputStream.bufferedReader()?.readText()
+            ?: throw Exception("响应体为空")
+        val json = JSONObject(responseText)
+        val contentArr = json.optJSONArray("content") ?: return ""
+        val sb = StringBuilder()
+        for (i in 0 until contentArr.length()) {
+            val block = contentArr.getJSONObject(i)
+            if (block.optString("type") == "text") {
+                sb.append(block.optString("text", ""))
+            }
+        }
+        return sb.toString()
     }
 
     /**
@@ -254,6 +390,8 @@ object ChatService {
         response.body?.source()?.let { source ->
             try {
                 while (!source.exhausted()) {
+                    // 检查线程是否被中断（协程取消时会中断 IO 线程）
+                    if (Thread.interrupted()) break
                     val line = source.readUtf8Line() ?: break
                     if (!line.startsWith("data: ")) continue // 跳过非 data 行
                     val data = line.removePrefix("data: ").trim()
@@ -423,6 +561,8 @@ object ChatService {
         response.body?.source()?.let { source ->
             try {
                 while (!source.exhausted()) {
+                    // 检查线程是否被中断（协程取消时会中断 IO 线程）
+                    if (Thread.interrupted()) break
                     val line = source.readUtf8Line() ?: break
 
                     when {

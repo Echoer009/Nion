@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.settings
 
+import android.app.Application
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,26 +21,51 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.rememberTimePickerState
+import androidx.compose.material3.TimePicker
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.echonion.nion.core
+import com.echonion.nion.reminder.GreetingScheduler
 import com.echonion.nion.ui.theme.NionColorTheme
 import com.echonion.nion.ui.theme.NionColors
 
+/**
+ * 设置页面 —— 应用配置中心。
+ *
+ * 包含：
+ * - 主题颜色选择
+ * - 伙伴问候配置（早安/午间/晚间）
+ *
+ * @param currentTheme 当前主题
+ * @param onThemeChange 主题切换回调
+ * @param onOpenCompanion 打开伙伴面板回调
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
@@ -47,6 +73,39 @@ fun SettingsScreen(
     onThemeChange: (NionColorTheme) -> Unit,
     onOpenCompanion: () -> Unit = {},
 ) {
+    val context = LocalContext.current
+    val app = context.applicationContext as Application
+    val core = app.core()
+
+    // ── 问候设置状态 ──
+    var greetingEnabled by remember { mutableStateOf(true) }
+    var morningTime by remember { mutableStateOf("08:00") }
+    var noonEnabled by remember { mutableStateOf(true) }
+    var eveningEnabled by remember { mutableStateOf(true) }
+    var showTimePicker by remember { mutableStateOf(false) }
+
+    // 从 settings 表加载问候配置
+    LaunchedEffect(Unit) {
+        try {
+            greetingEnabled = core.getSetting("greeting_enabled") != "false"
+            morningTime = core.getSetting("greeting_morning_time") ?: "08:00"
+            noonEnabled = core.getSetting("greeting_noon_enabled") != "false"
+            eveningEnabled = core.getSetting("greeting_evening_enabled") != "false"
+        } catch (_: Exception) {}
+    }
+
+    // 保存设置并重新调度问候闹钟
+    fun saveGreetingSettings() {
+        try {
+            core.setSetting("greeting_enabled", if (greetingEnabled) "true" else "false")
+            core.setSetting("greeting_morning_time", morningTime)
+            core.setSetting("greeting_noon_enabled", if (noonEnabled) "true" else "false")
+            core.setSetting("greeting_evening_enabled", if (eveningEnabled) "true" else "false")
+            // 设置变更后重新调度问候闹钟
+            GreetingScheduler.rescheduleAll(context, core)
+        } catch (_: Exception) {}
+    }
+
     Scaffold(
         contentWindowInsets = WindowInsets.statusBars,
         topBar = {
@@ -77,6 +136,7 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            // ── 主题颜色区域 ──
             Text(
                 "主题颜色",
                 style = MaterialTheme.typography.titleMedium,
@@ -92,8 +152,192 @@ fun SettingsScreen(
                 )
             }
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // ── 伙伴问候区域 ──
+            Text(
+                "伙伴问候",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+
+            // 总开关
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.WbSunny,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "情景问候",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "Nion 会在早晚主动关心你的任务进度",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = greetingEnabled,
+                        onCheckedChange = {
+                            greetingEnabled = it
+                            saveGreetingSettings()
+                        },
+                    )
+                }
+            }
+
+            // 只有总开关打开时才显示子选项
+            if (greetingEnabled) {
+                // 早安问候时间
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "早安问候",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                "每天 $morningTime 汇总今日待办",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        TextButton(onClick = { showTimePicker = true }) {
+                            Text(morningTime)
+                        }
+                    }
+                }
+
+                // 午间检查
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "午间检查",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                "每天 12:00 检查上午完成情况",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = noonEnabled,
+                            onCheckedChange = {
+                                noonEnabled = it
+                                saveGreetingSettings()
+                            },
+                        )
+                    }
+                }
+
+                // 晚间总结
+                ElevatedCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.medium,
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                "晚间总结",
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                "每天 21:00 总结今日成就",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Switch(
+                            checked = eveningEnabled,
+                            onCheckedChange = {
+                                eveningEnabled = it
+                                saveGreetingSettings()
+                            },
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
         }
+    }
+
+    // 早安时间选择器弹窗
+    if (showTimePicker) {
+        val parts = morningTime.split(":")
+        val initialHour = parts.getOrElse(0) { "8" }.toIntOrNull() ?: 8
+        val initialMinute = parts.getOrElse(1) { "0" }.toIntOrNull() ?: 0
+        val timePickerState = rememberTimePickerState(
+            initialHour = initialHour,
+            initialMinute = initialMinute,
+            is24Hour = true,
+        )
+
+        AlertDialog(
+            onDismissRequest = { showTimePicker = false },
+            title = { Text("选择早安问候时间") },
+            text = {
+                TimePicker(state = timePickerState)
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val hour = timePickerState.hour
+                    val minute = timePickerState.minute
+                    morningTime = String.format("%02d:%02d", hour, minute)
+                    saveGreetingSettings()
+                    showTimePicker = false
+                }) {
+                    Text("确定")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showTimePicker = false }) {
+                    Text("取消")
+                }
+            },
+        )
     }
 }
 

@@ -15,9 +15,11 @@ import com.echonion.nion.core
 import com.echonion.nion.ui.companion.tools.ToolExecutor
 import com.echonion.nion.ui.companion.tools.ToolResult
 import com.echonion.nion.ui.companion.tools.MemoryTool
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.nion_core.NionCore
@@ -88,6 +90,26 @@ class CompanionViewModel(
 
     /** 流式节流信号通道 —— CONFLATED 确保高频 token 到来时只保留最新信号 */
     private val streamingThrottleChannel = Channel<Unit>(Channel.CONFLATED)
+
+    /**
+     * 流式文本的 StringBuilder —— 替代 O(n²) 的字符串拼接。
+     * 每次 onTextDelta 追加到 StringBuilder，节流协程定期 toString() 刷新 UI。
+     * 因为 onTextDelta 可能从不同 IO 线程回调，用 @Volatile + synchronized 保护。
+     */
+    private val streamingBuilder = StringBuilder()
+
+    /** 对 streamingBuilder 的访问锁，防止并发 append 和 toString 冲突 */
+    private val streamingBuilderLock = Any()
+
+    /** 流式输出是否处于活跃状态，用于防止节流协程在流式结束后仍把旧文本写回 displayedStreamingText */
+    @Volatile
+    private var streamingActive = false
+
+    /**
+     * 保存消息防抖通道 —— CONFLATED 保证短时间内多次 saveChatMessages() 调用只执行最后一次。
+     * 解决问题：agent loop 中工具执行完成后连续调用 saveChatMessages，避免重复序列化 + SQLite 写入。
+     */
+    private val saveChannel = Channel<Unit>(Channel.CONFLATED)
 
     /** 流式消息的时间戳 */
     var streamingMessageTimestamp by mutableStateOf("")
@@ -185,10 +207,45 @@ class CompanionViewModel(
      */
     private var conversationHistory: MutableList<JSONObject> = mutableListOf()
 
-    /** 工具执行器，注入 NionCore 单例 + 数据变更通知回调 */
-    private val toolExecutor = ToolExecutor(core) { type ->
-        (app as NionApp).notifyDataChanged(type)
-    }
+    /** 工具执行器，注入 NionCore 单例 + 数据变更通知回调 + 提醒调度回调 */
+    private val toolExecutor = ToolExecutor(
+        core,
+        onDataChanged = { type ->
+            (app as NionApp).notifyDataChanged(type)
+        },
+        onScheduleReminder = { taskId ->
+            // 当工具修改了 reminder/recurrence 字段时，重新调度闹钟
+            try {
+                val task = core.getTask(taskId)
+                val reminder = task.reminder
+                val recurrenceRule = task.recurrenceRule
+                val recurrenceTime = task.recurrenceReminderTime
+
+                // 先取消旧闹钟
+                com.echonion.nion.reminder.ReminderScheduler.cancelReminder(app, taskId)
+
+                // 调度每日循环提醒
+                if (recurrenceRule == "daily" && recurrenceTime != null) {
+                    val parts = recurrenceTime.split(":")
+                    if (parts.size == 2) {
+                        val hour = parts[0].toIntOrNull()
+                        val minute = parts[1].toIntOrNull()
+                        if (hour != null && minute != null) {
+                            com.echonion.nion.reminder.ReminderScheduler.scheduleDailyReminder(app, taskId, hour, minute)
+                        }
+                    }
+                }
+
+                // 调度一次性提醒
+                if (reminder != null) {
+                    val dt = com.echonion.nion.reminder.ReminderScheduler.parseReminderToMillisPublic(reminder)
+                    if (dt != null && dt > System.currentTimeMillis()) {
+                        com.echonion.nion.reminder.ReminderScheduler.scheduleExactReminder(app, taskId, dt)
+                    }
+                }
+            } catch (_: Exception) {}
+        },
+    )
 
     /**
      * Agent Loop 的最大迭代次数，防止 LLM 无限循环调用工具。
@@ -205,7 +262,7 @@ class CompanionViewModel(
 2. create：创建任务、清单、分组。批量：传 items 数组
 3. update：更新任务属性（标题/优先级/状态等）、清单名称、分组名称/颜色。批量：传 ids 数组，所有实体应用相同变更
 4. delete：删除任务、清单、分组。批量：传 ids 数组
-5. move：移动任务到其他清单/分组，移动分组到其他清单（保留专注时长等数据）。批量：传 ids 数组
+5. move：移动任务到其他清单/分组，移动分组到其他清单，调整任务层级（保留专注时长等数据）。批量：传 ids 数组。支持：task→task（把任务变成另一任务的子任务）、task→root（把子任务提升为独立主任务）
 6. manage：通用操作（设置/移除每日循环等非 CRUD 操作）
 7. remember：记住用户偏好规则。当用户表达不满、提出习惯性要求、或希望你记住某条规则时，调用 add 操作记录下来。当用户说"不用遵守 xxx 了"时，调用 remove 删除。你应主动识别用户意图并调用此工具，而非等到用户明确说"记住这个"
 8. memory：主动记录关于用户的事实性信息。与 remember（偏好规则）不同，此工具记录的是描述性知识。在以下场景主动调用：
@@ -229,27 +286,79 @@ class CompanionViewModel(
 - 用中文回复，语气温暖简洁
 
 回复格式要求：
-- 不要用 emoji
-- 展示任务层级结构时，用 Markdown 缩进列表表示层级关系
+- 你可以使用以下 Markdown 格式，它们会被正确渲染：
+  - 标题：# ~ ######
+  - 粗体：**文字**
+  - 斜体：*文字*
+  - 内联代码：`代码`
+  - 删除线：~~文字~~
+  - 代码块：```包裹的多行代码```
+  - 无序列表：- 或 * 开头
+  - 有序列表：1. 开头
+  - 任务列表：- [ ] 未完成 / - [x] 已完成
+  - 引用块：> 开头
+  - 表格：| 列1 | 列2 | 格式（支持 :--- 左对齐、:---: 居中、---: 右对齐）
+  - 分割线：---
+  - 链接：[文字](url)（仅显示文字，不可点击，尽量少用）
+- 不支持的格式请勿使用：图片(![...](...))、HTML标签、嵌套缩进列表、脚注等
+- 展示任务层级结构时，用无序列表表示层级关系：
   - 父任务名 [状态]
-    - 子任务名 [状态]
-    - 子任务名 [状态]
-- 展示简单列表时用 Markdown 无序列表（- 开头）
-- 展示数据对比时用 Markdown 表格（| 列 | 格式）
+  - 子任务名 [状态]
+- 展示数据对比时用表格
     """.trimIndent()
 
+    /**
+     * 数据加载状态，true 表示正在从数据库加载（settings、消息、对话列表）。
+     * UI 据此显示加载指示器，避免加载完成前闪烁空白页。
+     */
+    var isDataLoading by mutableStateOf(true)
+        private set
+
     init {
-        loadSettings()
-        loadChatMessages()
-        loadConversationList()
+        /**
+         * 关键：协程在 Main dispatcher 上启动，确保所有 mutableStateOf 写入发生在主线程。
+         * 仅数据库 I/O 通过 withContext(Dispatchers.IO) 切到后台线程。
+         * 之前直接用 Dispatchers.IO 启动协程会导致 Compose 快照不触发重组（跨线程写入延迟）。
+         */
+        viewModelScope.launch {
+            Log.d("NionCompanion", "[init] loadSettings 开始（isInitialized=$isInitialized）")
+            loadSettings()
+            Log.d("NionCompanion", "[init] loadSettings 完成 → isInitialized=$isInitialized, provider=${currentProvider?.name}, apiKey=${if (apiKey != null) "已配置" else "未配置"}")
+            loadChatMessages()
+            loadConversationList()
+            isDataLoading = false
+            Log.d("NionCompanion", "[init] 全部加载完成 → messages.size=${messages.size}, conversations.size=${conversationList.size}")
+        }
+
+        // 安全超时：5 秒后如果 isInitialized 仍未变 true，强制初始化
+        // 防止因协程取消/线程阻塞等极端情况导致永久空白
+        viewModelScope.launch {
+            delay(5000L)
+            if (!isInitialized) {
+                Log.w(TAG, "[init] loadSettings 超时未完成（isInitialized=$isInitialized, isDataLoading=$isDataLoading），强制初始化")
+                isInitialized = true
+            }
+        }
         // 流式文本显示节流：每 ~80ms 才更新一次 UI，避免每次 token 触发 Markdown O(n²) 重解析
+        // 从 streamingBuilder 读取（加锁），而非从 streamingAssistantText（已废弃拼接逻辑）
+        // streamingActive 标志防止节流协程在流式结束后把旧文本重新写回
         viewModelScope.launch {
             var lastDisplay = 0L
             for (signal in streamingThrottleChannel) {
+                if (!streamingActive) continue
                 val elapsed = System.currentTimeMillis() - lastDisplay
                 if (elapsed < 80L) delay(80L - elapsed)
-                displayedStreamingText = streamingAssistantText
+                displayedStreamingText = synchronized(streamingBuilderLock) { streamingBuilder.toString() }
                 lastDisplay = System.currentTimeMillis()
+            }
+        }
+        // 消息保存防抖消费者：从 channel 收到信号后在 IO 线程执行实际保存
+        // CONFLATED channel 保证短时间内多次 requestSave() 只触发一次实际 I/O
+        viewModelScope.launch(Dispatchers.IO) {
+            for (signal in saveChannel) {
+                // 短暂延迟，合并连续的保存请求
+                delay(50)
+                performSave()
             }
         }
     }
@@ -258,99 +367,119 @@ class CompanionViewModel(
      * 从 Rust 层 settings 表中加载已保存的 provider / API key / 模型配置。
      * 同时加载多配置列表，向后兼容旧版单配置存储。
      * 加载完成后设 isInitialized = true，UI 据此决定显示设置页还是聊天页。
+     *
+     * suspend 设计：调用方必须在协程中调用。数据库 I/O 通过 withContext(Dispatchers.IO)
+     * 在后台线程执行，mutableStateOf 写入留在主线程以确保 Compose 快照正确观察。
      */
-    private fun loadSettings() {
+    private suspend fun loadSettings() {
+        /** 阶段 1 从 DB 读取的原始数据，用于在 IO 线程收集、在主线程写入 mutableStateOf */
+        data class RawData(
+            val configsJson: String?,
+            val providerName: String?,
+            val apiKey: String?,
+            val model: String?,
+            val baseUrl: String?,
+            val apiTypeName: String?,
+            val companionName: String?,
+            val companionPrompt: String?,
+            val prefsJson: String?,
+            val memoriesJson: String?,
+            val avatarUri: String?,
+        )
+
+        /**
+         * 阶段 1：在 IO 线程读取所有 DB 数据，存入局部变量。
+         * 关键：core.getSetting 内部有互斥锁，必须异步执行避免阻塞主线程。
+         */
+        val loaded: RawData = withContext(Dispatchers.IO) {
+            try {
+                RawData(
+                    configsJson = core.getSetting("llm_saved_configs"),
+                    providerName = core.getSetting("llm_provider"),
+                    apiKey = core.getSetting("llm_api_key"),
+                    model = core.getSetting("llm_model"),
+                    baseUrl = core.getSetting("llm_base_url"),
+                    apiTypeName = core.getSetting("llm_api_type"),
+                    companionName = core.getSetting("companion_name"),
+                    companionPrompt = core.getSetting("companion_prompt"),
+                    prefsJson = core.getSetting("companion_user_preferences"),
+                    memoriesJson = core.getSetting(MemoryTool.SETTING_KEY),
+                    avatarUri = core.getSetting("companion_avatar_uri"),
+                )
+            } catch (e: Exception) {
+                Log.e(TAG, "loadSettings DB 读取异常", e)
+                RawData(null, null, null, null, null, null, null, null, null, null, null)
+            }
+        }
+
+        /**
+         * 阶段 2：在主线程处理数据并写入 mutableStateOf。
+         * 此时已回到调用协程的 dispatcher（Main），所有 Compose 状态写入可被正确观察。
+         */
         try {
-            // ── 加载多配置列表 ──
-            val configsJson = core.getSetting("llm_saved_configs")
-            if (!configsJson.isNullOrEmpty()) {
-                val arr = JSONArray(configsJson)
-                val configs = mutableListOf<SavedConfig>()
-                for (i in 0 until arr.length()) {
-                    val obj = arr.getJSONObject(i)
-                    configs.add(SavedConfig(
-                        id = obj.getString("id"),
-                        provider = obj.getString("provider"),
-                        apiKey = obj.getString("apiKey"),
-                        model = obj.getString("model"),
-                        baseUrl = obj.optString("baseUrl", ""),
-                        apiType = obj.optString("apiType", "OPENAI_COMPATIBLE"),
-                    ))
-                }
-                savedConfigs = configs
+            // ── 解析多配置列表 ──
+            if (!loaded.configsJson.isNullOrEmpty()) {
+                try {
+                    val arr = JSONArray(loaded.configsJson)
+                    val configs = mutableListOf<SavedConfig>()
+                    for (i in 0 until arr.length()) {
+                        val obj = arr.getJSONObject(i)
+                        configs.add(SavedConfig(
+                            id = obj.getString("id"),
+                            provider = obj.getString("provider"),
+                            apiKey = obj.getString("apiKey"),
+                            model = obj.getString("model"),
+                            baseUrl = obj.optString("baseUrl", ""),
+                            apiType = obj.optString("apiType", "OPENAI_COMPATIBLE"),
+                        ))
+                    }
+                    savedConfigs = configs
+                } catch (_: Exception) {}
             }
 
-            // ── 加载当前激活的配置（优先用单键，向后兼容） ──
-            val savedProviderName = core.getSetting("llm_provider")
-            val savedApiKey = core.getSetting("llm_api_key")
-            val savedModel = core.getSetting("llm_model")
-            val savedBaseUrl = core.getSetting("llm_base_url")
-            val savedApiTypeName = core.getSetting("llm_api_type")
-
-            if (!savedProviderName.isNullOrEmpty() && !savedApiKey.isNullOrEmpty() && !savedModel.isNullOrEmpty()) {
-                apiKey = savedApiKey
-                modelName = savedModel
-                val savedApiType = try {
-                    ApiType.valueOf(savedApiTypeName ?: "OPENAI_COMPATIBLE")
+            // ── 加载当前激活的配置 ──
+            val pName = loaded.providerName
+            val pKey = loaded.apiKey
+            val pModel = loaded.model
+            if (!pName.isNullOrEmpty() && !pKey.isNullOrEmpty() && !pModel.isNullOrEmpty()) {
+                apiKey = pKey
+                modelName = pModel
+                val apiType = try {
+                    ApiType.valueOf(loaded.apiTypeName ?: "OPENAI_COMPATIBLE")
                 } catch (_: Exception) {
                     ApiType.OPENAI_COMPATIBLE
                 }
-                currentProvider = builtInProviders.find { it.name == savedProviderName }
-                    ?: ProviderConfig(
-                        name = savedProviderName,
-                        baseUrl = savedBaseUrl ?: "",
-                        apiType = savedApiType,
-                    )
-                // 如果多配置列表为空但单配置存在，自动迁移到多配置列表
+                currentProvider = builtInProviders.find { it.name == pName }
+                    ?: ProviderConfig(name = pName, baseUrl = loaded.baseUrl ?: "", apiType = apiType)
+                // 旧版单配置自动迁移到多配置列表
                 if (savedConfigs.isEmpty()) {
-                    migrateToMultiConfig(savedProviderName, savedApiKey, savedModel, savedBaseUrl ?: "", savedApiTypeName ?: "OPENAI_COMPATIBLE")
+                    migrateToMultiConfig(pName, pKey, pModel, loaded.baseUrl ?: "", loaded.apiTypeName ?: "OPENAI_COMPATIBLE")
                 }
             }
-        } catch (_: Exception) {
-            // 设置读取失败（如首次启动无记录），保持未配置状态即可
+
+            // ── 加载伙伴名称和提示词 ──
+            if (!loaded.companionName.isNullOrEmpty()) companionName = loaded.companionName
+            companionPrompt = loaded.companionPrompt ?: defaultCompanionPrompt
+
+            // ── 加载用户偏好 ──
+            if (!loaded.prefsJson.isNullOrEmpty()) {
+                try { userPreferences = JSONArray(loaded.prefsJson) } catch (_: Exception) {}
+            }
+
+            // ── 加载用户记忆 ──
+            if (!loaded.memoriesJson.isNullOrEmpty()) {
+                try { userMemories = JSONArray(loaded.memoriesJson) } catch (_: Exception) {}
+            }
+
+            // ── 加载头像 ──
+            if (!loaded.avatarUri.isNullOrEmpty()) companionAvatarUri = loaded.avatarUri
+        } catch (e: Exception) {
+            // 兜底：内层未捕获异常
+            Log.e(TAG, "loadSettings 状态写入异常", e)
+        } finally {
+            // 无论任何情况，标记初始化完成，防止面板永久空白
+            isInitialized = true
         }
-
-        // 加载伙伴名称和提示词，无保存值时使用默认值
-        try {
-            val savedName = core.getSetting("companion_name")
-            if (!savedName.isNullOrEmpty()) {
-                companionName = savedName
-            }
-            val savedPrompt = core.getSetting("companion_prompt")
-            companionPrompt = if (!savedPrompt.isNullOrEmpty()) {
-                savedPrompt
-            } else {
-                defaultCompanionPrompt
-            }
-        } catch (_: Exception) {
-            companionPrompt = defaultCompanionPrompt
-        }
-
-        // 加载用户偏好列表（AI 通过 remember 工具记录的偏好）
-        try {
-            val prefsJson = core.getSetting("companion_user_preferences")
-            if (!prefsJson.isNullOrEmpty()) {
-                userPreferences = JSONArray(prefsJson)
-            }
-        } catch (_: Exception) {}
-
-        // 加载用户记忆列表（AI 通过 memory 工具主动记录的关于用户的事实性信息）
-        try {
-            val memoriesJson = core.getSetting(MemoryTool.SETTING_KEY)
-            if (!memoriesJson.isNullOrEmpty()) {
-                userMemories = JSONArray(memoriesJson)
-            }
-        } catch (_: Exception) {}
-
-        // 加载伙伴头像 URI
-        try {
-            val savedAvatar = core.getSetting("companion_avatar_uri")
-            if (!savedAvatar.isNullOrEmpty()) {
-                companionAvatarUri = savedAvatar
-            }
-        } catch (_: Exception) {}
-
-        isInitialized = true
     }
 
     /** 将旧版单配置数据迁移到多配置列表 */
@@ -388,12 +517,21 @@ class CompanionViewModel(
     }
 
     /**
-     * 将当前消息列表序列化为 JSON 并持久化。
+     * 请求异步保存消息 —— 通过防抖 channel 合并短时间内的多次保存请求。
+     * 所有需要保存消息的地方都应调用此方法，而非直接调用 [performSave]。
+     */
+    private fun requestSave() {
+        saveChannel.trySend(Unit)
+    }
+
+    /**
+     * 实际执行保存操作：序列化消息列表 + API 对话历史，写入 SQLite。
+     * 此方法应在 IO 线程执行（由 saveChannel 消费者协程调用）。
+     *
      * 如果 currentConversationId 存在则保存到 chat_conversations 表，
      * 否则保存到 settings 的 chat_history 键（向后兼容）。
-     * 每次消息变更（发送/接收/清空）后调用。
      */
-    private fun saveChatMessages() {
+    private fun performSave() {
         try {
             val jsonArr = JSONArray()
             for (msg in messages) {
@@ -423,30 +561,54 @@ class CompanionViewModel(
      * 加载聊天消息。
      * 优先从 settings 中的 current_conversation_id 恢复上次活跃对话，
      * 否则从旧版 chat_history settings 键加载。
+     *
+     * DB 读取在 IO 线程，mutableStateOf 写入在主线程。
      */
-    private fun loadChatMessages() {
+    private suspend fun loadChatMessages() {
+        /** 阶段 1 从 DB 读取的原始聊天数据 */
+        data class RawChat(
+            val convId: String?,
+            val convMessages: String?,
+            val convApiHistory: String?,
+            val chatHistory: String?,
+        )
+
+        // 阶段 1：IO 线程读取 DB
+        val chatData: RawChat = withContext(Dispatchers.IO) {
+            try {
+                val convId = core.getSetting("current_conversation_id")
+                if (!convId.isNullOrEmpty()) {
+                    val conv = core.getConversation(convId)
+                    RawChat(convId = conv.id, convMessages = conv.messages, convApiHistory = conv.apiHistory, chatHistory = null)
+                } else {
+                    val json = core.getSetting("chat_history")
+                    RawChat(convId = null, convMessages = null, convApiHistory = null, chatHistory = json)
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "loadChatMessages DB 读取异常", e)
+                RawChat(null, null, null, null)
+            }
+        }
+
+        // 阶段 2：主线程解析 JSON 并写入 mutableStateOf
         try {
-            val convId = core.getSetting("current_conversation_id")
-            if (!convId.isNullOrEmpty()) {
-                val conv = core.getConversation(convId)
-                currentConversationId = conv.id
-                messages = parseMessagesJson(conv.messages)
-                // 恢复 API 层对话上下文
+            if (chatData.convId != null) {
+                currentConversationId = chatData.convId
+                messages = parseMessagesJson(chatData.convMessages ?: "[]")
+                // 恢复 API 层对话上下文（conversationHistory 是普通列表，非 Compose 状态）
                 conversationHistory.clear()
-                val apiHistoryStr = conv.apiHistory
-                if (apiHistoryStr.isNotEmpty() && apiHistoryStr != "[]") {
+                val apiHistoryStr = chatData.convApiHistory
+                if (!apiHistoryStr.isNullOrEmpty() && apiHistoryStr != "[]") {
                     val arr = JSONArray(apiHistoryStr)
                     for (i in 0 until arr.length()) {
                         conversationHistory.add(JSONObject(arr.getString(i)))
                     }
                 }
-                return
+            } else if (!chatData.chatHistory.isNullOrEmpty()) {
+                messages = parseMessagesJson(chatData.chatHistory)
             }
-            val json = core.getSetting("chat_history")
-            if (!json.isNullOrEmpty()) {
-                messages = parseMessagesJson(json)
-            }
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e(TAG, "loadChatMessages 解析异常", e)
             currentConversationId = null
         }
     }
@@ -486,13 +648,14 @@ class CompanionViewModel(
 
     /**
      * 加载对话历史列表（不含完整消息），供给历史面板展示。
+     *
+     * DB 读取在 IO 线程，mutableStateOf 写入在主线程。
      */
-    fun loadConversationList() {
-        try {
-            conversationList = core.getConversations()
-        } catch (_: Exception) {
-            conversationList = emptyList()
+    suspend fun loadConversationList() {
+        val list = withContext(Dispatchers.IO) {
+            try { core.getConversations() } catch (_: Exception) { emptyList() }
         }
+        conversationList = list
     }
 
     /**
@@ -500,60 +663,76 @@ class CompanionViewModel(
      * 如果当前对话为空则不做任何操作。
      */
     fun startNewConversation() {
-        // 保存当前对话到数据库
+        // 结束任何残留的流式输出，防止旧文本气泡残留
+        endStreaming()
+        // 保存当前对话到数据库（同步执行，因为后续要清空状态）
         if (messages.isNotEmpty()) {
-            saveChatMessages()
+            viewModelScope.launch(Dispatchers.IO) { performSave() }
         }
         // 清空状态，开始新对话
         currentConversationId = null
         messages = emptyList()
         conversationHistory.clear()
-        saveChatMessages()
+        viewModelScope.launch(Dispatchers.IO) { performSave() }
+        // 刷新历史列表 —— loadConversationList 内部已处理 IO/State 切线程，此处无需指定 Dispatchers.IO
+        viewModelScope.launch { loadConversationList() }
     }
 
     /**
      * 恢复历史对话 —— 从数据库加载指定对话的消息，设为当前活跃对话。
+     * 协程在 Main 启动确保 mutableStateOf 写入能被 Compose 正确观察。
      *
      * @param id 要恢复的对话 ID
      */
     fun loadConversation(id: String) {
-        try {
-            if (messages.isNotEmpty()) {
-                saveChatMessages()
-            }
-            val conv = core.getConversation(id)
-            currentConversationId = conv.id
-            messages = parseMessagesJson(conv.messages)
-            // 从持久化的 api_history 恢复 API 层对话上下文
-            conversationHistory.clear()
-            val apiHistoryStr = conv.apiHistory
-            if (apiHistoryStr.isNotEmpty() && apiHistoryStr != "[]") {
-                val arr = JSONArray(apiHistoryStr)
-                for (i in 0 until arr.length()) {
-                    conversationHistory.add(JSONObject(arr.getString(i)))
+        endStreaming()
+        viewModelScope.launch {
+            try {
+                // performSave 内部只做 DB 写，放 IO 线程避免阻塞主线程
+                if (messages.isNotEmpty()) {
+                    withContext(Dispatchers.IO) { performSave() }
                 }
-            }
-            core.setSetting("current_conversation_id", id)
-        } catch (_: Exception) {}
+                // DB 读 + JSON 解析在 IO 线程
+                val conv = withContext(Dispatchers.IO) { core.getConversation(id) }
+                // mutableStateOf 写入在主线程
+                currentConversationId = conv.id
+                messages = parseMessagesJson(conv.messages)
+                // 恢复 API 层对话上下文（conversationHistory 是普通列表，非 Compose 状态）
+                conversationHistory.clear()
+                val apiHistoryStr = conv.apiHistory
+                if (apiHistoryStr.isNotEmpty() && apiHistoryStr != "[]") {
+                    val arr = JSONArray(apiHistoryStr)
+                    for (i in 0 until arr.length()) {
+                        conversationHistory.add(JSONObject(arr.getString(i)))
+                    }
+                }
+                withContext(Dispatchers.IO) { core.setSetting("current_conversation_id", id) }
+            } catch (_: Exception) {}
+        }
     }
 
     /**
      * 删除历史对话。
+     * 协程在 Main 启动确保 mutableStateOf 写入能被 Compose 正确观察，
+     * 数据库 I/O 通过 withContext(Dispatchers.IO) 隔离。
      *
      * @param id 要删除的对话 ID
      */
     fun deleteConversation(id: String) {
-        try {
-            core.deleteConversation(id)
-            // 如果删除的是当前对话，清空状态
-            if (currentConversationId == id) {
-                currentConversationId = null
-                messages = emptyList()
-                conversationHistory.clear()
-                core.setSetting("current_conversation_id", "")
-            }
-            loadConversationList()
-        } catch (_: Exception) {}
+        viewModelScope.launch {
+            try {
+                // DB 删除在 IO 线程
+                withContext(Dispatchers.IO) { core.deleteConversation(id) }
+                // 状态写入在主线程
+                if (currentConversationId == id) {
+                    currentConversationId = null
+                    messages = emptyList()
+                    conversationHistory.clear()
+                    withContext(Dispatchers.IO) { core.setSetting("current_conversation_id", "") }
+                }
+                loadConversationList()
+            } catch (_: Exception) {}
+        }
     }
 
     /**
@@ -786,23 +965,33 @@ class CompanionViewModel(
     /**
      * 清除 API 配置 —— 清空本地状态和聊天记录。
      * 用于"切换 provider"或"重置设置"场景。
+     *
+     * mutableStateOf 写入必须在主线程，DB 操作通过 withContext(IO) 隔离。
      */
     fun clearApiConfig() {
-        // 保存当前对话到历史
-        if (messages.isNotEmpty()) {
-            saveChatMessages()
-        }
-        apiKey = null
-        modelName = null
-        currentProvider = null
-        currentConversationId = null
-        messages = emptyList()
-        conversationHistory.clear()
-        saveChatMessages()
-        try {
-            core.setSetting("llm_api_key", "")
-            core.setSetting("current_conversation_id", "")
-        } catch (_: Exception) {
+        endStreaming()
+        viewModelScope.launch {
+            // DB 保存在 IO 线程
+            withContext(Dispatchers.IO) {
+                if (messages.isNotEmpty()) {
+                    performSave()
+                }
+            }
+            // 状态写入在主线程 —— 关键：确保 Compose 快照正确观察
+            apiKey = null
+            modelName = null
+            currentProvider = null
+            currentConversationId = null
+            messages = emptyList()
+            conversationHistory.clear()
+            // 后续 DB 写也在 IO
+            withContext(Dispatchers.IO) {
+                performSave()
+                try {
+                    core.setSetting("llm_api_key", "")
+                    core.setSetting("current_conversation_id", "")
+                } catch (_: Exception) {}
+            }
         }
     }
 
@@ -819,7 +1008,10 @@ class CompanionViewModel(
      */
     fun sendMessage() {
         val text = inputText.trim()
-        if (text.isEmpty() || isLoading) return
+        if (text.isEmpty() || isLoading) {
+            Log.d(TAG, "[sendMessage] 拦截 → textEmpty=${text.isEmpty()}, isLoading=$isLoading")
+            return
+        }
 
         val provider = currentProvider ?: return
         val key = apiKey ?: return
@@ -832,6 +1024,8 @@ class CompanionViewModel(
             isFromUser = true,
             timestamp = now,
         )
+
+        Log.d(TAG, "[sendMessage] 发送 → text=$text, msgCount=${messages.size}")
 
         // 先追加用户消息到 UI 列表，让 UI 立即刷新
         messages = messages + userMessage
@@ -846,7 +1040,7 @@ class CompanionViewModel(
             } catch (_: Exception) {}
         }
 
-        saveChatMessages()
+        requestSave()
 
         // 将用户消息追加到 API 对话历史
         conversationHistory.add(JSONObject().apply {
@@ -854,9 +1048,11 @@ class CompanionViewModel(
             put("content", text)
         })
 
+        Log.d(TAG, "[sendMessage] 启动 AgentLoop → msgCount=${messages.size}")
         viewModelScope.launch {
             runAgentLoop(provider, key, model)
             isLoading = false
+            Log.d(TAG, "[sendMessage] AgentLoop 结束 → msgCount=${messages.size}")
         }
     }
 
@@ -991,9 +1187,10 @@ class CompanionViewModel(
 
     private suspend fun runAgentLoop(provider: ProviderConfig, apiKey: String, model: String) {
         var iteration = 0
-
+        Log.d(TAG, "[AgentLoop] 开始 iteration=0 msgCount=${messages.size}")
         while (iteration < maxAgentIterations) {
             iteration++
+            Log.d(TAG, "[AgentLoop] iteration=$iteration 开始")
             Log.d(TAG, "Agent loop iteration=$iteration provider=${provider.name} model=$model")
 
             // 构建完整的 API 消息列表：system prompt + 对话历史
@@ -1002,18 +1199,23 @@ class CompanionViewModel(
             // 初始化流式输出状态：记录开始时间、清空累积文本
             val timestamp = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
             streamingMessageTimestamp = timestamp
-            streamingAssistantText = ""
+            streamingAssistantText = "" // 标记"正在流式输出"，UI 据此显示流式气泡
             displayedStreamingText = ""
+            streamingActive = true
+            // 清空 StringBuilder，准备接收新一轮流式文本
+            synchronized(streamingBuilderLock) { streamingBuilder.clear() }
 
-            // 发送流式 SSE 请求，onTextDelta 在 IO 线程被调用（mutableState 是线程安全的）
+            // 发送流式 SSE 请求，onTextDelta 在 IO 线程被调用
             val result = ChatService.chatStream(
                 provider = provider,
                 apiKey = apiKey,
                 model = model,
                 messages = apiMessages,
                 onTextDelta = { delta ->
-                    // 每次收到文本增量时累积到流式状态
-                    streamingAssistantText = (streamingAssistantText ?: "") + delta
+                    // 追加到 StringBuilder（O(1) 均摊），替代 O(n) 的字符串拼接
+                    synchronized(streamingBuilderLock) { streamingBuilder.append(delta) }
+                    // 同步更新 streamingAssistantText，供 runAgentLoop 后续判断是否有文本
+                    streamingAssistantText = synchronized(streamingBuilderLock) { streamingBuilder.toString() }
                     // 通知节流协程有新文本到达（CONFLATED 自动丢弃积压信号）
                     streamingThrottleChannel.trySend(Unit)
                 },
@@ -1022,8 +1224,7 @@ class CompanionViewModel(
             if (result.isFailure) {
                 val err = result.exceptionOrNull()?.message ?: "unknown"
                 Log.e(TAG, "API 失败: $err")
-                streamingAssistantText = null // 清除流式残留
-                displayedStreamingText = null
+                endStreaming()
                 toolExecutionStatus = null
                 appendAssistantMessage("抱歉，出了点问题：$err")
                 break
@@ -1036,11 +1237,11 @@ class CompanionViewModel(
             if (response.toolCalls != null && response.toolCalls.isNotEmpty()) {
                 // 将已流式显示的文本固化为一条完整消息（如果有文本的话）
                 val streamedText = streamingAssistantText?.trim()
+                Log.d(TAG, "[AgentLoop] 有工具调用 → streamedText=${streamedText?.take(60)}, toolCount=${response.toolCalls.size}")
                 if (!streamedText.isNullOrEmpty()) {
                     appendAssistantMessage(streamedText, reasoningContent = response.reasoningContent)
                 }
-                streamingAssistantText = null // 清除流式状态，准备下一轮迭代
-                displayedStreamingText = null
+                endStreaming()
 
                 // 追加 assistant tool_calls 到对话历史（含 reasoning_content）
                 appendAssistantToolCallsMessage(response.toolCalls, response.reasoningContent)
@@ -1082,6 +1283,7 @@ class CompanionViewModel(
 
             // 情况 2：LLM 返回纯文本回复（无工具调用）
             val finalText = streamingAssistantText?.trim()
+            Log.d(TAG, "[AgentLoop] 纯文本 → finalText=${finalText?.take(60)}, response.text=${response.text?.take(60)}")
             if (!finalText.isNullOrEmpty()) {
                 // 使用流式累积的文本（与 UI 显示的完全一致），固化为最终消息
                 // 附带 reasoning_content 以满足 DeepSeek 推理模型的要求
@@ -1091,19 +1293,31 @@ class CompanionViewModel(
             } else {
                 appendAssistantMessage("（${companionName} 没有回复内容）")
             }
-            streamingAssistantText = null
-            displayedStreamingText = null
+            endStreaming()
             break
         }
 
         // 确保迭代结束时流式状态被清除（防止残留的 loading 状态）
-        streamingAssistantText = null
-        displayedStreamingText = null
+        endStreaming()
 
         // 达到最大迭代次数，安全退出
         if (iteration >= maxAgentIterations) {
             appendAssistantMessage("抱歉，工具调用次数过多，请简化你的请求后重试。")
         }
+    }
+
+    /**
+     * 安全结束流式输出 —— 先关闭 streamingActive 标志防止节流协程的残留信号
+     * 把旧文本重新写回，再清空 builder 和状态变量。
+     *
+     * 调用顺序是关键：streamingActive=false 必须在前，
+     * 确保后续的节流信号一律跳过，不会覆盖紧接着的 null 赋值。
+     */
+    private fun endStreaming() {
+        streamingActive = false
+        synchronized(streamingBuilderLock) { streamingBuilder.clear() }
+        streamingAssistantText = null
+        displayedStreamingText = null
     }
 
     /**
@@ -1119,13 +1333,15 @@ class CompanionViewModel(
         reasoningContent: String? = null,
     ) {
         val now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+        val newId = UUID.randomUUID().toString()
+        Log.d(TAG, "[appendMsg] id=$newId text=${text.take(80)}")
         messages = messages + ChatMessage(
-            id = UUID.randomUUID().toString(),
+            id = newId,
             text = text,
             isFromUser = false,
             timestamp = now,
         )
-        saveChatMessages()
+        requestSave()
         // 同步追加到 API 对话历史，优先使用原始消息（保留 reasoning_content 等）
         if (rawMessage != null) {
             conversationHistory.add(rawMessage)

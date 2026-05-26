@@ -244,7 +244,8 @@ object CreateTool : Tool {
     override val name = "create"
     override val description = "创建新实体，支持批量。通过 entity_type 指定类型：task（任务）、checklist（清单）、group（分组）。" +
         "单个创建传 title/name 等字段；批量创建传 items 数组，每项包含对应实体所需的字段。" +
-        "task 需 title，支持 recurrence_rule（循环规则，传\"daily\"=每天循环）、recurrence_reminder_time（提醒时间 HH:MM）；" +
+        "task 需 title，支持 reminder（一次性提醒，ISO 8601 如 2026-06-01T15:00）、" +
+        "recurrence_rule（循环规则，传\"daily\"=每天循环）、recurrence_reminder_time（提醒时间 HH:MM）；" +
         "checklist 需 name；group 需 name 和 checklist_id。"
 
     private val schema = """
@@ -293,6 +294,10 @@ object CreateTool : Tool {
             "recurrence_reminder_time": {
                 "type": "string",
                 "description": "每日循环提醒时间，格式 HH:MM，如 09:00，精确到分钟（仅 task，需搭配 recurrence_rule 使用）"
+            },
+            "reminder": {
+                "type": "string",
+                "description": "一次性提醒时间，ISO 8601 格式如 2026-06-01T15:00（可选，仅 task）。设置后 Nion 会在该时间主动提醒用户"
             },
             "name": {
                 "type": "string",
@@ -367,10 +372,15 @@ object CreateTool : Tool {
                             recurrenceRule = itemParams.optString("recurrence_rule", "").takeIf { it.isNotEmpty() },
                             recurrenceReminderTime = itemParams.optString("recurrence_reminder_time", "").takeIf { it.isNotEmpty() },
                         )
+                        // 批量创建也支持 reminder 字段
+                        val reminder = itemParams.optString("reminder", "").takeIf { it.isNotEmpty() }
+                        val finalTask = if (reminder != null) {
+                            core.updateTask(task.id, null, null, null, null, null, null, reminder, null, null, null)
+                        } else task
                         results.put(JSONObject().apply {
                             put("index", i)
                             put("success", true)
-                            put("task", taskToJson(task))
+                            put("task", taskToJson(finalTask))
                         })
                         successCount++
                     }
@@ -436,9 +446,14 @@ object CreateTool : Tool {
             recurrenceRule = params.optString("recurrence_rule", "").takeIf { it.isNotEmpty() },
             recurrenceReminderTime = params.optString("recurrence_reminder_time", "").takeIf { it.isNotEmpty() },
         )
+        // 如果指定了 reminder，需要二次更新（createTask 不支持 reminder 参数）
+        val reminder = params.optString("reminder", "").takeIf { it.isNotEmpty() }
+        val finalTask = if (reminder != null) {
+            core.updateTask(task.id, null, null, null, null, null, null, reminder, null, null, null)
+        } else task
         return JSONObject().apply {
             put("success", true)
-            put("task", taskToJson(task))
+            put("task", taskToJson(finalTask))
         }.toString()
     }
 
@@ -844,6 +859,7 @@ object MoveTool : Tool {
     override val description = "移动实体到新的容器，保留所有数据（如专注时长），支持批量。" +
         "单个移动传 id；批量移动传 ids 数组，所有实体移到同一目标。" +
         "支持：task→checklist（任务移到其他清单）、task→group（任务移到其他分组）、" +
+        "task→task（任务成为另一任务的子任务）、task→root（提升子任务为独立主任务）、" +
         "group→checklist（分组移到其他清单，组内任务跟随）。"
 
     private val schema = """
@@ -866,15 +882,15 @@ object MoveTool : Tool {
             },
             "target_type": {
                 "type": "string",
-                "enum": ["checklist", "group"],
-                "description": "目标容器类型：checklist=清单, group=分组"
+                "enum": ["checklist", "group", "task", "root"],
+                "description": "目标类型：checklist=清单, group=分组, task=成为目标任务的子任务, root=提升为独立主任务"
             },
             "target_id": {
                 "type": "string",
-                "description": "目标容器的 ID"
+                "description": "目标容器/任务的 ID（root 类型不需要此字段）"
             }
         },
-        "required": ["entity_type", "target_type", "target_id"]
+        "required": ["entity_type", "target_type"]
     }
     """.trimIndent()
 
@@ -885,8 +901,9 @@ object MoveTool : Tool {
         val singleId = params.optString("id", "").takeIf { it.isNotEmpty() }
         val idsArray = params.optJSONArray("ids")
         val targetType = params.getString("target_type")
+        // root 类型不需要 target_id，其他类型必填
         val targetId = params.optString("target_id", "").takeIf { it.isNotEmpty() }
-            ?: return """{"error":"移动操作必须指定 target_id"}"""
+            ?: if (targetType != "root") return """{"error":"移动操作必须指定 target_id"}""" else ""
 
         // 批量移动模式
         if (idsArray != null && idsArray.length() > 0) {
@@ -903,6 +920,8 @@ object MoveTool : Tool {
     private fun executeSingleMove(entityType: String, id: String, targetType: String, targetId: String, core: NionCore): String = when {
         entityType == "task" && targetType == "checklist" -> moveTaskToChecklist(id, targetId, core)
         entityType == "task" && targetType == "group" -> moveTaskToGroup(id, targetId, core)
+        entityType == "task" && targetType == "task" -> moveTaskToParent(id, targetId, core)
+        entityType == "task" && targetType == "root" -> promoteTaskToRoot(id, core)
         entityType == "group" && targetType == "checklist" -> moveGroupToChecklist(id, targetId, core)
         else -> """{"error":"不支持的移动操作：$entityType → $targetType"}"""
     }
@@ -938,6 +957,22 @@ object MoveTool : Tool {
                     }
                     entityType == "group" && targetType == "checklist" -> {
                         val result = moveGroupToChecklist(id, targetId, core)
+                        results.put(JSONObject(result).apply {
+                            put("id", id)
+                            put("success", true)
+                        })
+                        successCount++
+                    }
+                    entityType == "task" && targetType == "task" -> {
+                        val result = moveTaskToParent(id, targetId, core)
+                        results.put(JSONObject(result).apply {
+                            put("id", id)
+                            put("success", true)
+                        })
+                        successCount++
+                    }
+                    entityType == "task" && targetType == "root" -> {
+                        val result = promoteTaskToRoot(id, core)
                         results.put(JSONObject(result).apply {
                             put("id", id)
                             put("success", true)
@@ -1033,6 +1068,44 @@ object MoveTool : Tool {
             put("success", true)
             put("group", groupToJson(group))
             put("message", "分组已移动到新清单，组内任务已同步更新")
+        }.toString()
+    }
+
+    /**
+     * 将任务移到另一个任务下，成为其子任务。
+     * Rust 层 updateTaskParent 会自动继承新父任务的 category_id/group_id 并级联子孙。
+     * 校验：不能把自己变成自己的子任务。
+     */
+    private fun moveTaskToParent(taskId: String, parentTaskId: String, core: NionCore): String {
+        // 防止自引用
+        if (taskId == parentTaskId) {
+            return """{"error":"不能把任务变成自己的子任务"}"""
+        }
+        // 查询目标任务，确认存在且返回名称用于提示
+        val parentTask = core.getTask(parentTaskId)
+        core.updateTaskParent(taskId, parentTaskId)
+        // 查询更新后的任务用于返回
+        val task = core.getTask(taskId)
+        return JSONObject().apply {
+            put("success", true)
+            put("task", taskToJson(task))
+            put("message", "任务已成为「${parentTask.title}」的子任务")
+        }.toString()
+    }
+
+    /**
+     * 将子任务提升为独立主任务（parent_id 置空）。
+     * Rust 层 updateTaskParent(id, None) 不会改变 category_id/group_id，
+     * 所以提升后的任务仍留在原来的清单/分组中。
+     */
+    private fun promoteTaskToRoot(taskId: String, core: NionCore): String {
+        core.updateTaskParent(taskId, null)
+        // 查询更新后的任务用于返回
+        val task = core.getTask(taskId)
+        return JSONObject().apply {
+            put("success", true)
+            put("task", taskToJson(task))
+            put("message", "任务已提升为独立主任务")
         }.toString()
     }
 }

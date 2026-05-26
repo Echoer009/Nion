@@ -49,6 +49,7 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Bookmarks
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -83,8 +84,10 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.lifecycle.viewModelScope
 import android.graphics.BitmapFactory
 import android.net.Uri
+import kotlinx.coroutines.launch
 import uniffi.nion_core.ConversationData
 import org.json.JSONArray
 import com.echonion.nion.ui.companion.tools.MemoryTool
@@ -129,25 +132,35 @@ fun CompanionSidebar(
     viewModel: CompanionViewModel = viewModel(factory = CompanionViewModel.Factory),
     modifier: Modifier = Modifier,
 ) {
-    // 初始化完成后才决定显示哪个页面，避免启动闪烁
-    if (!viewModel.isInitialized) {
-        // 初始化中显示空白，实际只是瞬间
-        return
-    }
 
     // 面板当前模式：null=自动根据 API 配置决定，其余为手动切换的面板
     var panelMode by remember { mutableStateOf<String?>(null) }
 
-    // 根据 API 配置和模式决定显示哪个界面
+    /**
+     * 根据 API 配置和模式决定显示哪个界面。
+     *
+     * 关键：loadSettings 改为异步后，首次组合时 isInitialized=false，
+     * 此时 actualMode = "loading"，AnimatedContent 始终在组合树中。
+     * 当 IO 线程完成后 isInitialized 变为 true，actualMode 切换到
+     * 真实模式（"chat"/"setup"），AnimatedContent 自身的 targetState 变化
+     * 会驱动内部重组合——不依赖外部 DualPanelLayout 的重组合传播。
+     */
     val actualMode = when {
+        // 初始化未完成 → 显示空白占位，确保 AnimatedContent 始终在组合树中
+        !viewModel.isInitialized -> "loading"
         panelMode == "profile" -> "profile"
         panelMode == "setup" -> "setup"
         panelMode == "history" -> "history"
         panelMode == "switch" -> "switch"
         panelMode == "memories" -> "memories"
+        panelMode == "preferences" -> "preferences"
         viewModel.currentProvider != null && viewModel.apiKey != null -> "chat"
+        // 兜底：API 未配置时显示设置引导页
         else -> "setup"
     }
+
+    // 调试日志：追踪面板为何停在 loading 而不切换到实际内容
+    android.util.Log.d("NionCompanion", "[Sidebar] actualMode=$actualMode, isInitialized=${viewModel.isInitialized}, isDataLoading=${viewModel.isDataLoading}, panelMode=$panelMode, provider=${viewModel.currentProvider?.name}")
 
     // 当从设置页保存配置后（currentProvider 从 null 变为非 null），自动回到聊天页
     LaunchedEffect(viewModel.currentProvider) {
@@ -173,15 +186,24 @@ fun CompanionSidebar(
         tonalElevation = 2.dp,
     ) {
         /**
-         * 统一 AnimatedContent 替换原来的多个 AnimatedVisibility 堆叠。
-         * 所有面板模式（chat/setup/profile/history/switch）之间用同一套
-         * crossfade 动画过渡，与日程页日历展开/收回的 transitionSpec 一致。
+         * AnimatedContent 始终在组合树中（无条件守卫），通过 targetState 的
+         * "loading" 状态处理异步初始化阶段。
+         *
+         * targetState 变化链：
+         *   启动 → "loading" → isInitialized=true → "chat"/"setup"
+         *
+         * 所有面板模式（chat/setup/profile/history/switch/preferences/memories）
+         * 之间用同一套 crossfade 动画过渡。loading 状态不参与动画。
          */
         AnimatedContent(
+            modifier = Modifier.fillMaxSize(),
             targetState = actualMode,
             transitionSpec = {
-                if (targetState != "chat" && targetState != "setup" && targetState != "profile") {
-                    // 展开子面板（history/switch/memories）：子面板淡入(300ms)，主面板淡出(180ms)
+                // loading 进出不应用动画（duration=0），主面板/子面板之间才应用淡入淡出
+                if (targetState == "loading" || initialState == "loading") {
+                    fadeIn(tween(0)) togetherWith fadeOut(tween(0))
+                } else if (targetState != "chat" && targetState != "setup" && targetState != "profile") {
+                    // 展开子面板（history/switch/memories/preferences）：子面板淡入(300ms)，主面板淡出(180ms)
                     (fadeIn(tween(300, easing = FastOutSlowInEasing))
                         togetherWith fadeOut(tween(180, easing = FastOutSlowInEasing)))
                         .using(SizeTransform(clip = false))
@@ -195,6 +217,12 @@ fun CompanionSidebar(
             label = "panelMode",
         ) { mode ->
             when (mode) {
+                /**
+                 * 异步初始化未完成时的占位：透明的空白面板。
+                 * isInitialized 变为 true 后，targetState 切换到真实模式，
+                 * AnimatedContent 自身驱动内部重组，不依赖外层 DualPanelLayout。
+                 */
+                "loading" -> Box(modifier = Modifier.fillMaxSize())
                 "history" -> HistoryPanel(
                     conversations = viewModel.conversationList,
                     currentConversationId = viewModel.currentConversationId,
@@ -221,6 +249,12 @@ fun CompanionSidebar(
                 "profile" -> ProfileContent(
                     viewModel = viewModel,
                     onBack = { panelMode = null },
+                    onMemoriesClick = { panelMode = "memories" },
+                    onPreferencesClick = { panelMode = "preferences" },
+                )
+                "preferences" -> PreferencesPanel(
+                    viewModel = viewModel,
+                    onClose = { panelMode = "profile" },
                 )
                 "memories" -> MemoriesPanel(
                     viewModel = viewModel,
@@ -238,9 +272,15 @@ fun CompanionSidebar(
                     onNewChat = {
                         viewModel.startNewConversation()
                     },
-                    onHistoryClick = { panelMode = "history" },
+                    onHistoryClick = {
+                        // 打开历史面板前刷新列表，确保显示最新的对话记录
+                        // loadConversationList 是 suspend 函数，需要在协程中调用
+                        viewModel.viewModelScope.launch {
+                            viewModel.loadConversationList()
+                        }
+                        panelMode = "history"
+                    },
                     onSwitchClick = { panelMode = "switch" },
-                    onMemoriesClick = { panelMode = "memories" },
                 )
             }
         }
@@ -329,12 +369,14 @@ private fun CompanionAvatar(
 ) {
     val context = LocalContext.current
     // 从 URI 加载 Bitmap，avatarUri 变化时重新加载
+    // 使用 inSampleSize=4 降采样，避免大图全尺寸解码导致内存暴涨和主线程阻塞
     val bitmap = remember(avatarUri) {
         if (avatarUri != null) {
             try {
                 val uri = Uri.parse(avatarUri)
                 context.contentResolver.openInputStream(uri)?.use { stream ->
-                    BitmapFactory.decodeStream(stream)
+                    val options = BitmapFactory.Options().apply { inSampleSize = 4 }
+                    BitmapFactory.decodeStream(stream, null, options)
                 }
             } catch (_: Exception) { null }
         } else null
@@ -369,22 +411,22 @@ private fun CompanionAvatar(
 }
 
 /**
- * 伙伴信息编辑页 —— 在侧边栏内全屏展示，替代聊天/设置界面。
- * 返回即自动保存：名字和提示词的修改在点击返回时持久化。
+ * 伙伴资料编辑页面 —— 编辑名字、系统提示词、头像。
  *
  * @param viewModel 伙伴 ViewModel
- * @param onBack 返回上一页的回调，调用前会自动保存当前编辑内容
+ * @param onBack 点击返回按钮时触发，保存编辑内容并返回上一级
+ * @param onMemoriesClick 点击记忆按钮时触发，打开记忆面板
+ * @param onPreferencesClick 点击"关于你"按钮时触发，打开用户偏好面板
  */
 @Composable
 private fun ProfileContent(
     viewModel: CompanionViewModel,
     onBack: () -> Unit,
+    onMemoriesClick: () -> Unit,
+    onPreferencesClick: () -> Unit,
 ) {
     var name by remember { mutableStateOf(viewModel.companionName) }
     var prompt by remember { mutableStateOf(viewModel.companionPrompt) }
-
-    // 添加偏好对话框的状态：null 表示隐藏，非 null 表示正在添加
-    var showAddPrefDialog by remember { mutableStateOf(false) }
 
     // 系统图片选择器：选取头像图片
     val context = LocalContext.current
@@ -415,17 +457,40 @@ private fun ProfileContent(
             .verticalScroll(rememberScrollState())
             .padding(vertical = 24.dp, horizontal = 16.dp),
     ) {
-        // 顶部导航栏：返回按钮 + 居中占位
+        // 顶部导航栏：返回按钮 + 居中占位 + 右侧功能按钮
         Row(
             modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
+            // 左侧：返回按钮
             IconButton(onClick = backAndSave) {
                 Icon(
                     Icons.Default.ArrowBack,
                     contentDescription = "返回并保存",
                     modifier = Modifier.size(20.dp),
                 )
+            }
+            // 右侧按钮组：关于你 + 记忆
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // "关于你"按钮：打开用户偏好面板，查看和编辑 Nion 了解的用户偏好
+                IconButton(onClick = onPreferencesClick) {
+                    Icon(
+                        Icons.Outlined.Bookmarks,
+                        contentDescription = "关于你",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // 记忆按钮：打开 Nion 的笔记本，查看 AI 自动记录的关于用户的信息
+                IconButton(onClick = onMemoriesClick) {
+                    Icon(
+                        Icons.Outlined.AutoAwesome,
+                        contentDescription = "记忆",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
 
@@ -474,77 +539,6 @@ private fun ProfileContent(
         )
 
         Spacer(modifier = Modifier.height(16.dp))
-
-        // ── 用户偏好管理区域 ──
-        // 标题行：标题 + 添加按钮
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "用户偏好",
-                style = MaterialTheme.typography.titleSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            IconButton(
-                onClick = { showAddPrefDialog = true },
-                modifier = Modifier.size(32.dp),
-            ) {
-                Icon(
-                    Icons.Default.Add,
-                    contentDescription = "添加偏好",
-                    modifier = Modifier.size(18.dp),
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(4.dp))
-
-        Text(
-            "AI 会自动记住你表达的偏好，你也可以手动添加",
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 偏好列表 —— 按分类显示为带颜色标签的卡片
-        val prefs = viewModel.userPreferences
-        if (prefs.length() == 0) {
-            // 空状态提示
-            Text(
-                "暂无偏好记录",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
-                modifier = Modifier.padding(vertical = 8.dp),
-            )
-        } else {
-            Column(
-                modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(6.dp),
-            ) {
-                for (index in 0 until prefs.length()) {
-                    val pref = prefs.getJSONObject(index)
-                    PreferenceItem(
-                        pref = pref,
-                        onDelete = { viewModel.removePreference(pref.getString("id")) },
-                    )
-                }
-            }
-        }
-    }
-
-    // 添加偏好的弹窗
-    if (showAddPrefDialog) {
-        AddPreferenceDialog(
-            onDismiss = { showAddPrefDialog = false },
-            onConfirm = { content, category ->
-                viewModel.addPreference(content, category)
-                showAddPrefDialog = false
-            },
-        )
     }
 }
 
@@ -720,7 +714,6 @@ private fun ChatContent(
     onNewChat: () -> Unit,
     onHistoryClick: () -> Unit,
     onSwitchClick: () -> Unit,
-    onMemoriesClick: () -> Unit,
 ) {
     // 用 ViewModel 保存的滚动位置初始化 LazyListState
     // 当面板因打开左侧清单被移出组合再重新进入时，自动恢复到上次位置
@@ -796,17 +789,8 @@ private fun ChatContent(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
             }
-            // 右侧按钮组：记忆 + 新对话 + 历史记录 + 切换配置
+            // 右侧按钮组：新对话 + 历史记录 + 切换配置
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // 记忆按钮：查看 Nion 记住的关于用户的信息
-                IconButton(onClick = onMemoriesClick) {
-                    Icon(
-                        Icons.Outlined.AutoAwesome,
-                        contentDescription = "记忆",
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
                 // 新对话按钮：保存当前对话并开始新对话
                 IconButton(onClick = onNewChat) {
                     Icon(
@@ -1485,6 +1469,213 @@ private fun ConfigItem(
 }
 
 /**
+ * 用户偏好面板（"关于你"）—— 展示和管理用户的所有偏好。
+ * 支持按分类筛选、手动添加偏好、删除偏好。
+ *
+ * @param viewModel 伙伴 ViewModel
+ * @param onClose 点击返回按钮时触发，返回伙伴资料编辑页面
+ */
+@Composable
+private fun PreferencesPanel(
+    viewModel: CompanionViewModel,
+    onClose: () -> Unit,
+) {
+    // 当前筛选的分类，null 表示显示全部
+    var filterCategory by remember { mutableStateOf<String?>(null) }
+    // 添加偏好对话框的状态：false 表示隐藏
+    var showAddPrefDialog by remember { mutableStateOf(false) }
+
+    // 偏好分类选项列表
+    val categories = listOf(
+        "style" to "风格",
+        "behavior" to "行为",
+        "format" to "格式",
+        "other" to "其他",
+    )
+
+    // 偏好数量统计
+    val prefs = viewModel.userPreferences
+    val totalCount = prefs.length()
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(vertical = 24.dp, horizontal = 16.dp),
+    ) {
+        // 顶部导航栏：返回按钮 + 标题 + 添加按钮
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onClose) {
+                Icon(
+                    Icons.Default.ArrowBack,
+                    contentDescription = "返回",
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            // 标题 + 偏好数量副标题
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "关于你",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    if (totalCount == 0) "暂无偏好" else "共 $totalCount 条偏好",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+            }
+            // 右上角添加偏好按钮
+            IconButton(onClick = { showAddPrefDialog = true }) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = "添加偏好",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 说明文本
+        Text(
+            "AI 会自动记住你表达的偏好，你也可以手动添加",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+        )
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 分类筛选标签 —— 横向可滚动的分类标签行
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            // "全部"标签
+            val isAll = filterCategory == null
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = if (isAll) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.clickable { filterCategory = null },
+            ) {
+                Text(
+                    "全部",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isAll) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+            // 各分类标签 —— 仅显示有偏好的分类
+            categories.forEach { (key, label) ->
+                val count = countPreferencesByCategory(prefs, key)
+                if (count > 0) {
+                    val isSelected = filterCategory == key
+                    // 分类 → 颜色映射：风格=紫，行为=蓝，格式=绿，其他=灰
+                    val color = when (key) {
+                        "style" -> Color(0xFF6750A4)
+                        "behavior" -> Color(0xFF0061A4)
+                        "format" -> Color(0xFF006E1C)
+                        else -> Color(0xFF757575)
+                    }
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isSelected) color
+                        else MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.clickable { filterCategory = key },
+                    ) {
+                        Text(
+                            "$label ($count)",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (isSelected) Color.White
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+
+        // 偏好列表
+        if (totalCount == 0) {
+            // 空状态：居中提示，引导用户与 AI 对话产生偏好
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+            ) {
+                Icon(
+                    Icons.Outlined.Bookmarks,
+                    contentDescription = null,
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
+                )
+                Spacer(modifier = Modifier.height(12.dp))
+                Text(
+                    "还没有任何偏好",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                )
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    "和 ${viewModel.companionName} 聊天时，AI 会自动记住你的偏好",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                )
+            }
+        } else {
+            // 按筛选条件过滤后的偏好列表
+            val filteredPrefs = filterPreferences(prefs, filterCategory)
+            if (filteredPrefs.isEmpty()) {
+                // 该分类下无偏好
+                Text(
+                    "该分类下暂无偏好",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.padding(vertical = 16.dp),
+                )
+            } else {
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    items(filteredPrefs.size) { index ->
+                        val pref = filteredPrefs[index]
+                        PreferenceItem(
+                            pref = pref,
+                            onDelete = { viewModel.removePreference(pref.getString("id")) },
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    // 添加偏好的弹窗
+    if (showAddPrefDialog) {
+        AddPreferenceDialog(
+            onDismiss = { showAddPrefDialog = false },
+            onConfirm = { content, category ->
+                viewModel.addPreference(content, category)
+                showAddPrefDialog = false
+            },
+        )
+    }
+}
+
+/**
  * 记忆管理面板 —— 展示 Nion 记住的关于用户的所有事实性信息。
  *
  * 以分类标签 + 内容列表的形式展示记忆，支持按分类筛选和逐条删除。
@@ -1781,6 +1972,41 @@ private fun filterMemories(memories: JSONArray, category: String?): List<org.jso
         val mem = memories.getJSONObject(i)
         if (category == null || mem.optString("category", "other") == category) {
             result.add(mem)
+        }
+    }
+    return result
+}
+
+/**
+ * 统计指定分类下的偏好数量。
+ *
+ * @param prefs 偏好 JSONArray
+ * @param category 要统计的分类键
+ * @return 该分类下的偏好条数
+ */
+private fun countPreferencesByCategory(prefs: JSONArray, category: String): Int {
+    var count = 0
+    for (i in 0 until prefs.length()) {
+        if (prefs.getJSONObject(i).optString("category", "other") == category) {
+            count++
+        }
+    }
+    return count
+}
+
+/**
+ * 按分类筛选偏好列表，返回过滤后的列表。
+ *
+ * @param prefs 完整的偏好 JSONArray
+ * @param category 要筛选的分类键，null 表示返回全部
+ * @return 过滤后的 JSONObject 列表
+ */
+private fun filterPreferences(prefs: JSONArray, category: String?): List<org.json.JSONObject> {
+    val result = mutableListOf<org.json.JSONObject>()
+    for (i in 0 until prefs.length()) {
+        val pref = prefs.getJSONObject(i)
+        if (category == null || pref.optString("category", "other") == category) {
+            result.add(pref)
         }
     }
     return result

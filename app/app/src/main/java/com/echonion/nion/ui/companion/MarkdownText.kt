@@ -70,9 +70,6 @@ fun MarkdownText(
 ) {
     val textColor = style.color
 
-    // 完整文本日志，用于调试 Markdown 解析（不受流式 delta 影响）
-    Log.d(TAG, "=== FULL CONTENT START ===\n$content\n=== FULL CONTENT END ===")
-
     val blocks = try {
         parseBlocks(content)
     } catch (e: Exception) {
@@ -97,6 +94,35 @@ fun MarkdownText(
         }
     }
 }
+
+// ──────────── 预编译正则（避免每次 parseBlocks 调用时重新编译） ────────────
+
+/** 标题行正则：`# ` ~ `###### ` */
+private val HEADER_REGEX = Regex("""^(#{1,6})\s+(.+)$""")
+
+/** 任务列表行正则：`- [ ]` 或 `- [x]` */
+private val TASK_LIST_REGEX = Regex("""^[-*]\s+\[[ xX]\]\s+.*""")
+
+/** 任务列表前缀剥离正则 */
+private val TASK_PREFIX_REGEX = Regex("""^[-*]\s+\[[ xX]\]\s+""")
+
+/** 无序列表行正则：`- ` 或 `* ` */
+private val UNORDERED_LIST_REGEX = Regex("""^[-*]\s+.+""")
+
+/** 无序列表前缀剥离正则 */
+private val UNORDERED_PREFIX_REGEX = Regex("""^[-*]\s+""")
+
+/** 有序列表行正则：`1. ` */
+private val ORDERED_LIST_REGEX = Regex("""^\d+\.\s+.+""")
+
+/** 有序列表前缀剥离正则 */
+private val ORDERED_PREFIX_REGEX = Regex("""^\d+\.\s+""")
+
+/** 水平分割线正则：`---`、`***`、`___` */
+private val HR_REGEX = Regex("""^[-*_]{3,}\s*$""")
+
+/** 段落检测：标题行 */
+private val PARAGRAPH_HEADER_REGEX = Regex("""^(#{1,6}\s)""")
 
 // ──────────── 块模型 ────────────
 
@@ -190,8 +216,8 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
             }
 
             // ── 标题 ──
-            Regex("""^(#{1,6})\s+(.+)$""").find(line) != null -> {
-                val match = Regex("""^(#{1,6})\s+(.+)$""").find(line)!!
+            HEADER_REGEX.find(line) != null -> {
+                val match = HEADER_REGEX.find(line)!!
                 val level = match.groupValues[1].length
                 val text = match.groupValues[2].trim()
                 blocks.add(MdBlock.Header(level, text))
@@ -227,13 +253,13 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
             }
 
             // ── 任务列表 - [ ] / - [x] ──
-            line.matches(Regex("""^[-*]\s+\[[ xX]\]\s+.*""")) -> {
+            TASK_LIST_REGEX.matches(line) -> {
                 val items = mutableListOf<TaskItem>()
                 // 连续收集任务列表行
-                while (i < lines.size && lines[i].matches(Regex("""^[-*]\s+\[[ xX]\]\s+.*"""))) {
+                while (i < lines.size && TASK_LIST_REGEX.matches(lines[i])) {
                     val checked = lines[i].contains("[x]", ignoreCase = true)
                     // 去除 `- [x] ` 或 `- [ ] ` 前缀
-                    val text = lines[i].replaceFirst(Regex("""^[-*]\s+\[[ xX]\]\s+"""), "")
+                    val text = TASK_PREFIX_REGEX.replaceFirst(lines[i], "")
                     items.add(TaskItem(checked = checked, text = text))
                     i++
                 }
@@ -241,27 +267,27 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
             }
 
             // ── 无序列表（不匹配任务列表的 - [ ] 格式） ──
-            line.matches(Regex("""^[-*]\s+.+""")) -> {
+            UNORDERED_LIST_REGEX.matches(line) -> {
                 val items = mutableListOf<String>()
-                while (i < lines.size && lines[i].matches(Regex("""^[-*]\s+.+"""))) {
-                    items.add(lines[i].replaceFirst(Regex("""^[-*]\s+"""), ""))
+                while (i < lines.size && UNORDERED_LIST_REGEX.matches(lines[i])) {
+                    items.add(UNORDERED_PREFIX_REGEX.replaceFirst(lines[i], ""))
                     i++
                 }
                 blocks.add(MdBlock.ListBlock(ordered = false, items = items))
             }
 
             // ── 有序列表 ──
-            line.matches(Regex("""^\d+\.\s+.+""")) -> {
+            ORDERED_LIST_REGEX.matches(line) -> {
                 val items = mutableListOf<String>()
-                while (i < lines.size && lines[i].matches(Regex("""^\d+\.\s+.+"""))) {
-                    items.add(lines[i].replaceFirst(Regex("""^\d+\.\s+"""), ""))
+                while (i < lines.size && ORDERED_LIST_REGEX.matches(lines[i])) {
+                    items.add(ORDERED_PREFIX_REGEX.replaceFirst(lines[i], ""))
                     i++
                 }
                 blocks.add(MdBlock.ListBlock(ordered = true, items = items))
             }
 
             // ── 水平分割线 ──
-            line.matches(Regex("""^[-*_]{3,}\s*$""")) -> {
+            HR_REGEX.matches(line) -> {
                 blocks.add(MdBlock.HorizontalRule)
                 i++
             }
@@ -277,11 +303,11 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
                 while (i < lines.size &&
                     lines[i].isNotBlank() &&
                     !lines[i].trimStart().startsWith("```") &&
-                    !lines[i].matches(Regex("""^(#{1,6}\s)""")) &&
+                    !PARAGRAPH_HEADER_REGEX.matches(lines[i]) &&
                     !isTableLine(lines[i]) &&
                     !lines[i].trimStart().startsWith(">") &&
-                    !lines[i].matches(Regex("""^[-*]\s""")) &&
-                    !lines[i].matches(Regex("""^\d+\.\s"""))
+                    !UNORDERED_LIST_REGEX.matches(lines[i]) &&
+                    !ORDERED_LIST_REGEX.matches(lines[i])
                 ) {
                     paragraphLines.add(lines[i])
                     i++

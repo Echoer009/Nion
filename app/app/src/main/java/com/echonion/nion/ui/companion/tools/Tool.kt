@@ -87,6 +87,8 @@ data class ToolResult(
 class ToolExecutor(
     private val core: NionCore,
     private val onDataChanged: ((type: String) -> Unit)? = null,
+    /** 提醒调度回调，当工具修改了 reminder/recurrence 字段时触发，传入 task_id */
+    private val onScheduleReminder: ((taskId: String) -> Unit)? = null,
 ) {
 
     /**
@@ -151,6 +153,13 @@ class ToolExecutor(
                 if (changeType.isNotEmpty()) {
                     onDataChanged?.invoke(changeType)
                 }
+                // 检查是否需要重新调度提醒闹钟
+                if (onScheduleReminder != null && needsReschedule(name, params)) {
+                    val taskId = extractTaskId(name, params, result)
+                    if (taskId != null) {
+                        onScheduleReminder.invoke(taskId)
+                    }
+                }
             }
         } catch (e: Exception) {
             ToolResult(
@@ -158,5 +167,39 @@ class ToolExecutor(
                 data = """{"error":"工具执行异常: ${e.message}"}""",
             )
         }
+    }
+
+    /**
+     * 判断工具执行是否可能影响了提醒设置，需要重新调度闹钟。
+     */
+    private fun needsReschedule(toolName: String, params: JSONObject): Boolean {
+        return when (toolName) {
+            "update" -> params.has("reminder") || params.has("recurrence_rule") || params.has("recurrence_reminder_time")
+            "create" -> params.has("reminder") || params.has("recurrence_rule") || params.has("recurrence_reminder_time")
+            "manage" -> true // manage 工具的 set_recurrence/remove_recurrence 都涉及提醒
+            "delete" -> true // 删除任务需要取消闹钟
+            else -> false
+        }
+    }
+
+    /**
+     * 从工具参数或执行结果中提取任务 ID。
+     */
+    private fun extractTaskId(toolName: String, params: JSONObject, result: String): String? {
+        // 大多数工具通过 id 或 task_id 参数指定任务
+        val paramId = params.optString("id", "").takeIf { it.isNotEmpty() }
+            ?: params.optString("task_id", "").takeIf { it.isNotEmpty() }
+        if (paramId != null) return paramId
+
+        // create 工具的 ID 在返回结果中
+        if (toolName == "create") {
+            return try {
+                val json = JSONObject(result)
+                json.optString("id", "").takeIf { it.isNotEmpty() }
+                    ?: json.optJSONObject("task")?.optString("id", "")?.takeIf { it.isNotEmpty() }
+            } catch (_: Exception) { null }
+        }
+
+        return null
     }
 }
