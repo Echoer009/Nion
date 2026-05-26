@@ -260,9 +260,8 @@ fun TaskScreen(
                         onRemoveRecurrence = {
                             viewModel.removeRecurrence(taskId)
                         },
-                        /** 点击开始专注：关闭详情层，将预选时长传递给外部 */
+                        /** 点击开始专注：直接导航到专注页，不关闭详情浮层，避免任务列表闪现 */
                         onStartFocus = { durationMinutes ->
-                            expandedTaskId = null
                             onStartFocus(task.id, task.title, durationMinutes)
                         },
                         sharedElementModifier = Modifier.sharedElement(
@@ -985,7 +984,13 @@ private fun TaskDetailOverlay(
             modifier = sharedElementModifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
-                .heightIn(max = maxCardHeight),
+                .heightIn(max = maxCardHeight)
+                // 消费卡片上的点击事件，阻止穿透到外层遮罩触发 onDismiss
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                ),
             shape = RoundedCornerShape(24.dp),
             color = MaterialTheme.colorScheme.surfaceContainerLowest,
             tonalElevation = 12.dp,
