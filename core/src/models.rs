@@ -74,6 +74,69 @@ pub struct FocusStats {
     pub days: i32,
 }
 
+/// 每日任务完成记录 —— 追踪每日循环任务在每个日期的完成状态
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct DailyCompletion {
+    /// 关联的模板任务 ID
+    pub task_id: String,
+    /// 完成日期，格式 "YYYY-MM-DD"
+    pub date: String,
+    /// 完成时刻，RFC 3339 格式
+    pub completed_at: String,
+}
+
+/// 带日期完成状态的任务 —— 用于每日视图返回
+/// 每日任务的"完成"不再看 tasks.status，而是看 daily_completions 中有无记录
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct DailyTaskStatus {
+    /// 原始任务数据
+    pub task: TaskData,
+    /// 指定日期是否已完成（每日任务查 completions 表，普通任务看 status）
+    pub completed_for_date: bool,
+    /// 完成时间，仅当 completed_for_date = true 时有值
+    pub completion_date: Option<String>,
+}
+
+/// 过期的每日任务 —— 某个每日模板在某个历史日期没有完成记录
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct OverdueDailyTask {
+    /// 原始任务数据（模板）
+    pub task: TaskData,
+    /// 哪一天过期的，格式 "YYYY-MM-DD"
+    pub overdue_date: String,
+}
+
+/// 日历日期标记 —— 用于日程页面标记日历上的日期状态
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct CalendarDateMarker {
+    /// 日期，格式 "YYYY-MM-DD"
+    pub date: String,
+    /// 该日期有多少个任务
+    pub task_count: i32,
+    /// 该日期已完成多少个任务
+    pub completed_count: i32,
+    /// 是否有过期的每日任务
+    pub has_overdue: bool,
+}
+
+/// 任务附件 —— 存储关联到任务的图片或文件
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct AttachmentData {
+    pub id: String,
+    /// 所属任务的 ID
+    pub task_id: String,
+    /// 原始文件名（用于显示）
+    pub file_name: String,
+    /// 应用内部存储中的文件路径（绝对路径）
+    pub file_path: String,
+    /// MIME 类型，如 "image/jpeg"、"application/pdf" 等
+    pub mime_type: String,
+    /// 文件大小（字节）
+    pub file_size: i64,
+    /// 创建时间，RFC 3339 格式
+    pub created_at: String,
+}
+
 /// 对话记录 —— 存储一次完整的聊天会话
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
 pub struct ConversationData {

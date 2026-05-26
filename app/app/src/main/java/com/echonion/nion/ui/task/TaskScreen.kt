@@ -49,11 +49,15 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AddCircleOutline
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.ArrowDropUp
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -85,11 +89,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -97,12 +103,15 @@ import androidx.compose.ui.graphics.asComposeRenderEffect
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.SubcomposeLayout
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.zIndex
+import kotlinx.coroutines.launch
 import com.echonion.nion.ui.components.DualPanelState
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
@@ -124,11 +133,66 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
 fun TaskScreen(
     dualState: DualPanelState,
     viewModel: TaskViewModel,
-    /** 用户从任务详情点击"开始专注"时触发，传入 (任务ID, 任务标题) */
-    onStartFocus: (taskId: String, taskTitle: String) -> Unit = { _, _ -> },
+    /** 用户从任务详情点击"开始专注"时触发，传入 (任务ID, 任务标题, 预选时长分钟) */
+    onStartFocus: (taskId: String, taskTitle: String, durationMinutes: Int) -> Unit = { _, _, _ -> },
 ) {
     var showAddSheet by remember { mutableStateOf(false) }
     var expandedTaskId by remember { mutableStateOf<String?>(null) }
+
+    // ===== 附件相关状态 =====
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    // 新建任务时的临时附件列表（任务创建前暂存在内存中）
+    var pendingAttachments by remember { mutableStateOf<List<AttachmentUiItem>>(emptyList()) }
+    // 记录临时附件的完整信息（用于创建任务后批量写入数据库）
+    var pendingAttachmentData by remember { mutableStateOf<List<PickedFileInfo>>(emptyList()) }
+    // 当前查看详情的任务的附件列表
+    var detailAttachments by remember { mutableStateOf<List<AttachmentUiItem>>(emptyList()) }
+    // 图片预览状态：非 null 时显示全屏预览
+    var previewAttachment by remember { mutableStateOf<AttachmentUiItem?>(null) }
+
+    // 新建任务用的附件选择器
+    val addAttachmentPicker = rememberAttachmentPicker { fileInfo ->
+        val id = java.util.UUID.randomUUID().toString()
+        val item = AttachmentUiItem(
+            id = id,
+            fileName = fileInfo.fileName,
+            filePath = fileInfo.filePath,
+            mimeType = fileInfo.mimeType,
+            fileSize = fileInfo.fileSize,
+            isImage = fileInfo.mimeType.startsWith("image/"),
+        )
+        pendingAttachments = pendingAttachments + item
+        pendingAttachmentData = pendingAttachmentData + fileInfo
+    }
+
+    // 任务详情用的附件选择器
+    val detailAttachmentPicker = rememberAttachmentPicker { fileInfo ->
+        expandedTaskId?.let { taskId ->
+            viewModel.addAttachment(taskId, fileInfo.filePath, fileInfo.fileName, fileInfo.mimeType, fileInfo.fileSize)
+            // 刷新附件列表
+            scope.launch {
+                detailAttachments = viewModel.getAttachments(taskId)
+            }
+        }
+    }
+
+    // 当任务详情打开时，加载该任务的附件列表
+    LaunchedEffect(expandedTaskId) {
+        if (expandedTaskId != null) {
+            detailAttachments = viewModel.getAttachments(expandedTaskId!!)
+        } else {
+            detailAttachments = emptyList()
+        }
+    }
+
+    // 当新建任务浮层关闭时，清空临时附件
+    LaunchedEffect(showAddSheet) {
+        if (!showAddSheet) {
+            pendingAttachments = emptyList()
+            pendingAttachmentData = emptyList()
+        }
+    }
 
     // 提升到 AnimatedContent 外部，跨过渡保留滚动位置和拖拽状态
     val listState = rememberLazyListState()
@@ -196,10 +260,10 @@ fun TaskScreen(
                         onRemoveRecurrence = {
                             viewModel.removeRecurrence(taskId)
                         },
-                        /** 点击开始专注：关闭详情层，通知外部切换到专注页面 */
-                        onStartFocus = {
+                        /** 点击开始专注：关闭详情层，将预选时长传递给外部 */
+                        onStartFocus = { durationMinutes ->
                             expandedTaskId = null
-                            onStartFocus(task.id, task.title)
+                            onStartFocus(task.id, task.title, durationMinutes)
                         },
                         sharedElementModifier = Modifier.sharedElement(
                             sharedContentState = rememberSharedContentState("task_detail_$taskId"),
@@ -211,6 +275,18 @@ fun TaskScreen(
                                 )
                             },
                         ),
+                        /** 附件相关参数 */
+                        attachments = detailAttachments,
+                        onPickImage = { detailAttachmentPicker.pickImage() },
+                        onPickFile = { detailAttachmentPicker.pickFile() },
+                        onRemoveAttachment = { attachmentId ->
+                            viewModel.removeAttachment(attachmentId)
+                            // 刷新附件列表
+                            scope.launch {
+                                detailAttachments = viewModel.getAttachments(taskId)
+                            }
+                        },
+                        onPreviewImage = { previewAttachment = it },
                     )
                 }
             } else {
@@ -286,7 +362,20 @@ fun TaskScreen(
                         AddTaskOverlay(
                             onDismiss = { showAddSheet = false },
                             onAdd = { title, desc, priority, dueDate, recurrenceRule, recurrenceReminderTime ->
-                                viewModel.createTask(title, desc, priority, dueDate, recurrenceRule, recurrenceReminderTime)
+                                val pending = pendingAttachmentData.toList()
+                                viewModel.createTask(
+                                    title = title,
+                                    description = desc,
+                                    priority = priority,
+                                    dueDate = dueDate,
+                                    recurrenceRule = recurrenceRule,
+                                    recurrenceReminderTime = recurrenceReminderTime,
+                                ) { newTaskId ->
+                                    // 任务创建成功后，批量关联临时附件
+                                    if (pending.isNotEmpty()) {
+                                        viewModel.commitPendingAttachments(newTaskId, pending)
+                                    }
+                                }
                                 showAddSheet = false
                             },
                             sharedBoundsModifier = Modifier.sharedBounds(
@@ -299,6 +388,18 @@ fun TaskScreen(
                                     )
                                 },
                             ),
+                            pendingAttachments = pendingAttachments,
+                            onPickImage = { addAttachmentPicker.pickImage() },
+                            onPickFile = { addAttachmentPicker.pickFile() },
+                            onRemoveAttachment = { id ->
+                                // 从临时列表中移除
+                                val idx = pendingAttachments.indexOfFirst { it.id == id }
+                                if (idx >= 0) {
+                                    pendingAttachments = pendingAttachments.toMutableList().also { it.removeAt(idx) }
+                                    pendingAttachmentData = pendingAttachmentData.toMutableList().also { it.removeAt(idx) }
+                                }
+                            },
+                            onPreviewImage = { previewAttachment = it },
                         )
                     }
                 }
@@ -409,13 +510,19 @@ private fun TaskScreenContent(
 }
 
 /**
- * 添加任务浮层 —— 从 FAB 位置展开为居中的任务创建表单。
+ * 新建任务浮层 —— 从 FAB 位置 morph 展开为居中的任务创建表单。
  *
- * 米白色卡片 + 半透明遮罩，高斯模糊背景。
+ * 内部使用 AnimatedContent 在「表单」和「日期选择」两个页面之间切换，
+ * 共享同一个卡片容器（sharedBounds 与 FAB 做动画）。
  *
  * @param onDismiss 点击外部区域关闭回调
- * @param onAdd 确认添加回调，传入 (标题, 描述, 优先级)
+ * @param onAdd 确认添加回调，传入 (标题, 描述, 优先级, 截止日期, 循环规则, 提醒时间)
  * @param sharedBoundsModifier shared element 动画 modifier（与 FAB 共享 bounds）
+ * @param pendingAttachments 当前暂存的附件列表
+ * @param onPickImage 点击添加图片附件时触发
+ * @param onPickFile 点击添加文件附件时触发
+ * @param onRemoveAttachment 移除暂存附件时触发
+ * @param onPreviewImage 预览图片附件时触发
  */
 @Composable
 private fun AddTaskOverlay(
@@ -423,6 +530,16 @@ private fun AddTaskOverlay(
     /** 创建回调：title, description, priority, dueDate, recurrenceRule, recurrenceReminderTime */
     onAdd: (String, String?, String, String?, String?, String?) -> Unit,
     sharedBoundsModifier: Modifier,
+    /** 当前暂存的附件列表 */
+    pendingAttachments: List<AttachmentUiItem> = emptyList(),
+    /** 点击添加图片附件时触发 */
+    onPickImage: () -> Unit = {},
+    /** 点击添加文件附件时触发 */
+    onPickFile: () -> Unit = {},
+    /** 移除暂存附件时触发 */
+    onRemoveAttachment: (String) -> Unit = {},
+    /** 预览图片附件时触发 */
+    onPreviewImage: (AttachmentUiItem) -> Unit = {},
 ) {
     var title by remember { mutableStateOf("") }
     var description by remember { mutableStateOf("") }
@@ -577,23 +694,33 @@ private fun AddTaskOverlay(
                     ),
                     singleLine = true,
                 )
-                // 描述输入框：粗线边框
-                OutlinedTextField(
-                    value = description,
-                    onValueChange = { description = it },
-                    placeholder = { Text("描述") },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
-                    shape = RoundedCornerShape(14.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = Color.Transparent,
-                        unfocusedBorderColor = Color.Transparent,
-                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ),
-                    maxLines = 3,
-                )
+                // 描述输入框：粗线边框，右下角内嵌附件按钮
+                Box {
+                    OutlinedTextField(
+                        value = description,
+                        onValueChange = { description = it },
+                        placeholder = { Text("描述") },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedBorderColor = Color.Transparent,
+                            unfocusedBorderColor = Color.Transparent,
+                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        ),
+                        maxLines = 3,
+                    )
+                    // 附件按钮：定位在描述输入框的右下角
+                    AttachmentButton(
+                        onPickImage = onPickImage,
+                        onPickFile = onPickFile,
+                        modifier = Modifier
+                            .align(Alignment.BottomEnd)
+                            .padding(end = 4.dp, bottom = 4.dp),
+                    )
+                }
                 // 优先级选择
                 Text(
                     "优先级",
@@ -632,6 +759,15 @@ private fun AddTaskOverlay(
                     onRecurrenceChanged = { recurrenceRule = it },
                     onReminderTimeChanged = { recurrenceReminderTime = it },
                 )
+
+                // 已暂存的附件缩略图列表
+                if (pendingAttachments.isNotEmpty()) {
+                    AttachmentList(
+                        attachments = pendingAttachments,
+                        onRemove = onRemoveAttachment,
+                        onPreview = onPreviewImage,
+                    )
+                }
 
                 // 操作按钮
                 Row(
@@ -758,13 +894,14 @@ private fun AdaptiveHeightLayout(
  * - DETAIL：显示任务详情（备注、工具栏）
  * - ADD_SUBTASK：显示子任务创建表单
  * - DATE_PICKER：显示日期选择页面
+ * - RECURRENCE：显示循环设置页面
  */
 private enum class DetailPanel { DETAIL, ADD_SUBTASK, DATE_PICKER, RECURRENCE }
 
 /**
  * 任务详情浮层 —— 从任务卡片位置 morph 展开为居中的任务详情/子任务表单。
  *
- * 内部使用 AnimatedContent 在「任务详情」「添加子任务表单」「日期选择」三个面板之间切换，
+ * 内部使用 AnimatedContent 在「任务详情」「添加子任务表单」「日期选择」「附件管理」四个面板之间切换，
  * 三种状态共享的卡片通过 sharedElementModifier 与触发卡片做 morph 动画。
  *
  * 卡片本身无边框，通过 tonalElevation 形成粗阴影边缘（与任务列表卡片风格一致）。
@@ -778,6 +915,11 @@ private enum class DetailPanel { DETAIL, ADD_SUBTASK, DATE_PICKER, RECURRENCE }
  * @param onUpdateRecurrence 循环设置变更回调，传入 (recurrenceRule, reminderTime)
  * @param onRemoveRecurrence 移除循环回调
  * @param sharedElementModifier shared element 动画 modifier（与触发卡片共享 key）
+ * @param attachments 当前任务的附件列表
+ * @param onPickImage 点击添加图片附件时触发
+ * @param onPickFile 点击添加文件附件时触发
+ * @param onRemoveAttachment 删除附件时触发，传入附件 ID
+ * @param onPreviewImage 预览图片附件时触发，传入附件 UI 模型
  */
 @Composable
 private fun TaskDetailOverlay(
@@ -792,8 +934,18 @@ private fun TaskDetailOverlay(
     /** 移除每日循环回调 */
     onRemoveRecurrence: () -> Unit = {},
     sharedElementModifier: Modifier,
-    /** 用户点击"开始专注"按钮时触发 */
-    onStartFocus: () -> Unit = {},
+    /** 用户点击"开始专注"按钮时触发，传入预选的专注时长（分钟） */
+    onStartFocus: (Int) -> Unit = {},
+    /** 当前任务的附件列表 */
+    attachments: List<AttachmentUiItem> = emptyList(),
+    /** 点击添加图片附件时触发 */
+    onPickImage: () -> Unit = {},
+    /** 点击添加文件附件时触发 */
+    onPickFile: () -> Unit = {},
+    /** 删除附件时触发 */
+    onRemoveAttachment: (String) -> Unit = {},
+    /** 预览图片附件时触发 */
+    onPreviewImage: (AttachmentUiItem) -> Unit = {},
 ) {
     // 备注内容：初始值为任务描述，可随时编辑，每次变更自动保存
     var notes by remember(task.id) { mutableStateOf(task.description ?: "") }
@@ -802,6 +954,10 @@ private fun TaskDetailOverlay(
     // 子任务创建表单的标题和优先级
     var subtaskTitle by remember { mutableStateOf("") }
     var subtaskPriority by remember { mutableStateOf("medium") }
+    // focusExpanded: 专注行是否展开（播放按钮移到左侧，显示预选时长）
+    var focusExpanded by remember { mutableStateOf(false) }
+    // selectedDuration: 预选专注时长（分钟），可在 25/45/60 之间循环切换
+    var selectedDuration by remember { mutableStateOf(25) }
 
     // 半透明遮罩 + 点击外部关闭（与 AddTaskOverlay 一致的 scrim 背景，防止交叉淡入淡出期间背景透出）
     BoxWithConstraints(
@@ -1166,78 +1322,220 @@ private fun TaskDetailOverlay(
 
                         // 可编辑的备注输入框 —— weight(1f, fill=false) 占据 header/footer 之外的剩余空间
                             // 内容少时收缩（最低 120dp），内容多时自动扩展，超出后内部滚动
-                            OutlinedTextField(
-                                value = notes,
-                                onValueChange = {
-                                    notes = it
-                                    onUpdateNotes(it)
-                                },
-                                placeholder = { Text("添加备注...") },
+                            // 右下角内嵌附件按钮（回形针图标）
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .weight(1f, fill = false)
                                     .heightIn(min = 120.dp),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                ),
-                            )
+                            ) {
+                                OutlinedTextField(
+                                    value = notes,
+                                    onValueChange = {
+                                        notes = it
+                                        onUpdateNotes(it)
+                                    },
+                                    placeholder = { Text("添加备注...") },
+                                    modifier = Modifier.fillMaxSize(),
+                                    shape = RoundedCornerShape(14.dp),
+                                    colors = OutlinedTextFieldDefaults.colors(
+                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    ),
+                                )
+                                // 附件按钮：定位在备注输入框的右下角
+                                AttachmentButton(
+                                    onPickImage = onPickImage,
+                                    onPickFile = onPickFile,
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(end = 4.dp, bottom = 4.dp),
+                                )
+                            }
 
                             // 底部固定区域：专注信息 + 工具栏，始终显示
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                                 /**
-                                 * 专注信息行 —— 显示该任务的累计专注时长，并提供"开始专注"入口。
-                                 * 点击右侧播放按钮后，关闭详情浮层并跳转到专注页面，该任务会自动预选。
+                                 * 专注信息行 —— 两步交互：
+                                 * 状态 A（默认）：[⏱ 专注时间 2h 30m ▶]，点击 ▶ 进入状态 B
+                                 * 状态 B（展开）：[▶ 25分钟▲▼]，播放按钮从右侧平滑滑动到左侧，右侧显示可切换的预选时长
+                                 *   - 点击 "25分钟 ▲▼" 循环切换 25→45→60→25
+                                 *   - 点击 ▶ 启动计时并跳转专注页面
+                                 *
+                                 * 使用局部 SharedTransitionLayout + sharedBounds 让播放按钮在过渡期间保持可见，
+                                 * 从右侧平滑平移到左侧，而非淡入淡出。
                                  */
                                 Surface(
                                     shape = RoundedCornerShape(16.dp),
                                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                     modifier = Modifier.fillMaxWidth(),
-                                    onClick = onStartFocus,
                                 ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 16.dp, vertical = 12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        // 左侧：计时器图标 + 专注时间
-                                        Icon(
-                                            Icons.Default.Timer,
-                                            contentDescription = null,
-                                            modifier = Modifier.size(20.dp),
-                                            tint = MaterialTheme.colorScheme.primary,
-                                        )
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                "专注时间",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                            Text(
-                                                formatFocusTime(task.focusSeconds),
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = FontWeight.Medium,
-                                            )
-                                        }
-                                        // 右侧：开始专注按钮
-                                        Surface(
-                                            shape = RoundedCornerShape(12.dp),
-                                            color = MaterialTheme.colorScheme.primaryContainer,
-                                        ) {
-                                            Icon(
-                                                Icons.Default.PlayArrow,
-                                                contentDescription = "开始专注",
+                                    SharedTransitionLayout {
+                                        AnimatedContent(
+                                            targetState = focusExpanded,
+                                            transitionSpec = {
+                                                // 淡入淡出 300ms，播放按钮由 sharedBounds 独立处理位移动画
+                                                (fadeIn(tween(300, easing = FastOutSlowInEasing))
+                                                    togetherWith fadeOut(tween(300, easing = FastOutSlowInEasing)))
+                                                    .using(SizeTransform(clip = false))
+                                            },
+                                            label = "focusRow",
+                                        ) { expanded ->
+                                            // 捕获 AnimatedVisibilityScope，避免 this@AnimatedContent 标签歧义
+                                            val animatedScope = this
+                                            Row(
                                                 modifier = Modifier
-                                                    .padding(8.dp)
-                                                    .size(20.dp),
-                                                tint = MaterialTheme.colorScheme.primary,
-                                            )
+                                                    .fillMaxWidth()
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                            ) {
+                                                if (!expanded) {
+                                                    // 状态 A 左侧：时钟图标 + 专注时间文字
+                                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                                        Icon(
+                                                            Icons.Default.Timer,
+                                                            contentDescription = null,
+                                                            modifier = Modifier.size(20.dp),
+                                                            tint = MaterialTheme.colorScheme.primary,
+                                                        )
+                                                        Spacer(modifier = Modifier.width(10.dp))
+                                                        Column {
+                                                            Text(
+                                                                "专注时间",
+                                                                style = MaterialTheme.typography.labelSmall,
+                                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            )
+                                                            Text(
+                                                                formatFocusTime(task.focusSeconds),
+                                                                style = MaterialTheme.typography.bodyMedium,
+                                                                fontWeight = FontWeight.Medium,
+                                                            )
+                                                        }
+                                                    }
+                                                }
+
+                                                /**
+                                                 * 状态 B 左侧播放按钮：放在 Spacer 之前，确保在最左端
+                                                 * 与状态 A 右侧的播放按钮共享 sharedBounds key，
+                                                 * 过渡期间从右侧平滑滑动到最左侧
+                                                 */
+                                                if (expanded) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                                        modifier = Modifier.sharedBounds(
+                                                            sharedContentState = rememberSharedContentState(
+                                                                "focusPlayBtn_${task.id}"
+                                                            ),
+                                                            animatedVisibilityScope = animatedScope,
+                                                            boundsTransform = { _, _ ->
+                                                                spring(
+                                                                    dampingRatio = 0.75f,
+                                                                    stiffness = Spring.StiffnessMedium,
+                                                                )
+                                                            },
+                                                        ),
+                                                        onClick = {
+                                                            onStartFocus(selectedDuration)
+                                                        },
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.PlayArrow,
+                                                            contentDescription = "开始专注",
+                                                            modifier = Modifier
+                                                                .padding(8.dp)
+                                                                .size(20.dp),
+                                                            tint = MaterialTheme.colorScheme.primary,
+                                                        )
+                                                    }
+                                                }
+
+                                                Spacer(modifier = Modifier.weight(1f))
+
+                                                /**
+                                                 * 状态 A 右侧播放按钮：点击后进入状态 B
+                                                 * 与状态 B 左侧的播放按钮共享 sharedBounds key，
+                                                 * 过渡期间从当前位置滑动到左侧
+                                                 */
+                                                if (!expanded) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(12.dp),
+                                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                                        modifier = Modifier.sharedBounds(
+                                                            sharedContentState = rememberSharedContentState(
+                                                                "focusPlayBtn_${task.id}"
+                                                            ),
+                                                            animatedVisibilityScope = animatedScope,
+                                                            boundsTransform = { _, _ ->
+                                                                spring(
+                                                                    dampingRatio = 0.75f,
+                                                                    stiffness = Spring.StiffnessMedium,
+                                                                )
+                                                            },
+                                                        ),
+                                                        onClick = { focusExpanded = true },
+                                                    ) {
+                                                        Icon(
+                                                            Icons.Default.PlayArrow,
+                                                            contentDescription = "开始专注",
+                                                            modifier = Modifier
+                                                                .padding(8.dp)
+                                                                .size(20.dp),
+                                                            tint = MaterialTheme.colorScheme.primary,
+                                                        )
+                                                    }
+                                                }
+
+                                                if (expanded) {
+                                                    // 状态 B 右侧：预选专注时长，点击循环切换 25→45→60→25
+                                                    Row(
+                                                        verticalAlignment = Alignment.CenterVertically,
+                                                        modifier = Modifier.clickable {
+                                                            selectedDuration = when (selectedDuration) {
+                                                                25 -> 45
+                                                                45 -> 60
+                                                                else -> 25
+                                                            }
+                                                        },
+                                                    ) {
+                                                        Text(
+                                                            "${selectedDuration}分钟",
+                                                            style = MaterialTheme.typography.bodyMedium,
+                                                            fontWeight = FontWeight.Medium,
+                                                            color = MaterialTheme.colorScheme.onSurface,
+                                                        )
+                                                        Spacer(modifier = Modifier.width(4.dp))
+                                                        Column(
+                                                            horizontalAlignment = Alignment.CenterHorizontally,
+                                                        ) {
+                                                            Icon(
+                                                                Icons.Default.ArrowDropUp,
+                                                                contentDescription = null,
+                                                                modifier = Modifier.size(10.dp),
+                                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            )
+                                                            Icon(
+                                                                Icons.Default.ArrowDropDown,
+                                                                contentDescription = null,
+                                                                modifier = Modifier.size(10.dp),
+                                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                            )
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
+                                }
+
+                                // 附件区域：附件列表
+                                if (attachments.isNotEmpty()) {
+                                    AttachmentList(
+                                        attachments = attachments,
+                                        onRemove = onRemoveAttachment,
+                                        onPreview = onPreviewImage,
+                                    )
                                 }
 
                                 // 工具栏：添加子任务 + 删除
@@ -1432,6 +1730,24 @@ private fun TaskList(
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         item(key = "top_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(8.dp)) }
+
+        // ==================== 过期每日任务分区（仅"今天"视图显示） ====================
+        val overdueTasks = viewModel.overdueDailyTasks
+        if (overdueTasks.isNotEmpty()) {
+            item(key = "overdue_header", contentType = "header") {
+                SectionHeader("过期", overdueTasks.size, isError = true)
+            }
+            items(
+                items = overdueTasks,
+                key = { "overdue_${it.task.id}_${it.overdueDate}" },
+                contentType = { "overdue_task" },
+            ) { overdue ->
+                OverdueDailyTaskRow(
+                    overdue = overdue,
+                    onComplete = { viewModel.toggleOverdueDailyDone(overdue.task.id, overdue.overdueDate, false) },
+                )
+            }
+        }
 
         if (reorderableItems.isNotEmpty()) {
             item(key = "todo_header", contentType = "header") {
@@ -1837,22 +2153,92 @@ private fun handleDrop(
 }
 
 @Composable
-private fun SectionHeader(title: String, count: Int) {
+private fun SectionHeader(title: String, count: Int, isError: Boolean = false) {
+    val color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+    val containerColor = if (isError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer
+    val onContainerColor = if (isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(top = 8.dp, bottom = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+        Text(title, style = MaterialTheme.typography.titleSmall, color = color, fontWeight = FontWeight.Bold)
         Spacer(modifier = Modifier.width(8.dp))
-        Surface(shape = CircleShape, color = MaterialTheme.colorScheme.primaryContainer) {
+        Surface(shape = CircleShape, color = containerColor) {
             Text(
                 "$count",
                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                color = onContainerColor,
                 fontWeight = FontWeight.SemiBold,
+            )
+        }
+    }
+}
+
+/**
+ * 过期每日任务行 —— 显示任务名 + 过期日期 + 完成按钮。
+ * 用于"今天"视图顶部的过期分区。
+ *
+ * @param overdue 过期的每日任务数据
+ * @param onComplete 点击完成按钮时触发
+ */
+@Composable
+private fun OverdueDailyTaskRow(
+    overdue: uniffi.nion_core.OverdueDailyTask,
+    onComplete: () -> Unit,
+) {
+    // 将 "2026-05-24" 格式化为 "5月24日"
+    val formattedDate = runCatching {
+        val date = java.time.LocalDate.parse(overdue.overdueDate)
+        "${date.monthValue}月${date.dayOfMonth}日"
+    }.getOrElse { overdue.overdueDate }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp)
+            .background(
+                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
+                RoundedCornerShape(12.dp),
+            )
+            .padding(horizontal = 16.dp, vertical = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 完成按钮：简洁圆形，不带外圈边框，避免大环套小环
+        Box(
+            modifier = Modifier
+                .size(24.dp)
+                .clip(CircleShape)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onComplete,
+                ),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Default.RadioButtonUnchecked,
+                contentDescription = "完成",
+                tint = MaterialTheme.colorScheme.error,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = overdue.task.title,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                text = formattedDate,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
             )
         }
     }

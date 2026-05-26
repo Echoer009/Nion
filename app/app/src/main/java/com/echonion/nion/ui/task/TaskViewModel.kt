@@ -23,8 +23,11 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import uniffi.nion_core.NionCore
 import uniffi.nion_core.TaskData
+import uniffi.nion_core.DailyTaskStatus
+import uniffi.nion_core.OverdueDailyTask
 import uniffi.nion_core.ChecklistData
 import uniffi.nion_core.GroupData
+import uniffi.nion_core.AttachmentData
 
 @Stable
 data class TaskItem(
@@ -42,6 +45,10 @@ data class TaskItem(
     val recurrenceRule: String? = null,
     /** 每日循环的提醒时间，格式 "HH:MM"，仅当 recurrenceRule="daily" 时有效 */
     val recurrenceReminderTime: String? = null,
+    /** 是否为每日循环任务（recurrenceRule == "daily"） */
+    val isDaily: Boolean = false,
+    /** 当前查看日期的完成状态。每日任务看 completions 表，普通任务看 status */
+    val isCompletedForDate: Boolean = false,
 )
 
 @Stable
@@ -138,6 +145,10 @@ class TaskViewModel(
     var selectedTaskIds by mutableStateOf<Set<String>>(emptySet())
         private set
 
+    /** 过期的每日任务列表（所有历史未完成的每日任务），仅在"今天"视图中加载 */
+    var overdueDailyTasks by mutableStateOf<List<OverdueDailyTask>>(emptyList())
+        private set
+
     val isSelectionMode: Boolean by derivedStateOf { selectedTaskIds.isNotEmpty() }
 
     fun toggleSelection(taskId: String) {
@@ -221,6 +232,10 @@ class TaskViewModel(
                     }
                 }
                 tasks = loadedTasks
+                // "今天"视图同时加载过期每日任务
+                if (activeChecklistId == TODAY_ID) {
+                    withContext(Dispatchers.IO) { loadOverdueDailyTasks() }
+                }
             } catch (e: Exception) {
                 onError("加载任务失败: ${e.message}")
             }
@@ -256,6 +271,13 @@ class TaskViewModel(
                     }
                 }
                 tasks = loadedTasks
+                // "今天"视图同时加载过期每日任务
+                if (id == TODAY_ID) {
+                    withContext(Dispatchers.IO) { loadOverdueDailyTasks() }
+                } else {
+                    // 非"今天"视图清空过期列表
+                    overdueDailyTasks = emptyList()
+                }
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("切换清单失败: ${e.message}")
@@ -287,6 +309,7 @@ class TaskViewModel(
      *
      * @param recurrenceRule 循环规则：null/"none" 不循环，"daily" 每日循环
      * @param recurrenceReminderTime 每日循环提醒时间，格式 "HH:MM"
+     * @return 新创建的任务 ID，失败时返回 null
      */
     fun createTask(
         title: String,
@@ -295,16 +318,18 @@ class TaskViewModel(
         dueDate: String? = null,
         recurrenceRule: String? = null,
         recurrenceReminderTime: String? = null,
+        onCreated: ((String) -> Unit) = {},
     ) {
         viewModelScope.launch {
             try {
                 // "今天"不是真实清单，创建任务时 category_id 设为 null
                 val realCategoryId = if (activeChecklistId == TODAY_ID) null else activeChecklistId
-                withContext(Dispatchers.IO) {
+                val newTask = withContext(Dispatchers.IO) {
                     core.createTask(title, description, priority, dueDate, realCategoryId, null, activeGroupId, recurrenceRule, recurrenceReminderTime)
                 }
                 tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()
+                onCreated(newTask.id)
             } catch (e: Exception) {
                 onError("创建任务失败: ${e.message}")
             }
@@ -331,7 +356,80 @@ class TaskViewModel(
         }
     }
 
+    /**
+     * 切换任务完成状态。
+     * 每日任务：操作 daily_completions 表，不改 tasks.status
+     * 普通任务：改 tasks.status 为 "done"/"todo"
+     */
     fun toggleDone(task: TaskItem) {
+        if (task.isDaily) {
+            toggleDailyDone(task)
+        } else {
+            toggleNormalDone(task)
+        }
+    }
+
+    /**
+     * 完成或取消完成过期每日任务的某一天。
+     * @param taskId 每日任务 ID
+     * @param date 要完成/取消的日期，格式 "YYYY-MM-DD"
+     */
+    fun toggleOverdueDailyDone(taskId: String, date: String, isCompleted: Boolean) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    if (isCompleted) {
+                        core.uncompleteDailyTask(taskId, date)
+                    } else {
+                        core.completeDailyTask(taskId, date)
+                    }
+                }
+                // 重新加载过期列表和今日任务
+                overdueDailyTasks = withContext(Dispatchers.IO) {
+                    val todayStr = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+                    core.getOverdueDailyTasks(todayStr)
+                }
+                tasks = loadTasksForCurrentView()
+            } catch (e: Exception) {
+                onError("更新过期任务失败: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 每日任务的完成/取消：操作 daily_completions 表。
+     * 模板任务的 status 永远保持 "todo"，只有 completions 表变化。
+     */
+    private fun toggleDailyDone(task: TaskItem) {
+        val todayStr = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+        val markDone = !task.isCompletedForDate
+        // 乐观更新 UI
+        val updatedTask = task.copy(isDone = markDone, isCompletedForDate = markDone)
+        tasks = updateTaskInList(tasks, task.id, updatedTask)
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    if (markDone) {
+                        core.completeDailyTask(task.id, todayStr)
+                    } else {
+                        core.uncompleteDailyTask(task.id, todayStr)
+                    }
+                }
+                // 刷新过期列表
+                overdueDailyTasks = withContext(Dispatchers.IO) {
+                    core.getOverdueDailyTasks(todayStr)
+                }
+            } catch (e: Exception) {
+                onError("更新失败: ${e.message}")
+                tasks = loadTasksForCurrentView()
+            }
+        }
+    }
+
+    /**
+     * 普通任务的完成/取消：改 tasks.status + 级联子任务。
+     */
+    private fun toggleNormalDone(task: TaskItem) {
         val markDone = !task.isDone
         val newStatus = if (markDone) "done" else "todo"
         val updatedTask = if (markDone) markAllDone(task) else markAllTodo(task)
@@ -572,7 +670,8 @@ class TaskViewModel(
 
     /**
      * 加载今日任务：due_date = 今天 或 每日循环且未过期。
-     * 调用 Rust 端 getTasksDueToday 进行跨清单聚合查询。
+     * 调用 Rust 端 getTasksDueToday 获取 DailyTaskStatus，
+     * 每日任务的完成状态由 daily_completions 表决定。
      * 子任务递归加载，不单独筛选。
      */
     private fun loadTodayTasks(): List<TaskItem> {
@@ -583,10 +682,19 @@ class TaskViewModel(
                 task.toUi().copy(subtasks = subs)
             }
         }
-        return core.getTasksDueToday(todayStr).map { task ->
-            val subs = loadChildren(task.id)
-            task.toUi().copy(subtasks = subs)
+        return core.getTasksDueToday(todayStr).map { status ->
+            val subs = loadChildren(status.task.id)
+            status.toUi().copy(subtasks = subs)
         }
+    }
+
+    /**
+     * 加载过期每日任务列表（所有历史未完成）。
+     * 应在加载今日任务后调用，仅在"今天"视图中使用。
+     */
+    private fun loadOverdueDailyTasks() {
+        val todayStr = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+        overdueDailyTasks = core.getOverdueDailyTasks(todayStr)
     }
 
     /**
@@ -658,6 +766,87 @@ class TaskViewModel(
                 }
             } catch (e: Exception) {
                 onError("重命名分组失败: ${e.message}")
+            }
+        }
+    }
+
+    // ==================== 附件管理 ====================
+
+    /**
+     * 获取指定任务的所有附件，返回 UI 模型列表。
+     * 调用方需在协程中调用。
+     */
+    suspend fun getAttachments(taskId: String): List<AttachmentUiItem> {
+        return withContext(Dispatchers.IO) {
+            core.getAttachments(taskId).map { it.toUi() }
+        }
+    }
+
+    /**
+     * 为任务添加附件。
+     * 文件应已复制到内部存储，此方法将附件记录写入数据库。
+     *
+     * @param taskId 任务 ID
+     * @param filePath 内部存储文件路径
+     * @param fileName 原始文件名
+     * @param mimeType MIME 类型
+     * @param fileSize 文件大小（字节）
+     */
+    fun addAttachment(
+        taskId: String,
+        filePath: String,
+        fileName: String,
+        mimeType: String,
+        fileSize: Long,
+    ) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    core.addAttachment(taskId, fileName, filePath, mimeType, fileSize)
+                }
+            } catch (e: Exception) {
+                onError("添加附件失败: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 删除附件。
+     *
+     * @param attachmentId 附件 ID
+     */
+    fun removeAttachment(attachmentId: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    core.removeAttachment(attachmentId)
+                }
+            } catch (e: Exception) {
+                onError("删除附件失败: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 批量关联临时附件到新创建的任务。
+     * 用于新建任务场景：附件先存在临时列表中，任务创建后再批量写入数据库。
+     *
+     * @param taskId 新创建的任务 ID
+     * @param pendingAttachments 临时附件信息列表
+     */
+    fun commitPendingAttachments(
+        taskId: String,
+        pendingAttachments: List<PickedFileInfo>,
+    ) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    for (info in pendingAttachments) {
+                        core.addAttachment(taskId, info.fileName, info.filePath, info.mimeType, info.fileSize)
+                    }
+                }
+            } catch (e: Exception) {
+                onError("关联附件失败: ${e.message}")
             }
         }
     }
@@ -815,18 +1004,51 @@ private fun removeTaskFromList(tasks: List<TaskItem>, targetId: String): List<Ta
         .map { it.copy(subtasks = removeTaskFromList(it.subtasks, targetId)) }
 }
 
-private fun TaskData.toUi(): TaskItem = TaskItem(
-    id = id,
-    title = title,
-    description = description,
-    priority = priority,
-    isDone = status == "done",
-    dueDate = dueDate,
-    createdAt = createdAt,
-    focusSeconds = focusSeconds,
-    recurrenceRule = recurrenceRule,
-    recurrenceReminderTime = recurrenceReminderTime,
-)
+/**
+ * 将 Rust 端 DailyTaskStatus 转换为 UI 模型。
+ * 每日任务的完成状态由 completedForDate 决定，不看 tasks.status。
+ * 普通任务的完成状态仍由 task.status 决定。
+ */
+private fun DailyTaskStatus.toUi(): TaskItem {
+    val isDaily = task.recurrenceRule == "daily"
+    return TaskItem(
+        id = task.id,
+        title = task.title,
+        description = task.description,
+        priority = task.priority,
+        isDone = if (isDaily) completedForDate else (task.status == "done"),
+        dueDate = task.dueDate,
+        createdAt = task.createdAt,
+        focusSeconds = task.focusSeconds,
+        recurrenceRule = task.recurrenceRule,
+        recurrenceReminderTime = task.recurrenceReminderTime,
+        isDaily = isDaily,
+        isCompletedForDate = completedForDate,
+    )
+}
+
+/**
+ * 将 Rust 端 TaskData 转换为 UI 模型（用于清单视图）。
+ * 每日任务在清单视图中永远显示为未完成（status 保持 "todo"），
+ * 因为它们的完成由 daily_completions 表追踪。
+ */
+private fun TaskData.toUi(): TaskItem {
+    val isDaily = recurrenceRule == "daily"
+    return TaskItem(
+        id = id,
+        title = title,
+        description = description,
+        priority = priority,
+        isDone = if (isDaily) false else (status == "done"),
+        dueDate = dueDate,
+        createdAt = createdAt,
+        focusSeconds = focusSeconds,
+        recurrenceRule = recurrenceRule,
+        recurrenceReminderTime = recurrenceReminderTime,
+        isDaily = isDaily,
+        isCompletedForDate = false,
+    )
+}
 
 private fun ChecklistData.toUi(): ChecklistItem = ChecklistItem(
     id = id,
@@ -839,6 +1061,16 @@ private fun GroupData.toUi(): GroupItem = GroupItem(
     name = name,
     checklistId = checklistId,
     color = color,
+)
+
+/** 将 Rust 端 AttachmentData 转换为 UI 模型 */
+private fun AttachmentData.toUi(): AttachmentUiItem = AttachmentUiItem(
+    id = id,
+    fileName = fileName,
+    filePath = filePath,
+    mimeType = mimeType,
+    fileSize = fileSize,
+    isImage = mimeType.startsWith("image/"),
 )
 
 @Composable
