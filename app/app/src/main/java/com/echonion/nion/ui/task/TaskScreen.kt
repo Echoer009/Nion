@@ -694,8 +694,12 @@ private fun AddTaskOverlay(
                     ),
                     singleLine = true,
                 )
-                // 描述输入框：粗线边框，右下角内嵌附件按钮
-                Box {
+                // 描述输入框：粗线边框，右下角内嵌附件按钮，clip 防止附件按钮展开时溢出框外
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp)),
+                ) {
                     OutlinedTextField(
                         value = description,
                         onValueChange = { description = it },
@@ -1320,14 +1324,15 @@ private fun TaskDetailOverlay(
                             }
                         }
 
-                        // 可编辑的备注输入框 —— weight(1f, fill=false) 占据 header/footer 之外的剩余空间
+                            // 可编辑的备注输入框 —— weight(1f, fill=false) 占据 header/footer 之外的剩余空间
                             // 内容少时收缩（最低 120dp），内容多时自动扩展，超出后内部滚动
-                            // 右下角内嵌附件按钮（回形针图标）
+                            // 右下角内嵌附件按钮（回形针图标），clip 防止附件按钮展开时溢出框外
                             Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .weight(1f, fill = false)
-                                    .heightIn(min = 120.dp),
+                                    .heightIn(min = 120.dp)
+                                    .clip(RoundedCornerShape(14.dp)),
                             ) {
                                 OutlinedTextField(
                                     value = notes,
