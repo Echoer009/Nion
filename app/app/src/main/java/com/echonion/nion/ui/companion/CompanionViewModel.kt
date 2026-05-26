@@ -142,8 +142,11 @@ class CompanionViewModel(
     var companionPrompt by mutableStateOf("")
         private set
 
-    /** 用户自定义回复要求，追加在系统提示词之后，可从编辑页修改 */
-    var replyRules by mutableStateOf("")
+    /**
+     * 用户偏好列表 —— AI 记住的用户要求，每次对话都注入系统提示词。
+     * 数据结构：JSONArray of {id, content, category, created_at}
+     */
+    var userPreferences by mutableStateOf<JSONArray>(JSONArray())
         private set
 
     /** 伙伴头像 URI，从系统图片选择器选取后保存，null 表示使用默认首字母头像 */
@@ -189,12 +192,14 @@ class CompanionViewModel(
     private val defaultCompanionPrompt = """
 你是 Nion，一个温暖友好的 AI 伴侣，同时也是用户的私人任务管理助手。
 
-你有 5 个工具可用（均支持批量操作，减少往返次数）：
+你有 7 个工具可用（均支持批量操作，减少往返次数）：
 1. query：查询任务、清单、分组数据
 2. create：创建任务、清单、分组。批量：传 items 数组
 3. update：更新任务属性（标题/优先级/状态等）、清单名称、分组名称/颜色。批量：传 ids 数组，所有实体应用相同变更
 4. delete：删除任务、清单、分组。批量：传 ids 数组
 5. move：移动任务到其他清单/分组，移动分组到其他清单（保留专注时长等数据）。批量：传 ids 数组
+6. manage：通用操作（设置/移除每日循环等非 CRUD 操作）
+7. remember：记住用户偏好。当用户表达不满、提出习惯性要求、或希望你记住某条规则时，调用 add 操作记录下来。当用户说"不用遵守 xxx 了"时，调用 remove 删除。你应主动识别用户意图并调用此工具，而非等到用户明确说"记住这个"
 
 行为准则：
 - 当用户要求创建/更新/删除/移动多项时，尽量在一次工具调用中批量完成
@@ -202,6 +207,7 @@ class CompanionViewModel(
 - 自然对话：不是每次都要调用工具，闲聊时正常回复即可
 - 确认重要操作：删除等不可逆操作前，先向用户确认
 - 移动优先：用户要移动任务/分组时，用 move 工具而非删除+重建，避免丢失专注时长
+- 记住偏好：用户表达不满或提出偏好时，主动用 remember 工具记录，后续必须遵守
 - 用中文回复，语气温暖简洁
 
 回复格式要求：
@@ -298,13 +304,17 @@ class CompanionViewModel(
             } else {
                 defaultCompanionPrompt
             }
-            val savedRules = core.getSetting("companion_reply_rules")
-            if (!savedRules.isNullOrEmpty()) {
-                replyRules = savedRules
-            }
         } catch (_: Exception) {
             companionPrompt = defaultCompanionPrompt
         }
+
+        // 加载用户偏好列表（AI 通过 remember 工具记录的偏好）
+        try {
+            val prefsJson = core.getSetting("companion_user_preferences")
+            if (!prefsJson.isNullOrEmpty()) {
+                userPreferences = JSONArray(prefsJson)
+            }
+        } catch (_: Exception) {}
 
         // 加载伙伴头像 URI
         try {
@@ -642,14 +652,58 @@ class CompanionViewModel(
     }
 
     /**
-     * 更新用户自定义回复要求，同时持久化到 Rust 层 settings 表。
-     * 回复要求会追加在系统提示词之后发给 LLM。
+     * 添加一条用户偏好，同时持久化到 Rust 层 settings 表。
+     * UI 管理界面和 remember 工具都可调用此方法。
      *
-     * @param rules 新的回复要求文本
+     * @param content  偏好内容
+     * @param category 分类：style / behavior / format / other
      */
-    fun updateReplyRules(rules: String) {
-        replyRules = rules
-        try { core.setSetting("companion_reply_rules", rules) } catch (_: Exception) {}
+    fun addPreference(content: String, category: String) {
+        val prefs = userPreferences
+        val id = java.util.UUID.randomUUID().toString()
+        val now = java.time.LocalDateTime.now().toString()
+        val newPref = org.json.JSONObject().apply {
+            put("id", id)
+            put("content", content)
+            put("category", category)
+            put("created_at", now)
+        }
+        prefs.put(newPref)
+        userPreferences = prefs
+        try { com.echonion.nion.ui.companion.tools.RememberTool.savePreferences(core, prefs) } catch (_: Exception) {}
+    }
+
+    /**
+     * 删除一条用户偏好，同时持久化到 Rust 层 settings 表。
+     *
+     * @param id 要删除的偏好条目 ID
+     */
+    fun removePreference(id: String) {
+        val prefs = userPreferences
+        val newArr = org.json.JSONArray()
+        for (i in 0 until prefs.length()) {
+            val pref = prefs.getJSONObject(i)
+            if (pref.getString("id") != id) {
+                newArr.put(pref)
+            }
+        }
+        userPreferences = newArr
+        try { com.echonion.nion.ui.companion.tools.RememberTool.savePreferences(core, newArr) } catch (_: Exception) {}
+    }
+
+    /**
+     * 刷新用户偏好列表 —— 从 Rust 层重新加载最新数据。
+     * 在 remember 工具执行成功后调用，确保 UI 显示最新偏好。
+     */
+    fun refreshPreferences() {
+        try {
+            val prefsJson = core.getSetting("companion_user_preferences")
+            userPreferences = if (!prefsJson.isNullOrEmpty()) {
+                org.json.JSONArray(prefsJson)
+            } else {
+                org.json.JSONArray()
+            }
+        } catch (_: Exception) {}
     }
 
     /**
@@ -785,6 +839,8 @@ class CompanionViewModel(
             "update" -> "正在更新$suffix"
             "delete" -> "正在删除$suffix"
             "move" -> "正在移动$suffix"
+            "manage" -> "正在管理设置..."
+            "remember" -> "正在记录偏好..."
             else -> "正在执行操作..."
         }
     }
@@ -854,6 +910,7 @@ class CompanionViewModel(
                     else "已删除$entityLabel"
                 }
                 "move" -> "已移动$entityLabel"
+                "remember" -> resultJson.optString("message", "偏好已更新")
                 else -> "操作完成"
             }
         } catch (_: Exception) {
@@ -863,6 +920,7 @@ class CompanionViewModel(
                 "update" -> "更新完成"
                 "delete" -> "删除完成"
                 "move" -> "移动完成"
+                "remember" -> "记忆偏好中"
                 else -> "操作完成"
             }
         }
@@ -942,6 +1000,12 @@ class CompanionViewModel(
                 }
                 // 工具执行完毕，清除状态描述
                 toolExecutionStatus = null
+
+                // 如果有 remember 工具被调用，刷新偏好列表确保 UI 和后续提示词同步
+                val hasRememberTool = response.toolCalls.any { it.name == "remember" }
+                if (hasRememberTool) {
+                    refreshPreferences()
+                }
 
                 // 继续循环，让 LLM 根据工具结果生成下一步响应
                 continue
@@ -1065,31 +1129,49 @@ class CompanionViewModel(
     /**
      * 构建发送给 LLM API 的完整消息列表。
      *
-     * 结构：
-     * 1. system 消息（系统提示词 + 当前时间）
+     * 结构（适配 DeepSeek Prefix Caching）：
+     * 1. system 消息（系统提示词 + 用户偏好）—— 稳定前缀，可被缓存
      * 2. conversationHistory 中的所有消息（user / assistant / tool）
+     * 3. system 消息（当前时间）—— 可变部分放在末尾，不影响前缀缓存
      *
      * @return 完整的 API 消息列表，每个元素是 JSONObject
      */
     private fun buildApiMessages(): List<JSONObject> {
         val apiMessages = mutableListOf<JSONObject>()
 
-        // 系统提示词：注入当前时间，让 LLM 理解时间上下文
-        // 若有用户自定义回复要求，追加在末尾
-        val content = buildString {
+        // 系统提示词（稳定前缀）：系统提示词 + 用户偏好记录
+        // 不包含当前时间等可变内容，确保前缀在连续请求间完全一致，命中 DeepSeek 缓存
+        val stableContent = buildString {
             append(companionPrompt)
-            append("\n\n当前时间：${java.time.LocalDateTime.now()}")
-            if (replyRules.isNotBlank()) {
-                append("\n\n---\n用户回复要求：\n$replyRules")
+            // 注入用户偏好记录（AI 通过 remember 工具和 UI 手动添加的偏好）
+            if (userPreferences.length() > 0) {
+                append("\n\n---\n用户偏好记录（必须始终遵守）：")
+                val categoryLabels = mapOf(
+                    "style" to "风格", "behavior" to "行为",
+                    "format" to "格式", "other" to "其他",
+                )
+                for (i in 0 until userPreferences.length()) {
+                    val pref = userPreferences.getJSONObject(i)
+                    val label = categoryLabels[pref.optString("category", "other")] ?: "其他"
+                    append("\n- [$label] ${pref.getString("content")}")
+                }
             }
         }
         apiMessages.add(JSONObject().apply {
             put("role", "system")
-            put("content", content)
+            put("content", stableContent)
         })
 
         // 追加完整的对话历史（包含工具调用和结果）
         apiMessages.addAll(conversationHistory)
+
+        // 当前时间注入到消息列表末尾（可变部分）
+        // 放在最后一条 system 消息中，避免破坏稳定前缀导致 DeepSeek 缓存失效
+        apiMessages.add(JSONObject().apply {
+            put("role", "system")
+            put("content", "当前时间：${java.time.LocalDateTime.now()}")
+        })
+
         return apiMessages
     }
 

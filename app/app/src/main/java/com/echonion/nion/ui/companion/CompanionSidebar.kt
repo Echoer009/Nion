@@ -34,6 +34,8 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.unit.Dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
@@ -54,6 +56,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.material3.AlertDialog
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -370,7 +373,9 @@ private fun ProfileContent(
 ) {
     var name by remember { mutableStateOf(viewModel.companionName) }
     var prompt by remember { mutableStateOf(viewModel.companionPrompt) }
-    var rules by remember { mutableStateOf(viewModel.replyRules) }
+
+    // 添加偏好对话框的状态：null 表示隐藏，非 null 表示正在添加
+    var showAddPrefDialog by remember { mutableStateOf(false) }
 
     // 系统图片选择器：选取头像图片
     val context = LocalContext.current
@@ -392,13 +397,13 @@ private fun ProfileContent(
     // 返回并保存：将当前编辑的内容写回 ViewModel 后返回
     val backAndSave: () -> Unit = {
         viewModel.updateCompanionInfo(name.trim(), prompt.trim())
-        viewModel.updateReplyRules(rules.trim())
         onBack()
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(vertical = 24.dp, horizontal = 16.dp),
     ) {
         // 顶部导航栏：返回按钮 + 居中占位
@@ -459,19 +464,234 @@ private fun ProfileContent(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        Spacer(modifier = Modifier.height(12.dp))
+        Spacer(modifier = Modifier.height(16.dp))
 
-        // 回复要求输入框 —— 用户自定义额外规则，追加在系统提示词末尾发送给 LLM
-        OutlinedTextField(
-            value = rules,
-            onValueChange = { rules = it },
-            label = { Text("回复要求") },
-            placeholder = { Text("例如：不要使用 emoji、用聊天的语气说话、不要反问...") },
-            minLines = 2,
-            maxLines = 4,
+        // ── 用户偏好管理区域 ──
+        // 标题行：标题 + 添加按钮
+        Row(
             modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "用户偏好",
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            IconButton(
+                onClick = { showAddPrefDialog = true },
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = "添加偏好",
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(4.dp))
+
+        Text(
+            "AI 会自动记住你表达的偏好，你也可以手动添加",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 偏好列表 —— 按分类显示为带颜色标签的卡片
+        val prefs = viewModel.userPreferences
+        if (prefs.length() == 0) {
+            // 空状态提示
+            Text(
+                "暂无偏好记录",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                modifier = Modifier.padding(vertical = 8.dp),
+            )
+        } else {
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp),
+            ) {
+                for (index in 0 until prefs.length()) {
+                    val pref = prefs.getJSONObject(index)
+                    PreferenceItem(
+                        pref = pref,
+                        onDelete = { viewModel.removePreference(pref.getString("id")) },
+                    )
+                }
+            }
+        }
+    }
+
+    // 添加偏好的弹窗
+    if (showAddPrefDialog) {
+        AddPreferenceDialog(
+            onDismiss = { showAddPrefDialog = false },
+            onConfirm = { content, category ->
+                viewModel.addPreference(content, category)
+                showAddPrefDialog = false
+            },
         )
     }
+}
+
+/**
+ * 单条偏好卡片 —— 显示分类标签 + 偏好内容 + 删除按钮。
+ *
+ * @param pref 偏好 JSON 对象，包含 id/content/category/created_at
+ * @param onDelete 点击删除按钮时触发
+ */
+@Composable
+private fun PreferenceItem(
+    pref: org.json.JSONObject,
+    onDelete: () -> Unit,
+) {
+    // 分类 → (中文标签, 颜色) 映射
+    val categoryInfo = when (pref.optString("category", "other")) {
+        "style" -> "风格" to Color(0xFF6750A4)
+        "behavior" -> "行为" to Color(0xFF0061A4)
+        "format" -> "格式" to Color(0xFF006E1C)
+        else -> "其他" to Color(0xFF757575)
+    }
+    val (label, color) = categoryInfo
+
+    Surface(
+        shape = RoundedCornerShape(8.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 分类标签 —— 圆角小色块
+            Surface(
+                shape = RoundedCornerShape(4.dp),
+                color = color.copy(alpha = 0.15f),
+                modifier = Modifier.padding(end = 8.dp),
+            ) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = color,
+                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                )
+            }
+
+            // 偏好内容
+            Text(
+                pref.getString("content"),
+                style = MaterialTheme.typography.bodySmall,
+                modifier = Modifier.weight(1f),
+            )
+
+            // 删除按钮
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(24.dp),
+            ) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "删除偏好",
+                    modifier = Modifier.size(14.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 添加偏好的对话框 —— 输入偏好内容并选择分类。
+ *
+ * @param onDismiss 点击取消或外部区域时触发
+ * @param onConfirm 确认添加时触发，传入 (content, category)
+ */
+@Composable
+private fun AddPreferenceDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (content: String, category: String) -> Unit,
+) {
+    // 偏好内容输入
+    var content by remember { mutableStateOf("") }
+    // 选中的分类，默认"行为"
+    var selectedCategory by remember { mutableStateOf("behavior") }
+
+    // 分类选项列表
+    val categories = listOf(
+        "style" to "风格",
+        "behavior" to "行为",
+        "format" to "格式",
+        "other" to "其他",
+    )
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("添加偏好") },
+        text = {
+            Column {
+                // 偏好内容输入框
+                OutlinedTextField(
+                    value = content,
+                    onValueChange = { content = it },
+                    label = { Text("偏好内容") },
+                    placeholder = { Text("例如：不要使用 emoji") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // 分类选择 —— 横向排列的单选标签
+                Text(
+                    "分类",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.height(6.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                ) {
+                    categories.forEach { (key, label) ->
+                        val isSelected = selectedCategory == key
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isSelected) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.surfaceVariant,
+                            modifier = Modifier.clickable { selectedCategory = key },
+                        ) {
+                            Text(
+                                label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { if (content.isNotBlank()) onConfirm(content.trim(), selectedCategory) },
+                enabled = content.isNotBlank(),
+            ) {
+                Text("添加")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
 }
 
 /**

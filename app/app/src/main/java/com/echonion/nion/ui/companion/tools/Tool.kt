@@ -96,7 +96,7 @@ class ToolExecutor(
      * - create/update/delete/move：统一通知 checklists（涵盖清单、分组、任务变更）
      */
     private fun dataTypeForTool(name: String): String = when (name) {
-        "query" -> "" // 只读操作，无需通知
+        "query", "remember" -> "" // 只读操作，无需通知
         else -> "checklists" // 写操作统一通知 UI 刷新
     }
 
