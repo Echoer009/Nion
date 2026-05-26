@@ -31,6 +31,10 @@ pub struct TaskData {
     pub updated_at: String,
     pub completed_at: Option<String>,
     pub focus_seconds: i64,
+    /// 循环规则：None 或 "none" 表示不循环，"daily" 表示每日循环
+    pub recurrence_rule: Option<String>,
+    /// 每日循环的提醒时间，格式为 "HH:MM"（精确到分钟），仅当 recurrence_rule="daily" 时有效
+    pub recurrence_reminder_time: Option<String>,
 }
 
 /// 任务分组 —— 清单下的二级分类，例如"学习清单"下的"语文"、"英语"
