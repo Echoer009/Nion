@@ -50,6 +50,7 @@ import com.echonion.nion.ui.task.taskViewModel
 import kotlinx.coroutines.launch
 import com.echonion.nion.ui.theme.NionColorTheme
 import com.echonion.nion.ui.theme.NionTheme
+import androidx.compose.ui.graphics.Color
 
 data class BottomNavItem(
     val route: String,
@@ -73,7 +74,7 @@ fun NionApp() {
         val saved = try { core.getSetting("color_theme") } catch (_: Exception) { null }
         val initial = saved?.let { name ->
             NionColorTheme.entries.find { it.name == name }
-        } ?: NionColorTheme.BURNT_ORANGE
+        } ?: NionColorTheme.CORAL
         mutableStateOf(initial)
     }
 
@@ -163,7 +164,7 @@ fun NionApp() {
                                 },
                                 colors = NavigationBarItemDefaults.colors(
                                     selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                    indicatorColor = Color.Transparent,
                                     unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
                                 ),
                             )

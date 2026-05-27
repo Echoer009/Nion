@@ -264,9 +264,9 @@ class ReminderFloatingService : Service() {
                 val app = applicationContext as NionApp
                 val colorTheme = try {
                     val saved = app.core.getSetting("color_theme")
-                    NionColorTheme.entries.find { it.name == saved } ?: NionColorTheme.BURNT_ORANGE
+                    NionColorTheme.entries.find { it.name == saved } ?: NionColorTheme.CORAL
                 } catch (_: Exception) {
-                    NionColorTheme.BURNT_ORANGE
+                    NionColorTheme.CORAL
                 }
 
                 NionTheme(colorTheme = colorTheme) {
@@ -635,7 +635,7 @@ private fun FloatingReminderCard(
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = accentColor,
-                        contentColor = Color.White,
+                        contentColor = MaterialTheme.colorScheme.onPrimary,
                     ),
                     modifier = Modifier.weight(1f),
                 ) {

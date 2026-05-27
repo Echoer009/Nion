@@ -92,6 +92,7 @@ import kotlinx.coroutines.launch
 import uniffi.nion_core.ConversationData
 import org.json.JSONArray
 import com.echonion.nion.ui.companion.tools.MemoryTool
+import com.echonion.nion.ui.theme.NionColors
 
 /**
  * 聊天消息数据类 —— 单条消息的展示模型。
@@ -556,10 +557,10 @@ private fun PreferenceItem(
 ) {
     // 分类 → (中文标签, 颜色) 映射
     val categoryInfo = when (pref.optString("category", "other")) {
-        "style" -> "风格" to Color(0xFF6750A4)
-        "behavior" -> "行为" to Color(0xFF0061A4)
-        "format" -> "格式" to Color(0xFF006E1C)
-        else -> "其他" to Color(0xFF757575)
+        "style" -> "风格" to NionColors.PrefStyle
+        "behavior" -> "行为" to NionColors.PrefBehavior
+        "format" -> "格式" to NionColors.PrefFormat
+        else -> "其他" to NionColors.PrefOther
     }
     val (label, color) = categoryInfo
 
@@ -1582,10 +1583,10 @@ private fun PreferencesPanel(
                     val isSelected = filterCategory == key
                     // 分类 → 颜色映射：风格=紫，行为=蓝，格式=绿，其他=灰
                     val color = when (key) {
-                        "style" -> Color(0xFF6750A4)
-                        "behavior" -> Color(0xFF0061A4)
-                        "format" -> Color(0xFF006E1C)
-                        else -> Color(0xFF757575)
+                        "style" -> NionColors.PrefStyle
+                        "behavior" -> NionColors.PrefBehavior
+                        "format" -> NionColors.PrefFormat
+                        else -> NionColors.PrefOther
                     }
                     Surface(
                         shape = RoundedCornerShape(16.dp),
@@ -1596,7 +1597,7 @@ private fun PreferencesPanel(
                         Text(
                             "$label ($count)",
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (isSelected) Color.White
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         )
@@ -1781,7 +1782,7 @@ private fun MemoriesPanel(
                         Text(
                             "$label ($count)",
                             style = MaterialTheme.typography.labelSmall,
-                            color = if (isSelected) Color.White
+                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                         )
@@ -1854,20 +1855,20 @@ private fun MemoriesPanel(
  * 记忆分类 → 显示颜色的映射，用于标签和卡片的视觉区分。
  */
 private val MemoryItemColors = mapOf(
-    "identity" to Color(0xFF6750A4),
-    "study" to Color(0xFF1565C0),
-    "work" to Color(0xFF2E7D32),
-    "hobby" to Color(0xFFE65100),
-    "habit" to Color(0xFF6A1B9A),
-    "health" to Color(0xFFC62828),
-    "emotion" to Color(0xFFAD1457),
-    "goal" to Color(0xFF00838F),
-    "schedule" to Color(0xFF4527A0),
-    "social" to Color(0xFF1B5E20),
-    "location" to Color(0xFF37474F),
-    "pet" to Color(0xFF4E342E),
-    "context" to Color(0xFFEF6C00),
-    "other" to Color(0xFF757575),
+    "identity" to NionColors.MemoryIdentity,
+    "study" to NionColors.MemoryStudy,
+    "work" to NionColors.MemoryWork,
+    "hobby" to NionColors.MemoryHobby,
+    "habit" to NionColors.MemoryHabit,
+    "health" to NionColors.MemoryHealth,
+    "emotion" to NionColors.MemoryEmotion,
+    "goal" to NionColors.MemoryGoal,
+    "schedule" to NionColors.MemorySchedule,
+    "social" to NionColors.MemorySocial,
+    "location" to NionColors.MemoryLocation,
+    "pet" to NionColors.MemoryPet,
+    "context" to NionColors.MemoryContext,
+    "other" to NionColors.MemoryOther,
 )
 
 /**
@@ -1883,7 +1884,7 @@ private fun MemoryItem(
 ) {
     val category = mem.optString("category", "other")
     val label = MemoryTool.categoryLabels[category] ?: "其他"
-    val color = MemoryItemColors[category] ?: Color(0xFF757575)
+    val color = MemoryItemColors[category] ?: NionColors.MemoryOther
 
     Surface(
         shape = RoundedCornerShape(8.dp),

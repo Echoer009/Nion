@@ -74,7 +74,6 @@ import com.echonion.nion.reminder.WeatherAlertScheduler
 import com.echonion.nion.ui.companion.weather.LocationHelper
 import com.echonion.nion.ui.task.WheelSpinner
 import com.echonion.nion.ui.theme.NionColorTheme
-import com.echonion.nion.ui.theme.NionColors
 
 /**
  * 设置页面 —— 应用配置中心。
@@ -671,7 +670,7 @@ private fun ThemeOptionCard(
         ) {
             Surface(
                 shape = RoundedCornerShape(8.dp),
-                color = NionColors.Warm50,
+                color = MaterialTheme.colorScheme.surface,
                 modifier = Modifier.size(52.dp),
                 border = androidx.compose.foundation.BorderStroke(
                     1.dp,

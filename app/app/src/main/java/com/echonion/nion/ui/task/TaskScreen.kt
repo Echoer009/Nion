@@ -1252,12 +1252,12 @@ private fun GroupTabChip(
         MaterialTheme.colorScheme.surfaceVariant
     }
     val contentColor = if (isSelected) {
-        // 简单判断亮暗色：选择白色或深色文字
         chipColor?.let { c ->
             val r = android.graphics.Color.red(c)
             val g = android.graphics.Color.green(c)
             val b = android.graphics.Color.blue(c)
-            if (r * 0.299 + g * 0.587 + b * 0.114 > 186) Color.Black else Color.White
+            if (r * 0.299 + g * 0.587 + b * 0.114 > 186) MaterialTheme.colorScheme.onSurface
+            else MaterialTheme.colorScheme.onPrimary
         } ?: MaterialTheme.colorScheme.onPrimary
     } else {
         MaterialTheme.colorScheme.onSurfaceVariant

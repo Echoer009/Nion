@@ -370,7 +370,7 @@ fun ReminderOverlay(
                                 shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(
                                     containerColor = accentColor,
-                                    contentColor = Color.White,
+                                    contentColor = MaterialTheme.colorScheme.onPrimary,
                                 ),
                                 modifier = Modifier.weight(1f),
                             ) {
