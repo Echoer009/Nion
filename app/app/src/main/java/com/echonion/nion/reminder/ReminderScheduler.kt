@@ -120,6 +120,10 @@ object ReminderScheduler {
         try {
             val tasks = core.getTasks()
             for (task in tasks) {
+                // 重调度意味着新的提醒周期开始，重置旧的 trigger_count
+                // 避免 App 重启后残留的计数导致"第 N 次提醒"偏移
+                ReminderStore.resetTriggerCount(context, task.id)
+
                 // 处理普通任务的一次性提醒
                 val reminder = task.reminder
                 if (reminder != null) {

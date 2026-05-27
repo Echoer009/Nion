@@ -129,26 +129,35 @@ fun SharedTaskList(
      * 注意：在 composition 中修改 SnapshotStateList 会触发一次额外的重组，
      * 但第二次重组时 newIds == currentIds（已同步），不再修改，因此收敛为 2 次重组。
      */
-    remember(todoItems) {
-        if (draggedGroupId == null) {
-            val newIds = todoItems.map { it.task.id }
-            val currentIds = reorderableItems.map { it.task.id }
-            if (newIds != currentIds) {
-                // 只移除已离开待办列表的 item（完成或删除）
-                reorderableItems.removeAll { it.task.id !in newIds }
-                // 只添加新来的 item，插入到正确位置
-                for ((idx, item) in todoItems.withIndex()) {
-                    if (item.task.id !in currentIds) {
-                        reorderableItems.add(idx.coerceAtMost(reorderableItems.size), item)
-                    }
-                }
-                // 对已有 item 按新列表顺序重排
-                val targetOrder = newIds.withIndex().associate { (i, id) -> id to i }
-                reorderableItems.sortBy { targetOrder[it.task.id] ?: Int.MAX_VALUE }
-            }
-        }
-        true
-    }
+     remember(todoItems) {
+         if (draggedGroupId == null) {
+             val newIds = todoItems.map { it.task.id }
+             val currentIds = reorderableItems.map { it.task.id }
+             if (newIds != currentIds) {
+                 // 只移除已离开待办列表的 item（完成或删除）
+                 reorderableItems.removeAll { it.task.id !in newIds }
+                 // 只添加新来的 item，插入到正确位置
+                 for ((idx, item) in todoItems.withIndex()) {
+                     if (item.task.id !in currentIds) {
+                         reorderableItems.add(idx.coerceAtMost(reorderableItems.size), item)
+                     }
+                 }
+                 // 对已有 item 按新列表顺序重排
+                 val targetOrder = newIds.withIndex().associate { (i, id) -> id to i }
+                 reorderableItems.sortBy { targetOrder[it.task.id] ?: Int.MAX_VALUE }
+             }
+             // 同步已有 item 的内容变更（reminder、title 等字段变化时更新）
+             // 解决：设置提醒后卡片不刷新铃铛图标的问题
+             for (i in todoItems.indices) {
+                 val newItem = todoItems[i]
+                 val currentIdx = reorderableItems.indexOfFirst { it.task.id == newItem.task.id }
+                 if (currentIdx >= 0 && reorderableItems[currentIdx] != newItem) {
+                     reorderableItems[currentIdx] = newItem
+                 }
+             }
+         }
+         true
+     }
 
     val headerCount = 2
 

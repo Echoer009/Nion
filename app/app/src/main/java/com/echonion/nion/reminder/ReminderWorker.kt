@@ -6,6 +6,7 @@ import android.provider.Settings
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.Data
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
@@ -57,7 +58,14 @@ class ReminderWorker(
                 .setInputData(data)
                 .build()
 
-            WorkManager.getInstance(context).enqueue(workRequest)
+            // 使用唯一 Work 名称去重：同一任务已有排队中的 Worker 则跳过，
+            // 防止 AlarmManager 重复投递导致 trigger_count 被多次递增
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork(
+                    "reminder_$taskId",
+                    ExistingWorkPolicy.KEEP,
+                    workRequest,
+                )
             Log.d(TAG, "已入队 ReminderWorker: taskId=$taskId, type=$type")
         }
     }
@@ -83,8 +91,9 @@ class ReminderWorker(
             val taskPriority = task.priority
 
             // 2. 读取并递增 trigger_count
+            val oldTriggerCount = ReminderStore.getTriggerCount(applicationContext, taskId)
             val triggerCount = ReminderStore.incrementTriggerCount(applicationContext, taskId)
-            Log.d(TAG, "触发次数: $triggerCount/$${ReminderStore.MAX_TRIGGER_COUNT}, task=$taskTitle")
+            Log.d(TAG, "触发次数: $triggerCount/${ReminderStore.MAX_TRIGGER_COUNT}, task=$taskTitle (旧值=$oldTriggerCount)")
 
             // 3. 生成个性化文案（LLM 或模板兜底）
             val message = ReminderMessageGenerator.generateWithLLM(

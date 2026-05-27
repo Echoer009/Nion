@@ -61,7 +61,8 @@ object ReminderStore {
      * @return 递增后的触发次数
      */
     fun incrementTriggerCount(context: Context, taskId: String): Int {
-        val newCount = getTriggerCount(context, taskId) + 1
+        val oldCount = getTriggerCount(context, taskId)
+        val newCount = oldCount + 1
         setTriggerCount(context, taskId, newCount)
         return newCount
     }
