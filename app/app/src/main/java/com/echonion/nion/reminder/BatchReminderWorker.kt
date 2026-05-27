@@ -4,23 +4,14 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.echonion.nion.MainActivity
 import com.echonion.nion.NionApp
-import com.echonion.nion.R
-import com.echonion.nion.ui.companion.ApiType
-import com.echonion.nion.ui.companion.ChatService
-import com.echonion.nion.ui.companion.ProviderConfig
-import com.echonion.nion.ui.companion.builtInProviders
 import org.json.JSONArray
-import org.json.JSONObject
 import uniffi.nion_core.NionCore
-import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
@@ -34,9 +25,8 @@ import java.time.format.DateTimeFormatter
  *
  * 执行流程：
  * 1. 读取 InputData 中的时段信息和任务列表
- * 2. 构建汇总文案（LLM 或模板）
- * 3. 发送汇总通知（带「查看详情」和「调整计划」按钮）
- * 4. 「调整计划」按钮 → 打开伙伴面板，Nion 帮助重新安排
+ * 2. 构建汇总文案（通过 ReminderLlmClient 或模板兜底）
+ * 3. 通过 NotificationHelper 发送汇总通知
  */
 class BatchReminderWorker(
     context: Context,
@@ -92,7 +82,8 @@ class BatchReminderWorker(
                 // 只看今天有 reminder 的任务
                 val todayReminders = allTasks.mapNotNull { task ->
                     val reminder = task.reminder ?: return@mapNotNull null
-                    val millis = parseReminderToMillis(reminder) ?: return@mapNotNull null
+                    // 复用 ReminderUtils 解析时间（消除重复的 parseReminderToMillis）
+                    val millis = ReminderUtils.parseReminderToMillis(reminder) ?: return@mapNotNull null
                     val dateTime = java.time.Instant.ofEpochMilli(millis)
                         .atZone(ZoneId.systemDefault()).toLocalDateTime()
                     // 只看今天且未来的提醒
@@ -149,23 +140,6 @@ class BatchReminderWorker(
                 Log.e(TAG, "扫描密集时段失败", e)
             }
         }
-
-        private fun parseReminderToMillis(reminder: String): Long? {
-            return try {
-                val ldt = try {
-                    LocalDateTime.parse(reminder, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
-                } catch (_: Exception) {
-                    try {
-                        LocalDateTime.parse(reminder, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                    } catch (_: Exception) {
-                        return try {
-                            java.time.OffsetDateTime.parse(reminder).toInstant().toEpochMilli()
-                        } catch (_: Exception) { null }
-                    }
-                }
-                ldt?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli()
-            } catch (_: Exception) { null }
-        }
     }
 
     override suspend fun doWork(): Result {
@@ -188,7 +162,8 @@ class BatchReminderWorker(
                 try {
                     val task = core.getTask(id)
                     val reminderTime = task.reminder?.let { r ->
-                        parseReminderToMillis(r)?.let { m ->
+                        // 复用 ReminderUtils 解析时间
+                        ReminderUtils.parseReminderToMillis(r)?.let { m ->
                             java.time.Instant.ofEpochMilli(m)
                                 .atZone(ZoneId.systemDefault()).toLocalTime()
                                 .format(DateTimeFormatter.ofPattern("HH:mm"))
@@ -201,8 +176,8 @@ class BatchReminderWorker(
             // 生成汇总文案
             val message = generateBatchMessage(core, taskInfos, periodStart, periodEnd)
 
-            // 发送通知
-            showBatchNotification(applicationContext, message, taskIds)
+            // 通过 NotificationHelper 发送通知（复用共享方法）
+            NotificationHelper.showBatchNotification(applicationContext, message)
 
             return Result.success()
         } catch (e: Exception) {
@@ -213,6 +188,7 @@ class BatchReminderWorker(
 
     /**
      * 生成批量提醒文案。
+     * 通过 ReminderLlmClient 尝试 LLM 生成，失败时用模板兜底。
      */
     private suspend fun generateBatchMessage(
         core: NionCore,
@@ -220,91 +196,23 @@ class BatchReminderWorker(
         periodStart: String,
         periodEnd: String,
     ): String {
-        // 尝试 LLM
-        val llmResult = tryBatchLLM(core, taskInfos, periodStart, periodEnd)
-        if (llmResult != null) return llmResult
-
-        // 模板兜底
-        val taskLines = taskInfos.joinToString("\n") { (title, _, time) ->
-            if (time.isNotEmpty()) "• $title ($time)" else "• $title"
-        }
-        return "${periodStart}-${periodEnd} 这段时间有点忙哦～\n你有 ${taskInfos.size} 个任务堆在一起：\n$taskLines\n建议提前规划一下顺序！"
-    }
-
-    private suspend fun tryBatchLLM(
-        core: NionCore,
-        taskInfos: List<Triple<String, String, String>>,
-        periodStart: String,
-        periodEnd: String,
-    ): String? {
-        try {
-            val providerName = core.getSetting("llm_provider") ?: return null
-            val apiKey = core.getSetting("llm_api_key") ?: return null
-            val model = core.getSetting("llm_model") ?: return null
-            val providerConfig = builtInProviders.find { it.name == providerName }
-                ?: ProviderConfig(providerName, core.getSetting("llm_base_url") ?: "", ApiType.OPENAI_COMPATIBLE)
-
+        // 尝试 LLM（通过共享客户端统一管理配置读取和调用）
+        val client = ReminderLlmClient.fromCore(core)
+        if (client != null) {
             val systemPrompt = "你是 Nion，用户的 AI 伙伴。用户在 $periodStart-$periodEnd 有多个任务密集到期。请发一条简短提醒（2-3句话），帮助用户规划。不要用 Markdown。"
             val taskList = taskInfos.joinToString("\n") { (title, priority, time) ->
                 val p = when (priority) { "high" -> "高优"; "medium" -> "中优"; else -> "低优" }
                 if (time.isNotEmpty()) "- $title ($p, $time)" else "- $title ($p)"
             }
             val userMsg = "密集时段任务：\n$taskList"
-
-            val messages = listOf(
-                JSONObject().apply { put("role", "system"); put("content", systemPrompt) },
-                JSONObject().apply { put("role", "user"); put("content", userMsg) },
-            )
-
-            val result = ChatService.chatSimple(providerConfig, apiKey, model, messages)
-            return result.getOrNull()?.trim()
-        } catch (_: Exception) { return null }
-    }
-
-    /**
-     * 显示批量提醒通知。
-     */
-    private fun showBatchNotification(context: Context, message: String, taskIds: List<String>) {
-        val notificationId = ("batch_reminder").hashCode() and 0x7FFFFFFF
-
-        // 点击通知 → 打开伙伴面板
-        val contentIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("open_companion", true)
+            val result = client.chat(systemPrompt, userMsg)
+            if (result != null) return result
         }
-        val contentPendingIntent = PendingIntent.getActivity(
-            context, notificationId, contentIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
 
-        val notification = NotificationCompat.Builder(context, "task_reminders")
-            .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle("Nion")
-            .setContentText("任务密集时段提醒")
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setAutoCancel(true)
-            .setContentIntent(contentPendingIntent)
-            .build()
-
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        manager.notify(notificationId, notification)
-    }
-
-    private fun parseReminderToMillis(reminder: String): Long? {
-        return try {
-            val ldt = try {
-                LocalDateTime.parse(reminder, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
-            } catch (_: Exception) {
-                try {
-                    LocalDateTime.parse(reminder, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                } catch (_: Exception) {
-                    return try {
-                        java.time.OffsetDateTime.parse(reminder).toInstant().toEpochMilli()
-                    } catch (_: Exception) { null }
-                }
-            }
-            ldt?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli()
-        } catch (_: Exception) { null }
+        // 模板兜底
+        val taskLines = taskInfos.joinToString("\n") { (title, _, time) ->
+            if (time.isNotEmpty()) "• $title ($time)" else "• $title"
+        }
+        return "${periodStart}-${periodEnd} 这段时间有点忙哦～\n你有 ${taskInfos.size} 个任务堆在一起：\n$taskLines\n建议提前规划一下顺序！"
     }
 }

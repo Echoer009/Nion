@@ -197,6 +197,89 @@ object NotificationHelper {
     }
 
     /**
+     * 显示问候通知（无 Action 按钮，点击打开伙伴面板）。
+     *
+     * 用于早安/午间/晚间问候场景，通知优先级为 DEFAULT（不紧急）。
+     *
+     * @param context 上下文
+     * @param type 问候类型（"morning"/"noon"/"evening"），用于生成通知 ID 和标题
+     * @param message 问候文案（LLM 生成或模板）
+     */
+    fun showGreetingNotification(context: Context, type: String, message: String) {
+        val notificationId = ("greeting_$type").hashCode() and 0x7FFFFFFF
+
+        // 点击通知 → 打开 app 并展开伙伴面板
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("open_companion", true)
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        // 根据问候类型设置标题
+        val title = when (type) {
+            "morning" -> "早安问候"
+            "noon" -> "午间检查"
+            "evening" -> "晚间总结"
+            else -> "Nion"
+        }
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .setContentIntent(contentPendingIntent)
+            .build()
+
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(notificationId, notification)
+    }
+
+    /**
+     * 显示批量提醒通知（无 Action 按钮，点击打开伙伴面板）。
+     *
+     * 用于密集时段汇总提醒，通知优先级为 DEFAULT。
+     *
+     * @param context 上下文
+     * @param message 汇总文案（LLM 生成或模板）
+     */
+    fun showBatchNotification(context: Context, message: String) {
+        val notificationId = "batch_reminder".hashCode() and 0x7FFFFFFF
+
+        // 点击通知 → 打开伙伴面板
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("open_companion", true)
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentTitle("Nion")
+            .setContentText("任务密集时段提醒")
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .setContentIntent(contentPendingIntent)
+            .build()
+
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(notificationId, notification)
+    }
+
+    /**
      * 取消指定任务的通知。
      * 当用户在应用内处理了提醒后调用，避免通知栏还残留。
      */

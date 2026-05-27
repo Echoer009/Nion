@@ -1,27 +1,18 @@
 package com.echonion.nion.reminder
 
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
 import android.util.Log
-import androidx.core.app.NotificationCompat
 import androidx.work.CoroutineWorker
 import androidx.work.Data
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import com.echonion.nion.MainActivity
 import com.echonion.nion.NionApp
-import com.echonion.nion.R
-import com.echonion.nion.ui.companion.ApiType
-import com.echonion.nion.ui.companion.ChatService
-import com.echonion.nion.ui.companion.ProviderConfig
-import com.echonion.nion.ui.companion.builtInProviders
-import org.json.JSONArray
-import org.json.JSONObject
 import uniffi.nion_core.NionCore
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * 情景问候 Worker —— 在后台生成问候消息并写入伙伴对话 + 发送通知。
@@ -29,9 +20,9 @@ import java.time.format.DateTimeFormatter
  * 执行流程：
  * 1. 确定问候类型（morning/noon/evening）
  * 2. 查询今日任务数据（待办数、完成数、优先级分布）
- * 3. 构建上下文 → LLM 生成问候语（无 API key 用模板）
+ * 3. 构建上下文 → 通过 ReminderLlmClient 生成问候语（无 API key 用模板）
  * 4. 将问候消息写入当前伙伴对话（用户打开面板即可看到）
- * 5. 发送系统通知（一个按钮「打开聊天」）
+ * 5. 通过 NotificationHelper 发送系统通知
  * 6. 调度明天的同类型问候
  */
 class GreetingWorker(
@@ -85,8 +76,8 @@ class GreetingWorker(
             // 3. 写入伙伴对话
             writeGreetingToConversation(core, greetingText)
 
-            // 4. 发送通知
-            showGreetingNotification(applicationContext, type, greetingText)
+            // 4. 通过 NotificationHelper 发送通知（复用共享方法）
+            NotificationHelper.showGreetingNotification(applicationContext, type, greetingText)
 
             // 5. 调度明天的同类型问候
             val timeStr = getGreetingTime(core, type)
@@ -102,7 +93,7 @@ class GreetingWorker(
 
     /**
      * 生成问候文案。
-     * 优先尝试 LLM 生成，失败时使用模板兜底。
+     * 优先通过 ReminderLlmClient 尝试 LLM 生成，失败时使用模板兜底。
      */
     private suspend fun generateGreeting(
         core: NionCore,
@@ -112,34 +103,9 @@ class GreetingWorker(
         pending: Int,
         highPriority: Int,
     ): String {
-        // 先尝试 LLM
-        val llmResult = tryGenerateWithLLM(core, type, taskTitles, completed, pending, highPriority)
-        if (llmResult != null) return llmResult
-
-        // LLM 失败，用模板兜底
-        return generateFromTemplate(type, taskTitles, completed, pending, highPriority)
-    }
-
-    /**
-     * 尝试用 LLM 生成问候语。
-     * @return 生成成功返回文案，失败返回 null
-     */
-    private suspend fun tryGenerateWithLLM(
-        core: NionCore,
-        type: String,
-        taskTitles: List<String>,
-        completed: Int,
-        pending: Int,
-        highPriority: Int,
-    ): String? {
-        try {
-            val providerName = core.getSetting("llm_provider") ?: return null
-            val apiKey = core.getSetting("llm_api_key") ?: return null
-            val model = core.getSetting("llm_model") ?: return null
-            val baseUrl = core.getSetting("llm_base_url") ?: ""
-            val providerConfig = builtInProviders.find { it.name == providerName }
-                ?: ProviderConfig(providerName, baseUrl, ApiType.OPENAI_COMPATIBLE)
-
+        // 尝试 LLM（通过共享客户端统一管理配置读取和调用）
+        val client = ReminderLlmClient.fromCore(core)
+        if (client != null) {
             val timeContext = when (type) {
                 "morning" -> "现在是早上，新的一天开始了"
                 "noon" -> "现在是中午，午饭时间"
@@ -167,24 +133,12 @@ $taskList
 未完成：$pending 个
 高优先级未完成：$highPriority 个"""
 
-            val messages = listOf(
-                JSONObject().apply { put("role", "system"); put("content", systemPrompt) },
-                JSONObject().apply { put("role", "user"); put("content", userMsg) },
-            )
-
-            val result = ChatService.chatSimple(providerConfig, apiKey, model, messages)
-            val text = result.getOrNull()
-            if (!text.isNullOrBlank()) {
-                return text.trim()
-                    .replace(Regex("\\*\\*(.*?)\\*\\*"), "$1")
-                    .replace(Regex("```[\\s\\S]*?```"), "")
-                    .replace("`", "")
-                    .trim()
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "LLM 问候生成失败", e)
+            val result = client.chat(systemPrompt, userMsg)
+            if (result != null) return result
         }
-        return null
+
+        // LLM 失败或不可用，用模板兜底
+        return generateFromTemplate(type, taskTitles, completed, pending, highPriority)
     }
 
     /**
@@ -264,45 +218,6 @@ $taskList
         } catch (e: Exception) {
             Log.w(TAG, "写入对话失败", e)
         }
-    }
-
-    /**
-     * 显示问候通知（一个按钮「打开聊天」）。
-     */
-    private fun showGreetingNotification(context: Context, type: String, message: String) {
-        val notificationId = ("greeting_$type").hashCode() and 0x7FFFFFFF
-
-        // 点击通知 → 打开 app 并展开伙伴面板
-        val contentIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("open_companion", true)
-        }
-        val contentPendingIntent = PendingIntent.getActivity(
-            context,
-            notificationId,
-            contentIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
-        val title = when (type) {
-            "morning" -> "早安问候"
-            "noon" -> "午间检查"
-            "evening" -> "晚间总结"
-            else -> "Nion"
-        }
-
-        val notification = NotificationCompat.Builder(context, "task_reminders")
-            .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle(title)
-            .setContentText(message)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setAutoCancel(true)
-            .setContentIntent(contentPendingIntent)
-            .build()
-
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        manager.notify(notificationId, notification)
     }
 
     /**

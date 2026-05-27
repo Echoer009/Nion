@@ -1,19 +1,13 @@
 package com.echonion.nion.reminder
 
 import android.util.Log
-import com.echonion.nion.ui.companion.ApiType
-import com.echonion.nion.ui.companion.ChatService
-import com.echonion.nion.ui.companion.ProviderConfig
-import com.echonion.nion.ui.companion.builtInProviders
-import org.json.JSONArray
-import org.json.JSONObject
 import uniffi.nion_core.NionCore
 
 /**
  * 提醒文案生成器 —— 根据任务信息和紧迫度生成个性化的提醒消息。
  *
  * 两种生成策略：
- * - **LLM 生成**：有 API key 配置时，调用 ChatService 生成上下文感知的个性化文案
+ * - **LLM 生成**：有 API key 配置时，通过 ReminderLlmClient 生成上下文感知的个性化文案
  * - **模板兜底**：无 API key 时，使用预设的紧迫度模板（保证基本功能可用）
  */
 object ReminderMessageGenerator {
@@ -66,7 +60,7 @@ object ReminderMessageGenerator {
     /**
      * 使用 LLM 生成个性化提醒文案。
      *
-     * 从 settings 表读取 API 配置，构建精简的 prompt 调用 ChatService。
+     * 通过 ReminderLlmClient 统一读取 API 配置并发起调用。
      * 如果 LLM 调用失败，自动回退到模板文案。
      *
      * @param core NionCore 实例，用于读取 API 配置
@@ -81,50 +75,16 @@ object ReminderMessageGenerator {
         taskPriority: String,
         triggerCount: Int,
     ): String {
-        try {
-            // 读取 API 配置
-            val providerName = core.getSetting("llm_provider") ?: return generateFromTemplate(taskTitle, triggerCount)
-            val apiKey = core.getSetting("llm_api_key") ?: return generateFromTemplate(taskTitle, triggerCount)
-            val model = core.getSetting("llm_model") ?: return generateFromTemplate(taskTitle, triggerCount)
-            val baseUrl = core.getSetting("llm_base_url") ?: ""
-            val apiTypeStr = core.getSetting("llm_api_type") ?: "OPENAI_COMPATIBLE"
-
-            // 找到对应的 ProviderConfig
-            val providerConfig = builtInProviders.find { it.name == providerName }
-                ?: ProviderConfig(providerName, baseUrl, ApiType.OPENAI_COMPATIBLE)
-
-            // 构建精简的 prompt（不需要工具，只需要纯文本回复）
+        // 尝试通过共享 LLM 客户端生成
+        val client = ReminderLlmClient.fromCore(core)
+        if (client != null) {
             val systemPrompt = buildSystemPrompt(triggerCount)
             val userMessage = buildUserMessage(taskTitle, taskPriority, triggerCount)
-
-            val messages = listOf(
-                JSONObject().apply {
-                    put("role", "system")
-                    put("content", systemPrompt)
-                },
-                JSONObject().apply {
-                    put("role", "user")
-                    put("content", userMessage)
-                },
-            )
-
-            // 使用不带工具的简单聊天（只需要纯文本回复，节省 token）
-            val result = ChatService.chatSimple(providerConfig, apiKey, model, messages)
-            val response = result.getOrNull()
-
-            if (!response.isNullOrBlank()) {
-                // 清理可能的 Markdown 格式（通知中不应该有 Markdown）
-                return response.trim()
-                    .replace(Regex("\\*\\*(.*?)\\*\\*"), "$1") // 去粗体
-                    .replace(Regex("__(.*?)__"), "$1") // 去下划线粗体
-                    .replace(Regex("```[\\s\\S]*?```"), "") // 去代码块
-                    .replace("`", "") // 去行内代码
-                    .trim()
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "LLM 生成提醒文案失败，使用模板兜底", e)
+            val result = client.chat(systemPrompt, userMessage)
+            if (result != null) return result
         }
 
+        // LLM 不可用或调用失败，使用模板兜底
         return generateFromTemplate(taskTitle, triggerCount)
     }
 

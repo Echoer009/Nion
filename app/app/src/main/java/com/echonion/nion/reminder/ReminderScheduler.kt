@@ -5,11 +5,9 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.util.Log
-import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 import uniffi.nion_core.NionCore
 
 /**
@@ -127,7 +125,7 @@ object ReminderScheduler {
                 if (reminder != null) {
                     try {
                         // reminder 格式："YYYY-MM-DDTHH:MM" 或 RFC 3339
-                        val dt = parseReminderToMillis(reminder)
+                        val dt = ReminderUtils.parseReminderToMillis(reminder)
                         if (dt != null && dt > System.currentTimeMillis()) {
                             scheduleExactReminder(context, task.id, dt)
                         }
@@ -197,37 +195,10 @@ object ReminderScheduler {
     }
 
     /**
-     * 解析 reminder 字符串为毫秒时间戳。
-     * 支持格式：
-     * - "YYYY-MM-DDTHH:MM"（本地时间）
-     * - "YYYY-MM-DDTHH:MM:SS"（本地时间）
-     * - RFC 3339 格式（带时区后缀）
+     * 解析 reminder 字符串为毫秒时间戳（公开入口，委托给 ReminderUtils）。
      *
+     * @param reminder reminder 字段原始字符串
      * @return 毫秒时间戳，解析失败返回 null
      */
-    fun parseReminderToMillisPublic(reminder: String): Long? = parseReminderToMillis(reminder)
-
-    private fun parseReminderToMillis(reminder: String): Long? {
-        return try {
-            // 尝试解析为 LocalDateTime（本地时间格式）
-            val ldt = try {
-                LocalDateTime.parse(reminder, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
-            } catch (_: Exception) {
-                try {
-                    LocalDateTime.parse(reminder, DateTimeFormatter.ISO_LOCAL_DATE_TIME)
-                } catch (_: Exception) {
-                    // 最后尝试 RFC 3339（带时区）
-                    return try {
-                        java.time.OffsetDateTime.parse(reminder).toInstant().toEpochMilli()
-                    } catch (_: Exception) {
-                        null
-                    }
-                }
-            }
-            ldt?.atZone(ZoneId.systemDefault())?.toInstant()?.toEpochMilli()
-        } catch (e: Exception) {
-            Log.w(TAG, "无法解析 reminder: $reminder", e)
-            null
-        }
-    }
+    fun parseReminderToMillisPublic(reminder: String): Long? = ReminderUtils.parseReminderToMillis(reminder)
 }
