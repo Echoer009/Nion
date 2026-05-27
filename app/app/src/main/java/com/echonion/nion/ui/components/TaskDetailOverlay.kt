@@ -418,14 +418,14 @@ fun TaskDetailOverlay(
                             }
 
                             // 使用 ReminderTimePicker（startExpanded=true：直接显示日历，无标题行）
+                            // onReminderChanged 只管数据，onDismiss 负责返回 DETAIL 面板
                             ReminderTimePicker(
                                 reminder = task.reminder,
                                 onReminderChanged = { newReminder ->
                                     onUpdateReminder(newReminder)
-                                    panel = DetailPanel.DETAIL
                                 },
                                 startExpanded = true,
-                                onCancel = { panel = DetailPanel.DETAIL },
+                                onDismiss = { panel = DetailPanel.DETAIL },
                             )
                         }
                     }

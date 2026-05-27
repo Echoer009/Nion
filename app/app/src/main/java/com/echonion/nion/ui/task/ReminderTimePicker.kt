@@ -70,17 +70,21 @@ private enum class PickerStep { Date, Time }
  * @param reminder 当前提醒时间，格式 "YYYY-MM-DDTHH:MM"，null 表示未设置
  * @param onReminderChanged 提醒时间变更回调，传入新的时间字符串或 null（清除）
  * @param startExpanded 是否直接展开选择器（跳过标题行点击）。
- *   true = 面板模式：隐藏标题行，默认展开日历，取消按钮触发 onCancel 回调。
+ *   true = 面板模式：隐藏标题行，默认展开日历，操作完成后触发 onDismiss 回调。
  *   false = 内联模式（默认）：显示标题行，点击展开/收起。
  */
 @Composable
 fun ReminderTimePicker(
     reminder: String?,
+    /** 提醒时间变更回调，仅传递数据，不负责导航 */
     onReminderChanged: (String?) -> Unit,
     /** 是否直接展开（面板模式）。true 时隐藏标题行，初始展开日历 */
     startExpanded: Boolean = false,
-    /** 面板模式下点击"取消"按钮时触发，由外层负责返回上一面板。内联模式下忽略 */
-    onCancel: () -> Unit = {},
+    /**
+     * 面板模式下的关闭回调（确定/取消/清除均触发），由外层负责返回上一面板。
+     * 内联模式下忽略（直接收起选择器）。
+     */
+    onDismiss: () -> Unit = {},
 ) {
     // 解析现有 reminder 的日期和时间部分
     val initialDate = remember(reminder) {
@@ -247,8 +251,8 @@ fun ReminderTimePicker(
                                 // 清除提醒
                                 TextButton(
                                     onClick = {
-                                        if (startExpanded) onCancel()
-                                        else isExpanded = false
+                                        onReminderChanged(null)
+                                        if (startExpanded) onDismiss() else { isExpanded = false }
                                     },
                                     shape = RoundedCornerShape(14.dp),
                                     colors = ButtonDefaults.textButtonColors(
@@ -258,11 +262,10 @@ fun ReminderTimePicker(
                                     modifier = Modifier.weight(1f),
                                 ) { Text("清除", fontWeight = FontWeight.SemiBold, maxLines = 1) }
 
-                                // 取消：内联模式收起选择器，面板模式调用 onCancel 返回上一面板
+                                // 取消：内联模式收起选择器，面板模式调用 onDismiss 返回上一面板
                                 TextButton(
                                     onClick = {
-                                        if (startExpanded) onCancel()
-                                        else isExpanded = false
+                                        if (startExpanded) onDismiss() else { isExpanded = false }
                                     },
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(14.dp),
@@ -400,17 +403,16 @@ fun ReminderTimePicker(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                // 取消：内联模式收起选择器，面板模式调用 onCancel 返回上一面板
+                                // 取消：内联模式收起选择器，面板模式调用 onDismiss 返回上一面板
                                 TextButton(
                                     onClick = {
-                                        if (startExpanded) onCancel()
-                                        else isExpanded = false
+                                        if (startExpanded) onDismiss() else { isExpanded = false }
                                     },
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(14.dp),
                                 ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
 
-                                // 确定：拼接日期+时间并回调
+                                // 确定：拼接日期+时间并回调，面板模式下还要关闭面板
                                 Button(
                                     onClick = {
                                         if (selectedDate != null) {
@@ -423,7 +425,7 @@ fun ReminderTimePicker(
                                             )
                                             onReminderChanged(result)
                                         }
-                                        if (!startExpanded) isExpanded = false
+                                        if (startExpanded) onDismiss() else { isExpanded = false }
                                     },
                                     shape = RoundedCornerShape(14.dp),
                                     colors = ButtonDefaults.buttonColors(
