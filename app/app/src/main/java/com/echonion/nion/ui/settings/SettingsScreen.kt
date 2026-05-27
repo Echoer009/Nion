@@ -5,6 +5,8 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +28,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -57,6 +60,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.echonion.nion.core
 import com.echonion.nion.reminder.GreetingScheduler
+import com.echonion.nion.reminder.WeatherAlertScheduler
+import com.echonion.nion.ui.companion.weather.LocationHelper
 import com.echonion.nion.ui.theme.NionColorTheme
 import com.echonion.nion.ui.theme.NionColors
 
@@ -89,6 +94,17 @@ fun SettingsScreen(
     var eveningEnabled by remember { mutableStateOf(true) }
     var showTimePicker by remember { mutableStateOf(false) }
 
+    // ── 天气预警设置状态 ──
+    var weatherAlertEnabled by remember { mutableStateOf(true) }
+    var hasLocationPermission by remember { mutableStateOf(false) }
+
+    // 运行时位置权限请求 launcher
+    val locationPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) { grants ->
+        hasLocationPermission = grants[android.Manifest.permission.ACCESS_FINE_LOCATION] == true
+    }
+
     // 从 settings 表加载问候配置
     LaunchedEffect(Unit) {
         try {
@@ -97,6 +113,14 @@ fun SettingsScreen(
             noonEnabled = core.getSetting("greeting_noon_enabled") != "false"
             eveningEnabled = core.getSetting("greeting_evening_enabled") != "false"
         } catch (_: Exception) {}
+    }
+
+    // 加载天气设置和权限状态
+    LaunchedEffect(Unit) {
+        try {
+            weatherAlertEnabled = core.getSetting("weather_alert_enabled") != "false"
+        } catch (_: Exception) {}
+        hasLocationPermission = LocationHelper.hasLocationPermission(context)
     }
 
     // 保存设置并重新调度问候闹钟
@@ -312,6 +336,105 @@ fun SettingsScreen(
                 fontWeight = FontWeight.Bold,
                 color = MaterialTheme.colorScheme.primary,
             )
+
+            // 天气预警开关
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.WbSunny,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "天气预警",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            "下雨、降温、大风等天气变化时 Nion 会提醒你",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    Switch(
+                        checked = weatherAlertEnabled,
+                        onCheckedChange = {
+                            weatherAlertEnabled = it
+                            core.setSetting("weather_alert_enabled", if (it) "true" else "false")
+                            if (it) {
+                                WeatherAlertScheduler.start(context)
+                            } else {
+                                WeatherAlertScheduler.stop(context)
+                            }
+                        },
+                    )
+                }
+            }
+
+            // 定位权限（天气功能需要）
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.LocationOn,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "位置权限",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            if (hasLocationPermission) "已授权，天气功能可正常使用"
+                            else "未授权，天气功能需要位置权限获取所在城市",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (hasLocationPermission) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    if (!hasLocationPermission) {
+                        TextButton(onClick = {
+                            locationPermissionLauncher.launch(
+                                arrayOf(
+                                    android.Manifest.permission.ACCESS_FINE_LOCATION,
+                                    android.Manifest.permission.ACCESS_COARSE_LOCATION,
+                                )
+                            )
+                        }) {
+                            Text("授权")
+                        }
+                    } else {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = "已授权",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
 
             // 悬浮窗提醒权限开关
             ElevatedCard(

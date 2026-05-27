@@ -54,5 +54,16 @@ class BootReceiver : BroadcastReceiver() {
         } catch (e: Exception) {
             Log.e(TAG, "批量提醒重调度失败", e)
         }
+
+        try {
+            // 恢复天气预警定时检查
+            val weatherEnabled = app.core.getSetting("weather_alert_enabled")
+            if (weatherEnabled != "false") {
+                WeatherAlertScheduler.start(context)
+                Log.d(TAG, "天气预警调度恢复完成")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "天气预警调度恢复失败", e)
+        }
     }
 }

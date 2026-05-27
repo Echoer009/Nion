@@ -9,6 +9,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.echonion.nion.NionApp
 import uniffi.nion_core.NionCore
+import com.echonion.nion.ui.companion.weather.WeatherService
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import org.json.JSONArray
@@ -67,10 +68,17 @@ class GreetingWorker(
             val pendingToday = todayTasks.count { it.status != "done" }
             val highPriorityPending = todayTasks.count { it.status != "done" && it.priority == "high" }
 
-            // 2. 生成问候文案
+            // 2. 生成问候文案（注入天气上下文）
+            val weatherSummary = try {
+                WeatherService.fetchWeatherSummary(applicationContext, core)
+            } catch (e: Exception) {
+                Log.w(TAG, "获取天气数据用于问候失败", e)
+                null
+            }
             val greetingText = generateGreeting(
                 core, type, todayTasks.map { it.title },
                 completedToday, pendingToday, highPriorityPending,
+                weatherSummary,
             )
 
             // 3. 写入伙伴对话
@@ -94,6 +102,15 @@ class GreetingWorker(
     /**
      * 生成问候文案。
      * 优先通过 ReminderLlmClient 尝试 LLM 生成，失败时使用模板兜底。
+     * 会注入天气上下文，让问候结合天气情况给出建议。
+     *
+     * @param core NionCore 单例
+     * @param type 问候类型
+     * @param taskTitles 今日任务标题列表
+     * @param completed 已完成数
+     * @param pending 未完成数
+     * @param highPriority 高优先级未完成数
+     * @param weatherSummary 天气概要文本（可能为 null）
      */
     private suspend fun generateGreeting(
         core: NionCore,
@@ -102,6 +119,7 @@ class GreetingWorker(
         completed: Int,
         pending: Int,
         highPriority: Int,
+        weatherSummary: String? = null,
     ): String {
         // 尝试 LLM（通过共享客户端统一管理配置读取和调用）
         val client = ReminderLlmClient.fromCore(core)
@@ -119,7 +137,8 @@ class GreetingWorker(
 - 不要用 Markdown 格式
 - 不要加表情符号前缀
 - 语气轻松友好
-- 包含今日任务摘要和一个小建议"""
+- 包含今日任务摘要和一个小建议
+- ${if (weatherSummary != null) "结合天气信息给出实用建议（如带伞、穿衣、防晒等）" else "无需提及天气"}"""
 
             val taskList = if (taskTitles.isNotEmpty()) {
                 taskTitles.joinToString("\n") { "- $it" }
@@ -127,11 +146,15 @@ class GreetingWorker(
                 "今天没有待办任务"
             }
 
+            val weatherLine = if (weatherSummary != null) {
+                "\n当前天气：$weatherSummary"
+            } else ""
+
             val userMsg = """用户今日任务：
 $taskList
 已完成：$completed 个
 未完成：$pending 个
-高优先级未完成：$highPriority 个"""
+高优先级未完成：$highPriority 个$weatherLine"""
 
             val result = client.chat(systemPrompt, userMsg)
             if (result != null) return result
@@ -143,6 +166,7 @@ $taskList
 
     /**
      * 模板兜底生成问候语。
+     * 天气信息不为空时，在模板末尾追加天气建议。
      */
     private fun generateFromTemplate(
         type: String,
@@ -150,31 +174,36 @@ $taskList
         completed: Int,
         pending: Int,
         highPriority: Int,
+        weatherSummary: String? = null,
     ): String {
+        val weatherTip = if (weatherSummary != null) {
+            " $weatherSummary。"
+        } else ""
+
         return when (type) {
             "morning" -> {
                 if (pending > 0) {
-                    "早安～今天有 $pending 个任务等着你${if (highPriority > 0) "，其中 $highPriority 个比较紧急" else ""}。新的一天，加油！"
+                    "早安～今天有 $pending 个任务等着你${if (highPriority > 0) "，其中 $highPriority 个比较紧急" else ""}。新的一天，加油！$weatherTip"
                 } else {
-                    "早安～今天没有待办任务，轻松的一天！"
+                    "早安～今天没有待办任务，轻松的一天！$weatherTip"
                 }
             }
             "noon" -> {
                 if (completed > 0 && pending > 0) {
-                    "午安～上午完成了 $completed 个任务，下午还有 $pending 个。午饭后来继续吧！"
+                    "午安～上午完成了 $completed 个任务，下午还有 $pending 个。午饭后来继续吧！$weatherTip"
                 } else if (pending > 0) {
-                    "午安～下午还有 $pending 个任务没完成，趁着午后精力充沛搞定它们！"
+                    "午安～下午还有 $pending 个任务没完成，趁着午后精力充沛搞定它们！$weatherTip"
                 } else {
-                    "午安～今天的任务都完成了，好好休息一下！"
+                    "午安～今天的任务都完成了，好好休息一下！$weatherTip"
                 }
             }
             "evening" -> {
                 if (completed > 0) {
-                    "晚安～今天完成了 $completed 个任务，表现不错！好好休息，明天继续加油。"
+                    "晚安～今天完成了 $completed 个任务，表现不错！好好休息，明天继续加油。$weatherTip"
                 } else if (pending > 0) {
-                    "晚安～今天还有 $pending 个任务没完成，明天再接再厉！早点休息。"
+                    "晚安～今天还有 $pending 个任务没完成，明天再接再厉！早点休息。$weatherTip"
                 } else {
-                    "晚安～今天一切顺利，好好休息吧！"
+                    "晚安～今天一切顺利，好好休息吧！$weatherTip"
                 }
             }
             else -> "嗨～有什么需要帮忙的吗？"

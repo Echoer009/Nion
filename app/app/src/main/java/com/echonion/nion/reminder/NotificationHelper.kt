@@ -30,6 +30,13 @@ object NotificationHelper {
     /** 渠道描述 */
     private const val CHANNEL_DESC = "Nion 伙伴的个性化任务提醒"
 
+    /** 天气预警通知渠道 ID */
+    private const val WEATHER_CHANNEL_ID = "weather_alerts"
+    /** 天气预警渠道名称 */
+    private const val WEATHER_CHANNEL_NAME = "天气预警"
+    /** 天气预警渠道描述 */
+    private const val WEATHER_CHANNEL_DESC = "Nion 的天气变化提醒"
+
     /**
      * 创建通知渠道。
      * 必须在 Application.onCreate() 中调用，且只在 Android 8.0+ 需要创建。
@@ -48,6 +55,18 @@ object NotificationHelper {
             }
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
+
+            // 天气预警渠道（默认优先级，不紧急）
+            val weatherChannel = NotificationChannel(
+                WEATHER_CHANNEL_ID,
+                WEATHER_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_DEFAULT,
+            ).apply {
+                description = WEATHER_CHANNEL_DESC
+                enableVibration(true)
+                setShowBadge(true)
+            }
+            manager.createNotificationChannel(weatherChannel)
         }
     }
 
@@ -271,6 +290,56 @@ object NotificationHelper {
             .setContentText("任务密集时段提醒")
             .setStyle(NotificationCompat.BigTextStyle().bigText(message))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .setAutoCancel(true)
+            .setContentIntent(contentPendingIntent)
+            .build()
+
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(notificationId, notification)
+    }
+
+    /**
+     * 显示天气预警通知（无 Action 按钮，点击打开伙伴面板）。
+     *
+     * 用于天气变化预警场景（降雨、降温、大风等），通知优先级根据严重程度调整。
+     *
+     * @param context 上下文
+     * @param message 预警文案（LLM 生成或模板）
+     * @param severity 严重程度：info/warning/urgent
+     */
+    fun showWeatherAlertNotification(context: Context, message: String, severity: String) {
+        val notificationId = "weather_alert".hashCode() and 0x7FFFFFFF
+
+        // 点击通知 → 打开 app 并展开伙伴面板
+        val contentIntent = Intent(context, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            putExtra("open_companion", true)
+        }
+        val contentPendingIntent = PendingIntent.getActivity(
+            context,
+            notificationId,
+            contentIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+
+        val title = when (severity) {
+            "urgent" -> "天气紧急提醒"
+            "warning" -> "天气提醒"
+            else -> "天气提示"
+        }
+
+        val priority = when (severity) {
+            "urgent" -> NotificationCompat.PRIORITY_HIGH
+            "warning" -> NotificationCompat.PRIORITY_DEFAULT
+            else -> NotificationCompat.PRIORITY_LOW
+        }
+
+        val notification = NotificationCompat.Builder(context, WEATHER_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentTitle(title)
+            .setContentText(message)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setPriority(priority)
             .setAutoCancel(true)
             .setContentIntent(contentPendingIntent)
             .build()

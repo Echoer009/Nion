@@ -9,6 +9,7 @@ import com.echonion.nion.reminder.GreetingScheduler
 import com.echonion.nion.reminder.NotificationHelper
 import com.echonion.nion.reminder.ReminderEvent
 import com.echonion.nion.reminder.ReminderScheduler
+import com.echonion.nion.reminder.WeatherAlertScheduler
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -24,6 +25,12 @@ import uniffi.nion_core.NionCore
 data class DataChangeEvent(val type: String)
 
 class NionApp : Application() {
+    companion object {
+        /** 全局 Application 实例引用，供 WeatherTool 等需要 Context 的组件使用 */
+        var instance: NionApp? = null
+            private set
+    }
+
     lateinit var core: NionCore
         private set
 
@@ -75,6 +82,7 @@ class NionApp : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         val dbPath = getDir("nion_data", MODE_PRIVATE).absolutePath + "/nion.db"
         Log.d("NionApp", "Database path: $dbPath")
         try {
@@ -106,6 +114,16 @@ class NionApp : Application() {
             BatchReminderWorker.scheduleBatchReminders(this, core)
         } catch (e: Exception) {
             Log.e("NionApp", "调度批量提醒失败", e)
+        }
+
+        // 启动天气预警定时检查（每小时检查一次天气）
+        try {
+            val weatherEnabled = core.getSetting("weather_alert_enabled")
+            if (weatherEnabled != "false") {
+                WeatherAlertScheduler.start(this)
+            }
+        } catch (e: Exception) {
+            Log.e("NionApp", "启动天气预警调度失败", e)
         }
 
         // 注册 Activity 生命周期回调，跟踪 app 前后台状态
