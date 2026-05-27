@@ -251,7 +251,7 @@ fun SharedTaskCard(
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
-                            text = model.reminderTime ?: "",
+                            text = model.reminderTime,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
                             maxLines = 1,

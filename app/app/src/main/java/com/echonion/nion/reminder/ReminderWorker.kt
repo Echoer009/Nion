@@ -1,6 +1,8 @@
 package com.echonion.nion.reminder
 
 import android.content.Context
+import android.os.Build
+import android.provider.Settings
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.Data
@@ -94,10 +96,10 @@ class ReminderWorker(
                 applicationContext, taskId, taskTitle, message, triggerCount,
             )
 
-            // 5. 发事件到 UI 层（前台弹窗用）
-            // 只有 app 在前台时才发事件，让 ReminderOverlay 弹 app 内弹窗并 dismiss 系统通知。
-            // 后台时不发事件，保留系统通知，避免 Overlay 在后台偷偷把通知撤掉导致用户看不到。
+            // 5. 根据 App 前后台状态选择通知方式
             if (app.isInForeground) {
+                // 前台：发 SharedFlow 事件 → Compose ReminderOverlay 显示 App 内悬浮卡片
+                // 同时 dismiss 系统通知，避免双重提醒
                 try {
                     app.postReminderEvent(ReminderEvent(taskId, taskTitle, type, message, triggerCount))
                     Log.d(TAG, "已发送提醒事件到 UI（前台模式）")
@@ -105,7 +107,29 @@ class ReminderWorker(
                     Log.w(TAG, "发送提醒事件失败", e)
                 }
             } else {
-                Log.d(TAG, "App 在后台，跳过 UI 事件，保留系统通知")
+                // 后台：检查是否有悬浮窗权限
+                // 有权限 → 启动 ReminderFloatingService 显示系统级悬浮窗
+                // 无权限 → 保留系统通知栏通知（fallback）
+                val hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    Settings.canDrawOverlays(applicationContext)
+                } else {
+                    true
+                }
+
+                if (hasOverlayPermission) {
+                    try {
+                        ReminderFloatingService.start(
+                            applicationContext, taskId, taskTitle, message, triggerCount,
+                        )
+                        // 悬浮窗已接管，取消系统通知避免双重提醒
+                        NotificationHelper.dismissNotification(applicationContext, taskId)
+                        Log.d(TAG, "已启动悬浮窗 Service（后台模式）")
+                    } catch (e: Exception) {
+                        Log.w(TAG, "启动悬浮窗失败，保留系统通知", e)
+                    }
+                } else {
+                    Log.d(TAG, "App 在后台且无悬浮窗权限，保留系统通知")
+                }
             }
 
             // 6. 如果未达最大次数，调度下一次循环

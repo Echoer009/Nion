@@ -1,6 +1,10 @@
 package com.echonion.nion.ui.settings
 
 import android.app.Application
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.ElevatedCard
@@ -300,6 +305,88 @@ fun SettingsScreen(
                 }
             }
 
+            // ── 悬浮窗权限区域 ──
+            Text(
+                "提醒设置",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.primary,
+            )
+
+            // 悬浮窗提醒权限开关
+            ElevatedCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+            ) {
+                val hasOverlayPermission = remember {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        Settings.canDrawOverlays(context)
+                    } else {
+                        true
+                    }
+                }
+                // 权限状态可能在用户跳转设置后变化，用 LaunchedEffect 检测
+                var overlayGranted by remember { mutableStateOf(hasOverlayPermission) }
+                LaunchedEffect(Unit) {
+                    // 每次页面重新显示时检查权限状态
+                    overlayGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        Settings.canDrawOverlays(context)
+                    } else {
+                        true
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.OpenInNew,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "悬浮窗提醒",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            if (overlayGranted) "已授权，App 后台时可弹出悬浮卡片"
+                            else "未授权，App 后台时仅显示通知栏提醒",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (overlayGranted) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    if (!overlayGranted) {
+                        TextButton(onClick = {
+                            // 跳转系统悬浮窗权限设置页
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                val intent = Intent(
+                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                    Uri.parse("package:${context.packageName}"),
+                                )
+                                context.startActivity(intent)
+                            }
+                        }) {
+                            Text("去设置")
+                        }
+                    } else {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = "已授权",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
+
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
@@ -398,7 +485,7 @@ private fun ThemeOptionCard(
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    "#${String.format("%06X", theme.primary.value.toULong().shr(32).toInt() and 0xFFFFFF)}",
+                    "#${String.format("%06X", theme.primary.value.shr(32).toInt() and 0xFFFFFF)}",
                     style = MaterialTheme.typography.labelSmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )

@@ -1,3 +1,4 @@
+@file:Suppress("DEPRECATION")
 package com.echonion.nion.ui.companion
 
 import android.util.Log

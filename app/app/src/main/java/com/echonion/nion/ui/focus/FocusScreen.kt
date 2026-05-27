@@ -79,7 +79,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.echonion.nion.core
-import com.echonion.nion.ui.theme.NionColors
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -458,7 +457,7 @@ fun FocusScreen(
                             // 高亮刻度比普通刻度更长更粗，醒目的亮橙色
                             val hlLength = 26.dp.toPx()
                             val hlWidth = 4.5f.dp.toPx()
-                            val hlColor = Color(0xFFFF6D00).copy(alpha = highlightAlpha)
+                            val hlColor = primaryColor.copy(alpha = highlightAlpha)
                             rotate(hlAngleDeg.toFloat(), pivot = Offset(cx, cy)) {
                                 drawRoundRect(
                                     color = hlColor,
@@ -546,7 +545,7 @@ fun FocusScreen(
                             Icon(
                                 if (vm.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
                                 contentDescription = if (vm.isRunning) "暂停" else "开始",
-                                tint = Color.White,
+                                tint = MaterialTheme.colorScheme.onPrimary,
                                 modifier = Modifier.size(36.dp),
                             )
                         }
@@ -622,8 +621,7 @@ private fun TaskPanelOverlay(
     LaunchedEffect(Unit) { vm.loadTasks() }
 
     val primaryColor = MaterialTheme.colorScheme.primary
-    val creamWhite = NionColors.Warm50
-    val panelBg = creamWhite
+    val panelBg = MaterialTheme.colorScheme.surface
 
     // 计算所有任务中的最大专注秒数，用于归一化颜色深度
     val maxFocusSeconds = vm.tasks.maxOfOrNull { it.focusSeconds }?.coerceAtLeast(1L) ?: 1L
@@ -765,7 +763,7 @@ private fun TaskCardRow(
     onClick: () -> Unit,
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
-    val cardWhite = Color.White
+    val cardWhite = MaterialTheme.colorScheme.surfaceContainerLowest
     // 卡片背景：纯白 → 透明（融入米白色背景），专注越久越透明
     val cardColor = lerpColor(
         cardWhite,
@@ -795,14 +793,14 @@ private fun TaskCardRow(
                     fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    color = if (selected) primaryColor else Color(0xFF322E2A),
+                    color = if (selected) primaryColor else MaterialTheme.colorScheme.onSurface,
                 )
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
                     subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = if (selected) primaryColor.copy(alpha = 0.7f)
-                        else Color(0xFF322E2A).copy(alpha = 0.5f),
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
             if (selected) {

@@ -11,9 +11,9 @@ import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -26,15 +26,16 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
@@ -54,6 +55,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -61,9 +64,10 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import com.echonion.nion.ui.components.SharedTaskCard
-import com.echonion.nion.ui.components.TaskCardModel
+import androidx.compose.animation.SharedTransitionLayout
+import com.echonion.nion.ui.components.SharedTaskList
+import com.echonion.nion.ui.components.TaskDetailOverlay
+import com.echonion.nion.ui.task.FlatTaskItem
 import kotlinx.coroutines.launch
 import java.time.DayOfWeek
 import java.time.LocalDate
@@ -86,24 +90,31 @@ val dayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 /**
  * 日程主屏幕 —— 显示月/周选择器 + 当日任务列表。
  *
- * 使用 SharedTransitionLayout + AnimatedContent 在月视图日历弹窗和主界面之间切换，
- * 点击 MonthHeader 弹出日历选择器 overlay。
+ * 使用 SharedTransitionLayout + AnimatedContent 在两套过渡之间切换：
+ * 1. 月视图日历弹窗 ↔ 主界面
+ * 2. 任务列表 ↔ 任务详情浮层
  * 接入 ScheduleViewModel，从 Rust 端加载真实任务数据和日历标记。
  *
  * @param viewModel 日程页面的 ViewModel，提供任务数据和日历标记
  * @param onOpenCompanion 点击顶栏伙伴图标时的回调，用于打开右侧 AI 面板
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
+@Suppress("LABEL_NAME_CLASH", "kt")
 @Composable
 fun ScheduleScreen(
     viewModel: ScheduleViewModel = scheduleViewModel(),
     onOpenCompanion: () -> Unit = {},
 ) {
     var showCalendarPicker by remember { mutableStateOf(false) }
+    /** 当前展开的任务详情 ID，null 表示显示任务列表 */
+    var expandedTaskId by remember { mutableStateOf<String?>(null) }
     val today = LocalDate.now()
     val selectedDate = viewModel.selectedDate
     val dayLabel = dayLabels[selectedDate.dayOfWeek.value - 1]
     val yearMonth = YearMonth.from(selectedDate)
+
+    // 提升到 AnimatedContent 外部，跨过渡保留拖拽状态
+    val reorderableItems = remember { mutableStateListOf<FlatTaskItem>() }
 
     SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
         AnimatedContent(
@@ -121,6 +132,23 @@ fun ScheduleScreen(
             },
             label = "calendar",
         ) { showingCalendar ->
+            // 日历 morph modifier 提取到外层 "calendar" AnimatedContent，
+            // 避免内层嵌套 AnimatedContent 中 this@AnimatedContent 出现歧义。
+            val calendarSharedBounds = Modifier.sharedElement(
+                sharedContentState = rememberSharedContentState("calendar"),
+                animatedVisibilityScope = this@AnimatedContent,
+                boundsTransform = { _, _ ->
+                    spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                },
+            )
+            val calendarTextModifier = Modifier.sharedElement(
+                sharedContentState = rememberSharedContentState("monthText"),
+                animatedVisibilityScope = this@AnimatedContent,
+                boundsTransform = { _, _ ->
+                    spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                },
+            )
+
             if (showingCalendar) {
                 CalendarPickerOverlay(
                     initialYearMonth = yearMonth,
@@ -130,77 +158,80 @@ fun ScheduleScreen(
                         viewModel.selectDate(date)
                         showCalendarPicker = false
                     },
-                    sharedBoundsModifier = Modifier.sharedElement(
-                        sharedContentState = rememberSharedContentState("calendar"),
-                        animatedVisibilityScope = this@AnimatedContent,
-                        boundsTransform = { _, _ ->
-                            spring(
-                                dampingRatio = 0.8f,
-                                stiffness = Spring.StiffnessMediumLow,
-                            )
-                        },
-                    ),
-                    textSharedModifier = Modifier.sharedElement(
-                        sharedContentState = rememberSharedContentState("monthText"),
-                        animatedVisibilityScope = this@AnimatedContent,
-                        boundsTransform = { _, _ ->
-                            spring(
-                                dampingRatio = 0.8f,
-                                stiffness = Spring.StiffnessMediumLow,
-                            )
-                        },
-                    ),
-                    dateMarkers = viewModel.dateMarkers,
+                    sharedBoundsModifier = calendarSharedBounds,
+                    textSharedModifier = calendarTextModifier,
                 )
             } else {
-                ScheduleContent(
-                    selectedDate = selectedDate,
-                    dayLabel = dayLabel,
-                    today = today,
-                    tasks = viewModel.tasks,
-                    onSelectedDateChange = { viewModel.selectDate(it) },
-                    onOpenCalendar = { showCalendarPicker = true },
-                    onOpenCompanion = onOpenCompanion,
-                    onToggleDone = { taskId, date, isCompleted ->
-                        viewModel.toggleDailyDone(taskId, date, isCompleted)
+                // 第二层 AnimatedContent：任务列表 ↔ 任务详情浮层
+                AnimatedContent(
+                    targetState = expandedTaskId,
+                    transitionSpec = {
+                        if (targetState != null) {
+                            (EnterTransition.None togetherWith fadeOut(tween(250, easing = FastOutSlowInEasing)))
+                                .using(SizeTransform(clip = false))
+                        } else {
+                            (fadeIn(tween(250, easing = FastOutSlowInEasing))
+                                togetherWith fadeOut(tween(400, easing = FastOutSlowInEasing)))
+                                .using(SizeTransform(clip = false))
+                        }
                     },
-                    sharedBoundsModifier = Modifier.sharedElement(
-                        sharedContentState = rememberSharedContentState("calendar"),
-                        animatedVisibilityScope = this@AnimatedContent,
-                        boundsTransform = { _, _ ->
-                            spring(
-                                dampingRatio = 0.8f,
-                                stiffness = Spring.StiffnessMediumLow,
+                    label = "taskDetail",
+                ) { taskId ->
+                    if (taskId != null) {
+                        val task = viewModel.getFullTask(taskId)
+                        if (task != null) {
+                            TaskDetailOverlay(
+                                task = task,
+                                onDismiss = { expandedTaskId = null },
+                                onDelete = { expandedTaskId = null; viewModel.deleteTask(task.id) },
+                                onCreateSubtask = { _, _ -> },
+                                onUpdateNotes = { notes -> viewModel.updateTaskDescription(taskId, notes) },
+                                onUpdateRecurrence = { rule, time -> viewModel.updateRecurrence(taskId, rule, time) },
+                                onRemoveRecurrence = { viewModel.removeRecurrence(taskId) },
+                                onUpdateReminder = { reminder -> viewModel.updateReminder(taskId, reminder) },
+                                sharedElementModifier = Modifier.sharedElement(
+                                    sharedContentState = rememberSharedContentState("task_detail_$taskId"),
+                                    animatedVisibilityScope = this@AnimatedContent,
+                                    boundsTransform = { _, _ ->
+                                        spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                                    },
+                                ),
                             )
-                        },
-                    ),
-                    textSharedModifier = Modifier.sharedElement(
-                        sharedContentState = rememberSharedContentState("monthText"),
-                        animatedVisibilityScope = this@AnimatedContent,
-                        boundsTransform = { _, _ ->
-                            spring(
-                                dampingRatio = 0.8f,
-                                stiffness = Spring.StiffnessMediumLow,
-                            )
-                        },
-                    ),
-                )
+                        }
+                    } else {
+                        ScheduleContent(
+                            selectedDate = selectedDate,
+                            dayLabel = dayLabel,
+                            today = today,
+                            tasks = viewModel.tasks,
+                            viewModel = viewModel,
+                            onSelectedDateChange = { viewModel.selectDate(it) },
+                            onOpenCalendar = { showCalendarPicker = true },
+                            onOpenCompanion = onOpenCompanion,
+                            onTaskClick = { expandedTaskId = it },
+                            sharedBoundsModifier = calendarSharedBounds,
+                            textSharedModifier = calendarTextModifier,
+                            reorderableItems = reorderableItems,
+                        )
+                    }
+                }
             }
         }
     }
 }
 
 /**
- * 日程主界面内容 —— 顶栏 + 月份头部 + 周选择器 + 任务列表。
+ * 日程主界面内容 —— 顶栏 + 月份头部 + 周选择器 + 共享任务列表。
  *
  * @param selectedDate 当前选中日期
  * @param dayLabel "一"~"日" 的中文标签
  * @param today 今天的日期
- * @param tasks 当日任务列表（含每日任务完成状态）
+ * @param tasks 当日任务列表（用于判断空状态）
+ * @param viewModel 日程 ViewModel，提供 flatTodoItems / flatDoneItems 等状态
  * @param onSelectedDateChange 日期变更回调
  * @param onOpenCalendar 点击月份头部时打开日历弹窗
  * @param onOpenCompanion 点击顶栏伙伴图标回调
- * @param onToggleDone 切换每日任务完成状态
+ * @param onTaskClick 点击任务卡片时回调，传入 taskId 以打开详情浮层
  * @param sharedBoundsModifier shared element 动画 modifier（容器 bounds）
  * @param textSharedModifier shared element 动画 modifier（月份文字）
  */
@@ -211,26 +242,23 @@ private fun ScheduleContent(
     dayLabel: String,
     today: LocalDate,
     tasks: List<ScheduleTaskItem>,
+    viewModel: ScheduleViewModel,
     onSelectedDateChange: (LocalDate) -> Unit,
     onOpenCalendar: () -> Unit,
     onOpenCompanion: () -> Unit,
-    onToggleDone: (taskId: String, date: LocalDate, isCompleted: Boolean) -> Unit,
+    onTaskClick: (String) -> Unit,
     sharedBoundsModifier: Modifier,
     textSharedModifier: Modifier,
+    reorderableItems: SnapshotStateList<FlatTaskItem>,
 ) {
     val yearMonth = YearMonth.from(selectedDate)
-    val formatter = DateTimeFormatter.ofPattern("yyyy年 M月", Locale.CHINESE)
     Scaffold(
         contentWindowInsets = WindowInsets.statusBars,
         topBar = {
             TopAppBar(
                 title = {
                     Column {
-                        Text(
-                            "日程",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                        )
+                        Text("日程", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                         Text(
                             "周${dayLabel} · ${selectedDate.monthValue}月${selectedDate.dayOfMonth}日",
                             style = MaterialTheme.typography.bodySmall,
@@ -238,9 +266,7 @@ private fun ScheduleContent(
                         )
                     }
                 },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = Color.Transparent,
-                ),
+                colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 actions = {
                     IconButton(onClick = onOpenCompanion) {
                         Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
@@ -249,32 +275,26 @@ private fun ScheduleContent(
             )
         },
     ) { innerPadding ->
-        LazyColumn(
+        Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
-                .padding(horizontal = 16.dp),
-            // 全局小间距，卡片之间紧密排列；段落间的大间距用显式 Spacer 控制
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+                .padding(innerPadding),
         ) {
-            // 顶部留白
-            item { Spacer(modifier = Modifier.height(12.dp)) }
+            Spacer(modifier = Modifier.height(12.dp))
 
-            item {
-                MonthHeader(
-                    yearMonth = yearMonth,
-                    onPrev = { onSelectedDateChange(selectedDate.minusMonths(1)) },
-                    onNext = { onSelectedDateChange(selectedDate.plusMonths(1)) },
-                    onClick = onOpenCalendar,
-                    modifier = sharedBoundsModifier,
-                    textSharedModifier = textSharedModifier,
-                )
-            }
+            MonthHeader(
+                yearMonth = yearMonth,
+                onPrev = { onSelectedDateChange(selectedDate.minusMonths(1)) },
+                onNext = { onSelectedDateChange(selectedDate.plusMonths(1)) },
+                onClick = onOpenCalendar,
+                modifier = sharedBoundsModifier.padding(horizontal = 16.dp),
+                textSharedModifier = textSharedModifier,
+            )
 
-            // MonthHeader 与 WeekDaySelector 之间留较大间距
-            item { Spacer(modifier = Modifier.height(10.dp)) }
+            Spacer(modifier = Modifier.height(10.dp))
 
-            item {
+            // WeekDaySelector 本身 fillMaxWidth，包一层 Box 加水平内边距
+            Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                 WeekDaySelector(
                     selectedDate = selectedDate,
                     today = today,
@@ -282,58 +302,60 @@ private fun ScheduleContent(
                 )
             }
 
-            // WeekDaySelector 与标题之间留较大间距
-            item { Spacer(modifier = Modifier.height(10.dp)) }
+            Spacer(modifier = Modifier.height(10.dp))
 
-            item {
-                Text(
-                    "日程安排",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
+            Text(
+                "日程安排",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = 16.dp),
+            )
 
             if (tasks.isEmpty()) {
-                item {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(160.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                "暂无日程",
-                                style = MaterialTheme.typography.titleMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                "好好休息吧",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                            )
-                        }
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .height(160.dp)
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("暂无日程", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("好好休息吧", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                     }
                 }
             } else {
-                // 标题与第一张卡片之间的间距
-                item { Spacer(modifier = Modifier.height(6.dp)) }
+                Spacer(modifier = Modifier.height(6.dp))
 
-                items(tasks, key = { it.id }) { task ->
-                    // 使用共享任务卡片组件，compact=true 让日程页卡片略紧凑
-                    SharedTaskCard(
-                        model = task.toCardModel(),
-                        onToggleDone = {
-                            onToggleDone(task.id, selectedDate, task.isDone)
-                        },
-                        compact = true,
-                    )
-                }
+                SharedTaskList(
+                    todoItems = viewModel.flatTodoItems,
+                    doneItems = viewModel.flatDoneItems,
+                    overdueTasks = emptyList(),
+                    onToggleDone = { task ->
+                        val scheduleItem = tasks.find { it.id == task.id }
+                        if (scheduleItem != null) {
+                            viewModel.toggleDone(task.id, selectedDate, scheduleItem.isDone, scheduleItem.isDaily)
+                        }
+                    },
+                    onTaskClick = { task -> onTaskClick(task.id) },
+                    onToggleOverdueDailyDone = { _, _, _ -> },
+                    onToggleSelection = {},
+                    reorderCallback = { draggedId, _, siblingIds ->
+                        viewModel.reorderTasks(draggedId, null, siblingIds)
+                    },
+                    reorderableItems = reorderableItems,
+                    isSelectionMode = false,
+                    selectedIds = emptySet(),
+                    taskSharedModifier = { Modifier },
+                    innerPadding = PaddingValues(),
+                    modifier = Modifier.weight(1f),
+                )
             }
 
-            item { Spacer(modifier = Modifier.height(16.dp)) }
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -347,7 +369,6 @@ private fun ScheduleContent(
  * @param onSelect 选中日期回调
  * @param sharedBoundsModifier shared element 动画 modifier（容器 bounds）
  * @param textSharedModifier shared element 动画 modifier（月份文字）
- * @param dateMarkers 日历日期标记数据，用于在日历格子上显示任务指示器
  */
 @Composable
 private fun CalendarPickerOverlay(
@@ -357,12 +378,11 @@ private fun CalendarPickerOverlay(
     onSelect: (LocalDate) -> Unit,
     sharedBoundsModifier: Modifier,
     textSharedModifier: Modifier,
-    dateMarkers: Map<String, uniffi.nion_core.CalendarDateMarker> = emptyMap(),
 ) {
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color.Black.copy(alpha = 0.4f))
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -377,7 +397,6 @@ private fun CalendarPickerOverlay(
             onSelect = onSelect,
             modifier = sharedBoundsModifier,
             textSharedModifier = textSharedModifier,
-            dateMarkers = dateMarkers,
         )
     }
 }
@@ -543,12 +562,6 @@ private fun WeekDaySelector(
 }
 
 /**
- * 日程任务卡片 —— 显示任务标题、优先级色块、每日标签和完成状态。
- *
- * @param task 任务数据
- * @param onToggleDone 点击勾选框时切换完成状态
- */
-/**
  * 日历选择对话框 —— 显示月视图日历，支持左右滑动切换月份。
  *
  * 使用 HorizontalPager 包裹月网格，预渲染相邻月份，滑动时能看到前/后一个月。
@@ -570,7 +583,6 @@ private fun CalendarPickerDialog(
     onSelect: (LocalDate) -> Unit,
     modifier: Modifier = Modifier,
     textSharedModifier: Modifier = Modifier,
-    dateMarkers: Map<String, uniffi.nion_core.CalendarDateMarker> = emptyMap(),
 ) {
     // START_PAGE 居中，避免用户滑动到边界
     val startPage = Int.MAX_VALUE / 2
@@ -669,7 +681,6 @@ private fun CalendarPickerDialog(
                     yearMonth = month,
                     today = today,
                     onSelect = onSelect,
-                    dateMarkers = dateMarkers,
                 )
             }
 
@@ -708,24 +719,20 @@ private fun CalendarPickerDialog(
  * 单个月的日期网格 —— 渲染指定年月的日历格子。
  *
  * 固定渲染 6 行，空位补齐，避免不同月份行数不同导致高度变化。
- * 日期下方显示任务指示器小圆点：有任务 = 小圆点，全部完成 = 绿色，有未完成 = 橙色。
  *
  * @param yearMonth 要渲染的年月
  * @param today 今天的日期，用于高亮标记
  * @param onSelect 用户点击某一天时触发，回调传入被点击的 LocalDate
- * @param dateMarkers 日历日期标记数据
  */
 @Composable
 private fun CalendarMonthGrid(
     yearMonth: YearMonth,
     today: LocalDate,
     onSelect: (LocalDate) -> Unit,
-    dateMarkers: Map<String, uniffi.nion_core.CalendarDateMarker> = emptyMap(),
 ) {
     val firstDay = yearMonth.atDay(1)
     val daysInMonth = yearMonth.lengthOfMonth()
     val startDow = firstDay.dayOfWeek.value - 1
-    val totalCells = startDow + daysInMonth
     // 始终渲染 6 行，保持高度一致
     val rows = 6
 
@@ -738,9 +745,6 @@ private fun CalendarMonthGrid(
                     val isValid = day in 1..daysInMonth
                     val date = if (isValid) yearMonth.atDay(day) else null
                     val isToday = date == today
-                    // 日历标记：有任务时显示小圆点
-                    val dateStr = date?.format(DateTimeFormatter.ISO_LOCAL_DATE)
-                    val marker = dateStr?.let { dateMarkers[it] }
 
                     Box(
                         modifier = Modifier
@@ -767,35 +771,15 @@ private fun CalendarMonthGrid(
                         contentAlignment = Alignment.Center,
                     ) {
                         if (isValid) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                            ) {
-                                Text(
-                                    day.toString(),
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
-                                    color = when {
-                                        isToday -> MaterialTheme.colorScheme.primary
-                                        else -> MaterialTheme.colorScheme.onSurface
-                                    },
-                                )
-                                // 任务指示器小圆点
-                                if (marker != null && marker.taskCount > 0) {
-                                    Spacer(modifier = Modifier.height(1.dp))
-                                    Box(
-                                        modifier = Modifier
-                                            .size(4.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                when {
-                                                    marker.completedCount >= marker.taskCount -> Color(0xFF4CAF50)
-                                                    marker.hasOverdue -> MaterialTheme.colorScheme.error
-                                                    else -> Color(0xFFFF9800)
-                                                }
-                                            ),
-                                    )
-                                }
-                            }
+                            Text(
+                                day.toString(),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = if (isToday) FontWeight.Bold else FontWeight.Normal,
+                                color = when {
+                                    isToday -> MaterialTheme.colorScheme.primary
+                                    else -> MaterialTheme.colorScheme.onSurface
+                                },
+                            )
                         }
                     }
                 }

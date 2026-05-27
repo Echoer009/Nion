@@ -191,8 +191,7 @@ object ChatService {
             throw Exception("API 请求失败 (HTTP $responseCode): $errorBody")
         }
 
-        val responseText = connection.inputStream.bufferedReader()?.readText()
-            ?: throw Exception("响应体为空")
+        val responseText = connection.inputStream.bufferedReader().readText()
         val json = JSONObject(responseText)
         return json.getJSONArray("choices")
             .getJSONObject(0)
@@ -246,8 +245,7 @@ object ChatService {
             throw Exception("API 请求失败 (HTTP $responseCode): $errorBody")
         }
 
-        val responseText = connection.inputStream.bufferedReader()?.readText()
-            ?: throw Exception("响应体为空")
+        val responseText = connection.inputStream.bufferedReader().readText()
         val json = JSONObject(responseText)
         val contentArr = json.optJSONArray("content") ?: return ""
         val sb = StringBuilder()
@@ -720,8 +718,7 @@ object ChatService {
             return Result.failure(Exception("API 请求失败 (HTTP $responseCode): $errorBody"))
         }
 
-        val responseText = connection.inputStream.bufferedReader()?.readText()
-            ?: return Result.failure(Exception("响应体为空"))
+        val responseText = connection.inputStream.bufferedReader().readText()
         val json = JSONObject(responseText)
         val message = json.getJSONArray("choices")
             .getJSONObject(0)
@@ -739,7 +736,7 @@ object ChatService {
      */
     private fun parseOpenAIResponse(message: JSONObject): ChatResponse {
         // 提取文本内容（可能为 null）
-        val text = message.optString("content", null)?.takeIf { it.isNotEmpty() && it != "null" }
+        val text = message.optString("content", "").takeIf { it.isNotEmpty() && it != "null" }
 
         // 提取工具调用（OpenAI 格式）
         val toolCallsArray = message.optJSONArray("tool_calls")
@@ -821,8 +818,7 @@ object ChatService {
             return Result.failure(Exception("API 请求失败 (HTTP $responseCode): $errorBody"))
         }
 
-        val responseText = connection.inputStream.bufferedReader()?.readText()
-            ?: return Result.failure(Exception("响应体为空"))
+        val responseText = connection.inputStream.bufferedReader().readText()
         val json = JSONObject(responseText)
 
         return Result.success(parseAnthropicResponse(json))

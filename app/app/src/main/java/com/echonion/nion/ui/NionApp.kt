@@ -3,6 +3,7 @@ package com.echonion.nion.ui
 import android.app.Application
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
@@ -103,7 +104,6 @@ fun NionApp() {
                         preselectedFocusTaskTitle = taskTitle
                         preselectedFocusDuration = null
                         autoStartFocus = true
-                        // 导航到专注页面
                         navController.navigate("pomodoro") {
                             popUpTo(navController.graph.findStartDestination().id) {
                                 saveState = true
@@ -126,219 +126,219 @@ fun NionApp() {
     }
 
     NionTheme(colorTheme = colorTheme) {
-        // 全局提醒弹窗，放在导航层之外，确保无论在哪个页面都能弹出
-        // onStartFocus 回调：用户在弹窗中点击「开始做了」→ 跳转专注页面
-        ReminderOverlay(
-            app = app,
-            onStartFocus = { taskId, taskTitle ->
-                preselectedFocusTaskId = taskId
-                preselectedFocusTaskTitle = taskTitle
-                preselectedFocusDuration = null
-                autoStartFocus = true
-                // 导航到专注页面
-                navController.navigate("pomodoro") {
-                    popUpTo(navController.graph.findStartDestination().id) {
-                        saveState = true
+        // 用 Box 包裹，让悬浮卡片能覆盖在 Scaffold 上方
+        Box {
+            val navBackStackEntry by navController.currentBackStackEntryAsState()
+            val currentDestination = navBackStackEntry?.destination
+
+            Scaffold(
+                containerColor = MaterialTheme.colorScheme.background,
+                bottomBar = {
+                    NavigationBar(
+                        tonalElevation = 3.dp,
+                        containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                    ) {
+                        bottomNavItems.forEach { item ->
+                            val isSelected = currentDestination?.hierarchy?.any { it.route == item.route } == true
+                            NavigationBarItem(
+                                icon = {
+                                    Icon(
+                                        item.icon,
+                                        contentDescription = item.label,
+                                    )
+                                },
+                                selected = isSelected,
+                                onClick = {
+                                    /* 点击底部导航时，先收起已打开的侧边面板，再执行跳转 */
+                                    coroutineScope.launch {
+                                        dualState.closePanel()
+                                        navController.navigate(item.route) {
+                                            popUpTo(navController.graph.findStartDestination().id) {
+                                                saveState = true
+                                            }
+                                            launchSingleTop = true
+                                            restoreState = true
+                                        }
+                                    }
+                                },
+                                colors = NavigationBarItemDefaults.colors(
+                                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                                    indicatorColor = MaterialTheme.colorScheme.primaryContainer,
+                                    unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                ),
+                            )
+                        }
                     }
-                    launchSingleTop = true
-                    restoreState = true
-                }
-            },
-        )
-
-        val navBackStackEntry by navController.currentBackStackEntryAsState()
-        val currentDestination = navBackStackEntry?.destination
-
-        Scaffold(
-            containerColor = MaterialTheme.colorScheme.background,
-            bottomBar = {
-                NavigationBar(
-                    tonalElevation = 3.dp,
-                    containerColor = MaterialTheme.colorScheme.surfaceContainer,
+                },
+            ) { innerPadding ->
+                val currentRoute = currentDestination?.route
+                DualPanelLayout(
+                    leftPanelWidth = if (currentRoute == "pomodoro") 300.dp else 260.dp,
+                    rightPanelWidth = 320.dp,
+                    state = dualState,
+                    enableLeftSwipe = currentRoute == "tasks" || currentRoute == "pomodoro",
+                    modifier = Modifier.padding(innerPadding),
+                    leftPanel = { onDrag, onDragStopped, modifier ->
+                        if (currentRoute == "pomodoro") {
+                            FocusStatsPanel(
+                                onSidebarDrag = onDrag,
+                                onSidebarDragStopped = onDragStopped,
+                                modifier = modifier,
+                            )
+                        } else {
+                            val customCounts = remember(viewModel.checklistCounts) {
+                                viewModel.checklistCounts.mapNotNull { (k, v) -> k?.let { it to v } }.toMap()
+                            }
+                            SidebarContent(
+                                checklists = viewModel.checklists,
+                                activeChecklistId = viewModel.activeChecklistId,
+                                defaultCounts = viewModel.checklistCounts[TaskViewModel.TODAY_ID] ?: (0 to 0),
+                                customCounts = customCounts,
+                                onSelectChecklist = {
+                                    dualState.closeLeft()
+                                    viewModel.setActiveChecklist(it)
+                                },
+                                onAddChecklist = { name ->
+                                    viewModel.createChecklist(name)
+                                },
+                                onDeleteChecklist = { viewModel.deleteChecklist(it) },
+                                onReorderChecklists = { viewModel.reorderChecklists(it) },
+                                onSidebarDrag = onDrag,
+                                onSidebarDragStopped = onDragStopped,
+                                modifier = modifier,
+                            )
+                        }
+                    },
+                    rightPanel = { onDrag, onDragStopped, modifier ->
+                        CompanionSidebar(
+                            onSidebarDrag = onDrag,
+                            onSidebarDragStopped = onDragStopped,
+                            isVisible = dualState.isRightOpen,
+                            modifier = modifier,
+                        )
+                    },
                 ) {
-                    bottomNavItems.forEach { item ->
-                        val isSelected = currentDestination?.hierarchy?.any { it.route == item.route } == true
-                        NavigationBarItem(
-                            icon = {
-                                Icon(
-                                    item.icon,
-                                    contentDescription = item.label,
-                                )
-                            },
-                            selected = isSelected,
-                            onClick = {
-                                /* 点击底部导航时，先收起已打开的侧边面板，再执行跳转 */
-                                coroutineScope.launch {
-                                    dualState.closePanel()
-                                    navController.navigate(item.route) {
+                    NavHost(
+                        navController = navController,
+                        startDestination = "tasks",
+                        modifier = Modifier.fillMaxSize(),
+                        /* Fade Through：旧页面先淡出，再淡入新页面，中间有短暂空白帧 */
+                        enterTransition = {
+                            androidx.compose.animation.fadeIn(
+                                animationSpec = tween(
+                                    durationMillis = 200,
+                                    delayMillis = 150,
+                                    easing = FastOutSlowInEasing,
+                                ),
+                            )
+                        },
+                        exitTransition = {
+                            androidx.compose.animation.fadeOut(
+                                animationSpec = tween(
+                                    durationMillis = 150,
+                                    easing = FastOutSlowInEasing,
+                                ),
+                            )
+                        },
+                        popEnterTransition = {
+                            androidx.compose.animation.fadeIn(
+                                animationSpec = tween(
+                                    durationMillis = 200,
+                                    delayMillis = 150,
+                                    easing = FastOutSlowInEasing,
+                                ),
+                            )
+                        },
+                        popExitTransition = {
+                            androidx.compose.animation.fadeOut(
+                                animationSpec = tween(
+                                    durationMillis = 150,
+                                    easing = FastOutSlowInEasing,
+                                ),
+                            )
+                        },
+                    ) {
+                        composable("tasks") {
+                            TaskScreen(
+                                dualState = dualState,
+                                viewModel = viewModel,
+                                /** 点击任务详情中的专注按钮：立即导航到专注页，面板关闭在后台并行 */
+                                onStartFocus = { taskId, taskTitle, durationMinutes ->
+                                    preselectedFocusTaskId = taskId
+                                    preselectedFocusTaskTitle = taskTitle
+                                    preselectedFocusDuration = durationMinutes
+                                    autoStartFocus = true
+                                    navController.navigate("pomodoro") {
                                         popUpTo(navController.graph.findStartDestination().id) {
                                             saveState = true
                                         }
                                         launchSingleTop = true
                                         restoreState = true
                                     }
-                                }
-                            },
-                            colors = NavigationBarItemDefaults.colors(
-                                selectedIconColor = MaterialTheme.colorScheme.primary,
-                                indicatorColor = MaterialTheme.colorScheme.primaryContainer,
-                                unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
-                            ),
-                        )
-                    }
-                }
-            },
-        ) { innerPadding ->
-            val currentRoute = currentDestination?.route
-            DualPanelLayout(
-                leftPanelWidth = if (currentRoute == "pomodoro") 300.dp else 260.dp,
-                rightPanelWidth = 320.dp,
-                state = dualState,
-                enableLeftSwipe = currentRoute == "tasks" || currentRoute == "pomodoro",
-                modifier = Modifier.padding(innerPadding),
-                leftPanel = { onDrag, onDragStopped, modifier ->
-                    if (currentRoute == "pomodoro") {
-                        FocusStatsPanel(
-                            onSidebarDrag = onDrag,
-                            onSidebarDragStopped = onDragStopped,
-                            modifier = modifier,
-                        )
-                    } else {
-                        val customCounts = remember(viewModel.checklistCounts) {
-                            viewModel.checklistCounts.mapNotNull { (k, v) -> k?.let { it to v } }.toMap()
-                        }
-                        SidebarContent(
-                            checklists = viewModel.checklists,
-                            activeChecklistId = viewModel.activeChecklistId,
-                            defaultCounts = viewModel.checklistCounts[TaskViewModel.TODAY_ID] ?: (0 to 0),
-                            customCounts = customCounts,
-                            onSelectChecklist = {
-                                dualState.closeLeft()
-                                viewModel.setActiveChecklist(it)
-                            },
-                            onAddChecklist = { name ->
-                                viewModel.createChecklist(name)
-                            },
-                            onDeleteChecklist = { viewModel.deleteChecklist(it) },
-                            onReorderChecklists = { viewModel.reorderChecklists(it) },
-                            onSidebarDrag = onDrag,
-                            onSidebarDragStopped = onDragStopped,
-                            modifier = modifier,
-                        )
-                    }
-                },
-                rightPanel = { onDrag, onDragStopped, modifier ->
-                    CompanionSidebar(
-                        onSidebarDrag = onDrag,
-                        onSidebarDragStopped = onDragStopped,
-                        isVisible = dualState.isRightOpen,
-                        modifier = modifier,
-                    )
-                },
-            ) {
-                NavHost(
-                    navController = navController,
-                    startDestination = "tasks",
-                    modifier = Modifier.fillMaxSize(),
-                    /* Fade Through：旧页面先淡出，再淡入新页面，中间有短暂空白帧 */
-                    enterTransition = {
-                        androidx.compose.animation.fadeIn(
-                            animationSpec = tween(
-                                durationMillis = 200,
-                                delayMillis = 150,
-                                easing = FastOutSlowInEasing,
-                            ),
-                        )
-                    },
-                    exitTransition = {
-                        androidx.compose.animation.fadeOut(
-                            animationSpec = tween(
-                                durationMillis = 150,
-                                easing = FastOutSlowInEasing,
-                            ),
-                        )
-                    },
-                    popEnterTransition = {
-                        androidx.compose.animation.fadeIn(
-                            animationSpec = tween(
-                                durationMillis = 200,
-                                delayMillis = 150,
-                                easing = FastOutSlowInEasing,
-                            ),
-                        )
-                    },
-                    popExitTransition = {
-                        androidx.compose.animation.fadeOut(
-                            animationSpec = tween(
-                                durationMillis = 150,
-                                easing = FastOutSlowInEasing,
-                            ),
-                        )
-                    },
-                ) {
-                    composable("tasks") {
-                        TaskScreen(
-                            dualState = dualState,
-                            viewModel = viewModel,
-                            /** 点击任务详情中的专注按钮：立即导航到专注页，面板关闭在后台并行 */
-                            onStartFocus = { taskId, taskTitle, durationMinutes ->
-                                preselectedFocusTaskId = taskId
-                                preselectedFocusTaskTitle = taskTitle
-                                preselectedFocusDuration = durationMinutes
-                                autoStartFocus = true
-                                // 先立即导航（同步），避免 closePanel 的 200ms 阻塞导致任务列表闪现
-                                navController.navigate("pomodoro") {
-                                    popUpTo(navController.graph.findStartDestination().id) {
-                                        saveState = true
+                                    coroutineScope.launch {
+                                        dualState.closePanel()
                                     }
-                                    launchSingleTop = true
-                                    restoreState = true
+                                },
+                            )
+                        }
+                        composable("schedule") {
+                            ScheduleScreen(
+                                onOpenCompanion = { dualState.openRight() },
+                            )
+                        }
+                        composable("pomodoro") {
+                            FocusScreen(
+                                onOpenCompanion = { dualState.openRight() },
+                                preselectedTaskId = preselectedFocusTaskId,
+                                preselectedTaskTitle = preselectedFocusTaskTitle,
+                                preselectedDuration = preselectedFocusDuration,
+                                autoStart = autoStartFocus,
+                            )
+                            /**
+                             * 预选任务信息在传递给 FocusScreen 后消费掉，
+                             * 避免导航回退时重复预选。
+                             */
+                            LaunchedEffect(preselectedFocusTaskId) {
+                                if (preselectedFocusTaskId != null) {
+                                    preselectedFocusTaskId = null
+                                    preselectedFocusTaskTitle = null
+                                    preselectedFocusDuration = null
+                                    autoStartFocus = false
                                 }
-                                // 面板关闭在后台并行执行，不阻塞导航
-                                coroutineScope.launch {
-                                    dualState.closePanel()
-                                }
-                            },
-                        )
-                    }
-                    composable("schedule") {
-                        ScheduleScreen(
-                            onOpenCompanion = { dualState.openRight() },
-                        )
-                    }
-                    composable("pomodoro") {
-                        FocusScreen(
-                            onOpenCompanion = { dualState.openRight() },
-                            preselectedTaskId = preselectedFocusTaskId,
-                            preselectedTaskTitle = preselectedFocusTaskTitle,
-                            preselectedDuration = preselectedFocusDuration,
-                            autoStart = autoStartFocus,
-                        )
-                        /**
-                         * 预选任务信息在传递给 FocusScreen 后消费掉，
-                         * 避免导航回退时重复预选。
-                         */
-                        LaunchedEffect(preselectedFocusTaskId) {
-                            if (preselectedFocusTaskId != null) {
-                                preselectedFocusTaskId = null
-                                preselectedFocusTaskTitle = null
-                                preselectedFocusDuration = null
-                                autoStartFocus = false
                             }
                         }
-                    }
-                    composable("settings") {
-                        SettingsScreen(
-                            currentTheme = colorTheme,
-                            onThemeChange = {
-                                colorTheme = it
-                                try { core.setSetting("color_theme", it.name) } catch (_: Exception) {}
-                            },
-                            onOpenCompanion = { dualState.openRight() },
-                        )
+                        composable("settings") {
+                            SettingsScreen(
+                                currentTheme = colorTheme,
+                                onThemeChange = {
+                                    colorTheme = it
+                                    try { core.setSetting("color_theme", it.name) } catch (_: Exception) {}
+                                },
+                                onOpenCompanion = { dualState.openRight() },
+                            )
+                        }
                     }
                 }
             }
+
+            // 全局提醒悬浮卡片，放在 Scaffold 之后（Z 轴上层），确保浮在所有界面之上
+            // onStartFocus 回调：用户点击「开始做了」→ 跳转专注页面
+            ReminderOverlay(
+                app = app,
+                onStartFocus = { taskId, taskTitle ->
+                    preselectedFocusTaskId = taskId
+                    preselectedFocusTaskTitle = taskTitle
+                    preselectedFocusDuration = null
+                    autoStartFocus = true
+                    navController.navigate("pomodoro") {
+                        popUpTo(navController.graph.findStartDestination().id) {
+                            saveState = true
+                        }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
+                },
+            )
         }
     }
 }
