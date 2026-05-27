@@ -61,7 +61,7 @@ private enum class PickerStep { Date, Time }
  * 一次性提醒时间选择器 —— 复用 NionCalendar（日期）+ WheelSpinner（时间）。
  *
  * 交互流程（分步选择 + 左右滑动动画）：
- * 1. 显示当前提醒时间或"设置提醒"
+ * 1. 显示当前提醒时间或"设置提醒"（仅内联模式，startExpanded=false）
  * 2. 点击后展开，先只显示日历（第一步）
  * 3. 用户选完日期后，日历向左滑出，时间滚轮从右侧滑入（第二步）
  * 4. 顶部显示已选日期，可点击返回日历重新选择
@@ -69,11 +69,18 @@ private enum class PickerStep { Date, Time }
  *
  * @param reminder 当前提醒时间，格式 "YYYY-MM-DDTHH:MM"，null 表示未设置
  * @param onReminderChanged 提醒时间变更回调，传入新的时间字符串或 null（清除）
+ * @param startExpanded 是否直接展开选择器（跳过标题行点击）。
+ *   true = 面板模式：隐藏标题行，默认展开日历，取消按钮触发 onCancel 回调。
+ *   false = 内联模式（默认）：显示标题行，点击展开/收起。
  */
 @Composable
 fun ReminderTimePicker(
     reminder: String?,
     onReminderChanged: (String?) -> Unit,
+    /** 是否直接展开（面板模式）。true 时隐藏标题行，初始展开日历 */
+    startExpanded: Boolean = false,
+    /** 面板模式下点击"取消"按钮时触发，由外层负责返回上一面板。内联模式下忽略 */
+    onCancel: () -> Unit = {},
 ) {
     // 解析现有 reminder 的日期和时间部分
     val initialDate = remember(reminder) {
@@ -99,8 +106,8 @@ fun ReminderTimePicker(
         } catch (_: Exception) { 0 }
     }
 
-    // 是否展开选择器
-    var isExpanded by remember { mutableStateOf(false) }
+    // 是否展开选择器：面板模式默认展开，内联模式默认收起
+    var isExpanded by remember { mutableStateOf(startExpanded) }
     // 当前步骤：Date 先选日期，Time 再选时间
     var step by remember { mutableStateOf(PickerStep.Date) }
     // 已选择的日期
@@ -129,47 +136,49 @@ fun ReminderTimePicker(
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        // 标题行：闹钟图标 + "提醒" 文字 + 当前值
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Icon(
-                Icons.Outlined.Alarm,
-                contentDescription = null,
-                modifier = Modifier.size(18.dp),
-                tint = if (reminder != null) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                "提醒",
-                style = MaterialTheme.typography.bodyMedium,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            // 当前提醒时间或"设置提醒"，点击展开/收起
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = if (reminder != null) MaterialTheme.colorScheme.primaryContainer
-                    else MaterialTheme.colorScheme.surfaceContainerHighest,
-                modifier = Modifier
-                    .clip(RoundedCornerShape(8.dp))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = { isExpanded = !isExpanded },
-                    ),
+        // 标题行：仅内联模式显示（闹钟图标 + "提醒" + 当前值，点击展开/收起）
+        if (!startExpanded) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Text(
-                    text = formatReminderDisplay(reminder),
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (reminder != null) MaterialTheme.colorScheme.primary
+                Icon(
+                    Icons.Outlined.Alarm,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = if (reminder != null) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                 )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "提醒",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Spacer(modifier = Modifier.weight(1f))
+                // 当前提醒时间或"设置提醒"，点击展开/收起
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (reminder != null) MaterialTheme.colorScheme.primaryContainer
+                        else MaterialTheme.colorScheme.surfaceContainerHighest,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = { isExpanded = !isExpanded },
+                        ),
+                ) {
+                    Text(
+                        text = formatReminderDisplay(reminder),
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (reminder != null) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
             }
         }
 
@@ -238,9 +247,8 @@ fun ReminderTimePicker(
                                 // 清除提醒
                                 TextButton(
                                     onClick = {
-                                        onReminderChanged(null)
-                                        isExpanded = false
-                                        selectedDate = null
+                                        if (startExpanded) onCancel()
+                                        else isExpanded = false
                                     },
                                     shape = RoundedCornerShape(14.dp),
                                     colors = ButtonDefaults.textButtonColors(
@@ -250,9 +258,12 @@ fun ReminderTimePicker(
                                     modifier = Modifier.weight(1f),
                                 ) { Text("清除", fontWeight = FontWeight.SemiBold, maxLines = 1) }
 
-                                // 取消
+                                // 取消：内联模式收起选择器，面板模式调用 onCancel 返回上一面板
                                 TextButton(
-                                    onClick = { isExpanded = false },
+                                    onClick = {
+                                        if (startExpanded) onCancel()
+                                        else isExpanded = false
+                                    },
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(14.dp),
                                 ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
@@ -348,7 +359,7 @@ fun ReminderTimePicker(
                                     horizontalArrangement = Arrangement.Center,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    // 小时滚轮 (0-23)
+                                    // 小时滚轮 (0-23)，循环滚动
                                     WheelSpinner(
                                         items = (0..23).map { "%02d".format(it) },
                                         initialIndex = selectedHour,
@@ -356,6 +367,7 @@ fun ReminderTimePicker(
                                         itemHeight = itemHeight,
                                         onSelected = { selectedHour = it },
                                         modifier = Modifier.weight(1f),
+                                        circular = true,
                                     )
 
                                     // 冒号分隔符
@@ -367,7 +379,7 @@ fun ReminderTimePicker(
                                         modifier = Modifier.padding(horizontal = 8.dp),
                                     )
 
-                                    // 分钟滚轮 (0-59)
+                                    // 分钟滚轮 (0-59)，循环滚动
                                     WheelSpinner(
                                         items = (0..59).map { "%02d".format(it) },
                                         initialIndex = selectedMinute,
@@ -375,6 +387,7 @@ fun ReminderTimePicker(
                                         itemHeight = itemHeight,
                                         onSelected = { selectedMinute = it },
                                         modifier = Modifier.weight(1f),
+                                        circular = true,
                                     )
                                 }
                             }
@@ -387,9 +400,12 @@ fun ReminderTimePicker(
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
-                                // 取消
+                                // 取消：内联模式收起选择器，面板模式调用 onCancel 返回上一面板
                                 TextButton(
-                                    onClick = { isExpanded = false },
+                                    onClick = {
+                                        if (startExpanded) onCancel()
+                                        else isExpanded = false
+                                    },
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(14.dp),
                                 ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
@@ -407,7 +423,7 @@ fun ReminderTimePicker(
                                             )
                                             onReminderChanged(result)
                                         }
-                                        isExpanded = false
+                                        if (!startExpanded) isExpanded = false
                                     },
                                     shape = RoundedCornerShape(14.dp),
                                     colors = ButtonDefaults.buttonColors(

@@ -73,232 +73,6 @@ import kotlinx.coroutines.launch
 private val dayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 
 /**
- * 可复用的日期选择行 —— 用于新建任务表单。
- * 显示日历图标 + 日期文字，点击弹出 Nion 自定义日历。
- */
-@Composable
-fun DatePickerRow(
-    dueDate: String?,
-    onDateSelected: (String?) -> Unit,
-    modifier: Modifier = Modifier,
-) {
-    var showPicker by remember { mutableStateOf(false) }
-
-    Row(
-        modifier = modifier.clickable { showPicker = true },
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(
-            Icons.Outlined.CalendarToday,
-            contentDescription = null,
-            modifier = Modifier.size(18.dp),
-            tint = if (dueDate != null) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        Spacer(modifier = Modifier.width(8.dp))
-        Text(
-            text = dueDate.formatDueDate() ?: "选择日期",
-            style = MaterialTheme.typography.bodyMedium,
-            fontWeight = FontWeight.Medium,
-            color = if (dueDate != null) MaterialTheme.colorScheme.primary
-                else MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-    }
-
-    if (showPicker) {
-        NionDatePickerDialog(
-            initialDate = dueDate,
-            onConfirm = { selected ->
-                onDateSelected(selected)
-                showPicker = false
-            },
-            onDismiss = { showPicker = false },
-        )
-    }
-}
-
-/**
- * Nion 自定义日期选择对话框 —— 用自研日历替代 M3 DatePicker。
- */
-@Composable
-fun NionDatePickerDialog(
-    initialDate: String?,
-    onConfirm: (String?) -> Unit,
-    onDismiss: () -> Unit,
-) {
-    val initialLocalDate = remember(initialDate) {
-        try {
-            if (!initialDate.isNullOrBlank()) LocalDate.parse(initialDate, DateTimeFormatter.ISO_LOCAL_DATE)
-            else null
-        } catch (_: Exception) { null }
-    }
-    val initialYearMonth = remember(initialLocalDate) { initialLocalDate?.let { YearMonth.from(it) } ?: YearMonth.now() }
-    val today = remember { LocalDate.now() }
-    var selectedDate by remember(initialLocalDate) { mutableStateOf<LocalDate?>(initialLocalDate) }
-
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp),
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        tonalElevation = 6.dp,
-    ) {
-        Column(modifier = Modifier.padding(20.dp)) {
-            NionCalendar(
-                initialYearMonth = initialYearMonth,
-                today = today,
-                selectedDate = selectedDate,
-                onSelect = { selectedDate = it },
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Surface(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                        onClick = { selectedDate = today },
-                    ),
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-            ) {
-                Box(
-                    modifier = Modifier.padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Text(
-                        "回到今天",
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                TextButton(
-                    onClick = { onConfirm(null) },
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.textButtonColors(
-                        contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                    ),
-                    modifier = Modifier.weight(1f),
-                ) { Text("清除", fontWeight = FontWeight.SemiBold, maxLines = 1) }
-                TextButton(
-                    onClick = onDismiss,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(14.dp),
-                ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
-                Button(
-                    onClick = { onConfirm(selectedDate?.format(DateTimeFormatter.ISO_LOCAL_DATE)) },
-                    shape = RoundedCornerShape(14.dp),
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                    modifier = Modifier.weight(1f),
-                ) { Text("确定", fontWeight = FontWeight.SemiBold, maxLines = 1) }
-            }
-        }
-    }
-}
-
-/**
- * 日期选择页面 —— 用于任务详情 morph 动画中。
- * 替代 M3 DatePicker，使用自研日历。
- */
-@Composable
-fun DatePickerPage(
-    taskId: String,
-    initialDate: String?,
-    onConfirm: (String?) -> Unit,
-    onBack: () -> Unit,
-) {
-    val initialLocalDate = remember(initialDate) {
-        try {
-            if (!initialDate.isNullOrBlank()) LocalDate.parse(initialDate, DateTimeFormatter.ISO_LOCAL_DATE)
-            else null
-        } catch (_: Exception) { null }
-    }
-    val initialYearMonth = remember(initialLocalDate) { initialLocalDate?.let { YearMonth.from(it) } ?: YearMonth.now() }
-    val today = remember { LocalDate.now() }
-    var selectedDate by remember(initialLocalDate) { mutableStateOf<LocalDate?>(initialLocalDate) }
-
-    Column(modifier = Modifier.padding(20.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.primaryContainer,
-                modifier = Modifier.size(40.dp),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Outlined.CalendarToday,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp),
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.width(14.dp))
-            Text(
-                "选择日期",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-            )
-            Spacer(modifier = Modifier.weight(1f))
-            IconButton(onClick = onBack) {
-                Icon(Icons.Default.Close, contentDescription = "关闭")
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-
-        NionCalendar(
-            initialYearMonth = initialYearMonth,
-            today = today,
-            selectedDate = selectedDate,
-            onSelect = { selectedDate = it },
-        )
-
-        Spacer(modifier = Modifier.height(20.dp))
-
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            TextButton(
-                onClick = { onConfirm(null) },
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.textButtonColors(
-                    contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                ),
-                modifier = Modifier.weight(1f),
-            ) { Text("清除", fontWeight = FontWeight.SemiBold, maxLines = 1) }
-            TextButton(
-                onClick = onBack,
-                modifier = Modifier.weight(1f),
-                shape = RoundedCornerShape(14.dp),
-            ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
-            Button(
-                onClick = { onConfirm(selectedDate?.format(DateTimeFormatter.ISO_LOCAL_DATE)) },
-                shape = RoundedCornerShape(14.dp),
-                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                modifier = Modifier.weight(1f),
-            ) { Text("确定", fontWeight = FontWeight.SemiBold, maxLines = 1) }
-        }
-    }
-}
-
-/**
  * Nion 自定义日历 —— 与日程页日历风格一致。
  *
  * 年月选择器使用 SharedTransitionLayout + 双 sharedElement（容器 + 文字），与日程页一致。
@@ -573,6 +347,21 @@ fun NionCalendar(
  * @param onSelected 选中项变更回调，传入新的索引
  * @param modifier 外部 modifier，用于控制宽度等布局属性
  */
+/**
+ * 滚轮选择器 —— 基于 LazyColumn 实现的 wheel picker。
+ *
+ * 每行显示一个文本项，中心行高亮（放大、加粗、主色），
+ * 向两侧渐变缩小、淡化，营造 3D 滚筒效果。
+ * 滚动停止后自动 snap 到最近的整数位置。
+ *
+ * @param items 显示文本列表，如 ["00","01",...,"23"]
+ * @param initialIndex 初始选中项索引（在 items 中的位置）
+ * @param visibleItemCount 可见行数（推荐奇数，如 5）
+ * @param itemHeight 每行高度
+ * @param onSelected 选中项变更回调，传入新的索引（在 items 中的位置）
+ * @param modifier 外部 modifier
+ * @param circular 是否启用循环滚动。true 时首尾衔接（00 上方是 23），false 时到头停止
+ */
 @Composable
 fun WheelSpinner(
     items: List<String>,
@@ -581,6 +370,8 @@ fun WheelSpinner(
     itemHeight: Dp,
     onSelected: (Int) -> Unit,
     modifier: Modifier = Modifier,
+    /** 是否启用循环滚动：true 时 00 上方接 23，滑不到头 */
+    circular: Boolean = false,
 ) {
     val halfVisibleCount = visibleItemCount / 2
     val coroutineScope = rememberCoroutineScope()
@@ -589,10 +380,20 @@ fun WheelSpinner(
     // itemHeight 转换为像素，用于计算连续的中心位置
     val itemHeightPx = with(density) { itemHeight.toPx() }
 
-    // 列表状态：firstVisibleItemIndex = 数据索引（padding 行数和中心偏移抵消）
+    // 安全的初始索引，确保在 items 范围内
     val safeInitial = initialIndex.coerceIn(0, items.lastIndex)
+
+    // 循环模式：数据行数量用 100000 模拟无限列表（不能用 Int.MAX_VALUE，LazyColumn 内部 IntervalList 会溢出）；
+    // 初始位置设在中间附近并对齐数据周期，确保向两端都能滑很远
+    val totalDataItems = if (circular) 100_000 else items.size
+    val startVirtualIndex = if (circular) {
+        val mid = 50_000
+        // 对齐到数据周期起始位置后偏移 safeInitial，确保初始显示正确
+        mid - mid % items.size + safeInitial
+    } else safeInitial
+
     val listState = rememberLazyListState(
-        initialFirstVisibleItemIndex = safeInitial,
+        initialFirstVisibleItemIndex = startVirtualIndex,
     )
 
     // 跟踪上一次上报的索引，避免重复回调
@@ -612,17 +413,24 @@ fun WheelSpinner(
     // 滚动停止后 snap 到最近的整数位置，并回调选中项
     LaunchedEffect(listState.isScrollInProgress) {
         if (!listState.isScrollInProgress) {
-            val target = continuousCenter.roundToInt().coerceIn(0, items.lastIndex)
+            val rawTarget = continuousCenter.roundToInt()
+            // 循环模式不限制范围（无限列表），非循环模式限制在数据索引范围内
+            val target = if (circular) rawTarget
+                else rawTarget.coerceIn(0, items.lastIndex)
             // 如果不在整数位置，执行 snap 动画
             if (listState.firstVisibleItemIndex != target ||
                 listState.firstVisibleItemScrollOffset != 0
             ) {
                 listState.animateScrollToItem(target)
             }
+            // 循环模式：虚拟位置映射回真实索引；非循环模式：直接使用
+            val realIndex = if (circular) {
+                ((target % items.size) + items.size) % items.size
+            } else target
             // snap 目标与上次上报不同时，回调通知外部
-            if (target != lastReportedIndex) {
-                lastReportedIndex = target
-                onSelected(target)
+            if (realIndex != lastReportedIndex) {
+                lastReportedIndex = realIndex
+                onSelected(realIndex)
             }
         }
     }
@@ -645,10 +453,12 @@ fun WheelSpinner(
             ) {}
         }
 
-        // 数据行
-        items(items.size) { index ->
+        // 数据行：循环模式用 Int.MAX_VALUE 模拟无限列表
+        items(totalDataItems) { virtualIndex ->
+            // 循环模式：虚拟索引映射回真实数据索引
+            val realIndex = if (circular) virtualIndex % items.size else virtualIndex
             // 计算与中心的连续距离，驱动渐变色/字重（组合阶段）
-            val absDist = abs(index - continuousCenter)
+            val absDist = abs(virtualIndex - continuousCenter)
             // 渐变色进度：1.0 = 完全选中色，0.0 = 完全未选中色
             val colorProgress = (1f - absDist * 0.6f).coerceIn(0f, 1f)
 
@@ -658,7 +468,7 @@ fun WheelSpinner(
                     .height(itemHeight)
                     .graphicsLayer {
                         // 在绘制阶段读取 continuousCenter，驱动缩放和透明度动画
-                        val distance = index - continuousCenter
+                        val distance = virtualIndex - continuousCenter
                         val ad = abs(distance)
                         // 缩放：中心 1.0，每行缩小 6%，最小 0.7
                         val scale = (1f - ad * 0.06f).coerceIn(0.7f, 1f)
@@ -673,14 +483,14 @@ fun WheelSpinner(
                         onClick = {
                             coroutineScope.launch {
                                 // 点击后动画滚动到被点击的项
-                                listState.animateScrollToItem(index)
+                                listState.animateScrollToItem(virtualIndex)
                             }
                         },
                     ),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(
-                    text = items[index],
+                    text = items[realIndex],
                     style = MaterialTheme.typography.headlineMedium,
                     // 距中心 < 0.5 行时显示粗体，过渡更自然
                     fontWeight = if (absDist < 0.5f) FontWeight.Bold else FontWeight.Normal,

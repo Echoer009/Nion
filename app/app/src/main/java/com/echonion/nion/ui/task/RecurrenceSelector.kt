@@ -7,6 +7,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,6 +38,63 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+
+/**
+ * 循环规则入口行 —— 显示当前循环设置，点击后导航到全屏 RECURRENCE 面板。
+ *
+ * 轻量级组件：仅显示 Repeat 图标 + "重复" 文字 + 当前值（"不重复" / "每天 HH:MM"），
+ * 不内联展开时间滚轮。点击行为由外部 onClick 回调处理（通常切换到 RECURRENCE 面板）。
+ *
+ * @param recurrenceRule 当前循环规则：null 或 "none" 表示不循环，"daily" 表示每日循环
+ * @param reminderTime 提醒时间，格式 "HH:MM"，仅当 recurrenceRule="daily" 时有效
+ * @param onClick 点击整行时触发的回调
+ */
+@Composable
+fun RecurrenceEntryRow(
+    recurrenceRule: String?,
+    reminderTime: String?,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onClick,
+            )
+            .padding(vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // Repeat 图标，已设置循环时使用 primary 色
+        Icon(
+            Icons.Outlined.Repeat,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = if (recurrenceRule == "daily") MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        // "重复" 标签
+        Text(
+            "重复",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        // 当前值文字：不循环显示"不重复"，每天循环显示"每天 HH:MM"
+        Text(
+            text = if (recurrenceRule == "daily") {
+                if (reminderTime != null) "每天 $reminderTime" else "每天提醒"
+            } else "不重复",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.SemiBold,
+            color = if (recurrenceRule == "daily") MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
 
 /**
  * 循环规则选择器 —— 用于任务创建表单和任务详情中。
@@ -198,7 +257,7 @@ fun RecurrenceSelector(
                         horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        // 小时滚轮 (0-23)，weight(1f) 平分宽度
+                        // 小时滚轮 (0-23)，循环滚动
                         WheelSpinner(
                             items = (0..23).map { "%02d".format(it) },
                             initialIndex = initialHour,
@@ -212,6 +271,7 @@ fun RecurrenceSelector(
                                 )
                             },
                             modifier = Modifier.weight(1f),
+                            circular = true,
                         )
 
                         // 冒号分隔符
@@ -223,7 +283,7 @@ fun RecurrenceSelector(
                             modifier = Modifier.padding(horizontal = 8.dp),
                         )
 
-                        // 分钟滚轮 (0-59)，weight(1f) 平分宽度
+                        // 分钟滚轮 (0-59)，循环滚动
                         WheelSpinner(
                             items = (0..59).map { "%02d".format(it) },
                             initialIndex = initialMinute,
@@ -237,6 +297,7 @@ fun RecurrenceSelector(
                                 )
                             },
                             modifier = Modifier.weight(1f),
+                            circular = true,
                         )
                     }
                 }
