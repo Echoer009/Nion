@@ -193,6 +193,7 @@ fun NionApp() {
                                 checklists = viewModel.checklists,
                                 activeChecklistId = viewModel.activeChecklistId,
                                 defaultCounts = viewModel.checklistCounts[TaskViewModel.TODAY_ID] ?: (0 to 0),
+                                inboxCounts = viewModel.checklistCounts[null] ?: (0 to 0),
                                 customCounts = customCounts,
                                 onSelectChecklist = {
                                     dualState.closeLeft()
@@ -322,14 +323,14 @@ fun NionApp() {
             }
 
             // 全局提醒悬浮卡片，放在 Scaffold 之后（Z 轴上层），确保浮在所有界面之上
-            // onStartFocus 回调：用户点击「开始做了」→ 跳转专注页面
+            // onStartFocus 回调：用户点击右上角专注图标 → 跳转专注页面（不自动开始）
             ReminderOverlay(
                 app = app,
                 onStartFocus = { taskId, taskTitle ->
                     preselectedFocusTaskId = taskId
                     preselectedFocusTaskTitle = taskTitle
                     preselectedFocusDuration = null
-                    autoStartFocus = true
+                    autoStartFocus = false
                     navController.navigate("pomodoro") {
                         popUpTo(navController.graph.findStartDestination().id) {
                             saveState = true

@@ -70,12 +70,28 @@ import androidx.compose.ui.zIndex
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
 
+/**
+ * 侧边栏内容 —— 显示清单列表，支持切换、新建、删除、拖拽排序。
+ *
+ * @param checklists 用户创建的真实清单列表（不含虚拟清单）
+ * @param activeChecklistId 当前选中的清单 ID（可能是虚拟 ID：TODAY_ID、INBOX_ID）
+ * @param defaultCounts "今天"视图的任务/子任务计数
+ * @param inboxCounts "收集箱"视图的任务/子任务计数（孤儿任务）
+ * @param customCounts 各真实清单的任务/子任务计数，key 为清单 ID
+ * @param onSelectChecklist 点击清单项时触发，回调传入清单 ID（虚拟或真实）
+ * @param onAddChecklist 新建清单时触发，回调传入清单名称
+ * @param onDeleteChecklist 删除清单时触发，回调传入清单 ID
+ * @param onReorderChecklists 拖拽排序结束时触发，回调传入重排后的清单 ID 列表
+ * @param onSidebarDrag 侧边栏拖拽中回调，传入水平偏移量
+ * @param onSidebarDragStopped 侧边栏拖拽结束回调
+ */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SidebarContent(
     checklists: List<ChecklistItem>,
     activeChecklistId: String?,
     defaultCounts: Pair<Int, Int>,
+    inboxCounts: Pair<Int, Int>,
     customCounts: Map<String, Pair<Int, Int>>,
     onSelectChecklist: (String?) -> Unit,
     onAddChecklist: (String) -> Unit,
@@ -111,7 +127,11 @@ fun SidebarContent(
     val haptic = LocalHapticFeedback.current
     var wasMoved by remember { mutableStateOf(false) }
 
-    val headerCount = 1
+    /**
+     * 固定项数量（"今天" + "收集箱"），用于计算拖拽排序的索引偏移。
+     * 固定项不参与拖拽排序，位于 LazyColumn 列表头部。
+     */
+    val headerCount = 2
 
     val reorderableState = rememberReorderableLazyListState(
         lazyListState = listState,
@@ -160,6 +180,21 @@ fun SidebarContent(
                         subtaskCount = defaultCounts.second,
                         isActive = activeChecklistId == TaskViewModel.TODAY_ID,
                         onClick = { onSelectChecklist(TaskViewModel.TODAY_ID) },
+                        showDelete = false,
+                        onDelete = {},
+                    )
+                }
+                /**
+                 * "收集箱"固定项 —— 显示所有未分配清单的孤儿任务（category_id = null）。
+                 * 不可删除，不可拖拽排序，始终排在"今天"之后。
+                 */
+                item(key = "inbox") {
+                    SidebarChecklistItem(
+                        name = "收集箱",
+                        taskCount = inboxCounts.first,
+                        subtaskCount = inboxCounts.second,
+                        isActive = activeChecklistId == TaskViewModel.INBOX_ID,
+                        onClick = { onSelectChecklist(TaskViewModel.INBOX_ID) },
                         showDelete = false,
                         onDelete = {},
                     )

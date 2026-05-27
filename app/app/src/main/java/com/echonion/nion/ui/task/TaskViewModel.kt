@@ -94,6 +94,13 @@ class TaskViewModel(
          * 不是真实存储在 DB 中的清单，而是 App 启动默认显示的跨清单聚合视图。
          */
         const val TODAY_ID = "today"
+
+        /**
+         * "收集箱"视图的虚拟清单 ID。
+         * 不是真实存储在 DB 中的清单，用于显示所有未分配清单的孤儿任务（category_id = null）。
+         * 任何没有关联清单的任务都会自动出现在此视图中。
+         */
+        const val INBOX_ID = "inbox"
     }
 
     var tasks by mutableStateOf<List<TaskItem>>(emptyList())
@@ -102,7 +109,12 @@ class TaskViewModel(
     var checklists by mutableStateOf<List<ChecklistItem>>(emptyList())
         private set
 
-    /** 当前活跃清单 ID。null = "我的任务"（未分配），"today" = "今天"视图，其他 = 真实清单 ID */
+    /**
+     * 当前活跃清单 ID。
+     * "today" = "今天"跨清单聚合视图；
+     * "inbox" = "收集箱"孤儿任务视图（category_id = null 的任务）；
+     * 其他 = 真实清单 ID。
+     */
     var activeChecklistId by mutableStateOf<String?>(TODAY_ID)
         private set
 
@@ -140,6 +152,7 @@ class TaskViewModel(
     val activeChecklistName: String
         get() = when (activeChecklistId) {
             TODAY_ID -> "今天"
+            INBOX_ID -> "收集箱"
             null -> "我的任务"
             else -> checklists.find { it.id == activeChecklistId }?.name ?: "我的任务"
         }
@@ -217,8 +230,8 @@ class TaskViewModel(
                 onError("加载清单失败: ${e.message}")
             }
             try {
-                // 刷新当前清单下的分组（"今天"和"我的任务"视图无分组）
-                groups = if (activeChecklistId != null && activeChecklistId != TODAY_ID) {
+                // 刷新当前清单下的分组（"今天"、"收集箱"视图无分组，只有真实清单才有分组）
+                groups = if (activeChecklistId != null && activeChecklistId != TODAY_ID && activeChecklistId != INBOX_ID) {
                     withContext(Dispatchers.IO) {
                         core.getGroupsByChecklist(activeChecklistId!!).map { it.toUi() }
                     }
@@ -231,6 +244,9 @@ class TaskViewModel(
                     // "今天"视图使用跨清单聚合查询
                     if (activeChecklistId == TODAY_ID) {
                         loadTodayTasks()
+                    } else if (activeChecklistId == INBOX_ID) {
+                        // "收集箱"视图加载所有 category_id = null 的孤儿任务
+                        loadTasksWithSubtasks(null, activeGroupId)
                     } else {
                         loadTasksWithSubtasks(activeChecklistId, activeGroupId)
                     }
@@ -251,7 +267,8 @@ class TaskViewModel(
      * 切换活跃清单，同时加载该清单下的分组列表，并重置分组筛选。
      * groupId = null 表示显示该清单下所有任务。
      * id = "today" 切换至"今天"视图（跨清单聚合今日任务）。
-     * id = null 切换至"我的任务"（未分配清单的孤儿任务）。
+     * id = "inbox" 切换至"收集箱"视图（未分配清单的孤儿任务）。
+     * id = null 切换至"我的任务"（未分配清单的孤儿任务，与 inbox 相同）。
      */
     fun setActiveChecklist(id: String?) {
         viewModelScope.launch {
@@ -259,8 +276,8 @@ class TaskViewModel(
                 // 切换清单时重置分组选择
                 activeGroupId = null
                 activeChecklistId = id
-                // "今天"和"我的任务"视图不加载分组，真实清单才加载
-                groups = if (id != null && id != TODAY_ID) {
+                // "今天"和"收集箱"视图不加载分组，真实清单才加载
+                groups = if (id != null && id != TODAY_ID && id != INBOX_ID) {
                     withContext(Dispatchers.IO) {
                         core.getGroupsByChecklist(id).map { it.toUi() }
                     }
@@ -270,6 +287,9 @@ class TaskViewModel(
                 val loadedTasks = withContext(Dispatchers.IO) {
                     if (id == TODAY_ID) {
                         loadTodayTasks()
+                    } else if (id == INBOX_ID) {
+                        // "收集箱"视图加载所有 category_id = null 的孤儿任务
+                        loadTasksWithSubtasks(null, null)
                     } else {
                         loadTasksWithSubtasks(id, null)
                     }
@@ -309,7 +329,8 @@ class TaskViewModel(
 
     /**
      * 创建任务。自动关联到当前活跃清单和活跃分组。
-     * 在"今天"视图中创建时，category_id 为 null（不属于任何清单）。
+     * 在"今天"或"收集箱"视图中创建时，category_id 为 null（不属于任何清单），
+     * 任务会自动出现在"收集箱"中。
      *
      * @param recurrenceRule 循环规则：null/"none" 不循环，"daily" 每日循环
      * @param recurrenceReminderTime 每日循环提醒时间，格式 "HH:MM"
@@ -325,8 +346,11 @@ class TaskViewModel(
     ) {
         viewModelScope.launch {
             try {
-                // "今天"不是真实清单，创建任务时 category_id 设为 null
-                val realCategoryId = if (activeChecklistId == TODAY_ID) null else activeChecklistId
+                // "今天"和"收集箱"不是真实清单，创建任务时 category_id 设为 null
+                val realCategoryId = when (activeChecklistId) {
+                    TODAY_ID, INBOX_ID -> null
+                    else -> activeChecklistId
+                }
                 val newTask = withContext(Dispatchers.IO) {
                     core.createTask(title, description, priority, realCategoryId, null, activeGroupId, recurrenceRule, recurrenceReminderTime)
                 }
@@ -349,7 +373,11 @@ class TaskViewModel(
             try {
                 // 子任务继承父任务的分组归属
                 val parentGroup = activeGroupId
-                val realCategoryId = if (activeChecklistId == TODAY_ID) null else activeChecklistId
+                // "今天"和"收集箱"不是真实清单，子任务 category_id 设为 null
+                val realCategoryId = when (activeChecklistId) {
+                    TODAY_ID, INBOX_ID -> null
+                    else -> activeChecklistId
+                }
                 withContext(Dispatchers.IO) {
                     core.createTask(title, null, priority, realCategoryId, parentId, parentGroup, null, null)
                 }
@@ -620,14 +648,16 @@ class TaskViewModel(
         val currentTasks = tasks
         val counts = withContext(Dispatchers.IO) {
             val result = mutableMapOf<String?, Pair<Int, Int>>()
-            // 当前视图的计数（可能是 "today", null, 或清单 ID）
+            // 当前视图的计数（可能是 "today", "inbox", null, 或清单 ID）
             result[currentActiveId] = countItems(currentTasks)
             // "今天"视图计数（如果不是当前视图则单独计算）
             if (currentActiveId != TODAY_ID) {
                 result[TODAY_ID] = countItems(loadTodayTasks())
             }
-            // "我的任务"计数（如果不是当前视图则单独计算）
-            if (currentActiveId != null) {
+            // "收集箱"计数：当前视图就是收集箱时复用已有数据，否则单独查询孤儿任务
+            if (currentActiveId == INBOX_ID) {
+                result[null] = result[INBOX_ID]!!
+            } else if (currentActiveId != null) {
                 result[null] = countItems(loadTasksWithSubtasks(null, null))
             }
             // 各清单计数
@@ -702,11 +732,15 @@ class TaskViewModel(
 
     /**
      * 根据当前活跃视图加载任务数据。
-     * "today" → 今日聚合查询；null → 未分配查询；其他 → 指定清单查询。
+     * "today" → 今日聚合查询；
+     * "inbox" → 孤儿任务查询（category_id = null）；
+     * 其他 → 指定清单查询。
      */
     private suspend fun loadTasksForCurrentView(): List<TaskItem> = withContext(Dispatchers.IO) {
         if (activeChecklistId == TODAY_ID) {
             loadTodayTasks()
+        } else if (activeChecklistId == INBOX_ID) {
+            loadTasksWithSubtasks(null, activeGroupId)
         } else {
             loadTasksWithSubtasks(activeChecklistId, activeGroupId)
         }
@@ -919,7 +953,8 @@ class TaskViewModel(
     }
 }
 
-private fun flattenWithGroupInfo(tasks: List<TaskItem>): List<FlatTaskItem> {
+/** 将任务树展平为 FlatTaskItem 列表，供 TaskViewModel 和 FocusSetupViewModel 共用 */
+internal fun flattenWithGroupInfo(tasks: List<TaskItem>): List<FlatTaskItem> {
     val result = mutableListOf<FlatTaskItem>()
     for (task in tasks) {
         flattenTodoGroup(task, depth = 0, result)
@@ -930,8 +965,9 @@ private fun flattenWithGroupInfo(tasks: List<TaskItem>): List<FlatTaskItem> {
 /**
  * 递归展开待办任务组。未完成任务作为组根 + 递归子树；
  * 已完成任务跳过自身但继续深入子树（子任务可能被单独取消完成）。
+ * 供 flattenWithGroupInfo 内部调用。
  */
-private fun flattenTodoGroup(
+internal fun flattenTodoGroup(
     task: TaskItem,
     depth: Int,
     result: MutableList<FlatTaskItem>,
@@ -959,8 +995,8 @@ private fun flattenTodoGroup(
     }
 }
 
-/** 递归展开子任务为 FlatTaskItem 列表，跳过已完成项但继续递归其子树（子任务可能被单独取消完成） */
-private fun flattenSubs(
+/** 递归展开子任务为 FlatTaskItem 列表，跳过已完成项但继续递归其子树。供 flattenTodoGroup 内部调用。 */
+internal fun flattenSubs(
     subs: List<TaskItem>,
     depth: Int,
     parentId: String,
@@ -1099,7 +1135,8 @@ private fun DailyTaskStatus.toUi(): TaskItem {
  * 每日任务在清单视图中永远显示为未完成（status 保持 "todo"），
  * 因为它们的完成由 daily_completions 表追踪。
  */
-private fun TaskData.toUi(): TaskItem {
+/** 将 Rust 端 TaskData 转换为 UI 模型，供 TaskViewModel 和 FocusSetupViewModel 共用 */
+internal fun TaskData.toUi(): TaskItem {
     val isDaily = recurrenceRule == "daily"
     return TaskItem(
         id = id,

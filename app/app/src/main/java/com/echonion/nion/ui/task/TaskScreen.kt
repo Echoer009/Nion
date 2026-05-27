@@ -485,8 +485,10 @@ private fun TaskScreenContent(
         },
         floatingActionButton = fab,
     ) { innerPadding ->
-        // 分组标签栏：选中清单时始终显示（即使没有分组也能新建）
-        val showGroupBar = viewModel.activeChecklistId != null && viewModel.activeChecklistId != TaskViewModel.TODAY_ID
+        // 分组标签栏：选中真实清单时显示（"今天"和"收集箱"是虚拟视图，无分组）
+        val showGroupBar = viewModel.activeChecklistId != null
+                && viewModel.activeChecklistId != TaskViewModel.TODAY_ID
+                && viewModel.activeChecklistId != TaskViewModel.INBOX_ID
         Column(modifier = Modifier.padding(innerPadding)) {
             if (showGroupBar) {
                 /**
@@ -843,12 +845,12 @@ private fun AddTaskOverlay(
                             }
 
                             // 使用 ReminderTimePicker（startExpanded=true：直接显示日历，隐藏标题行）
-                            // ReminderTimePicker 自带 清除/取消/确定 按钮，无需面板级按钮
+                            // onReminderChanged 只管数据，onDismiss 负责返回 FORM 面板
                             ReminderTimePicker(
                                 reminder = taskReminder,
                                 onReminderChanged = { taskReminder = it },
                                 startExpanded = true,
-                                onCancel = { panel = AddPanel.FORM },
+                                onDismiss = { panel = AddPanel.FORM },
                             )
                         }
                     }
