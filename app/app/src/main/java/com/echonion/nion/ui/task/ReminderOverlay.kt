@@ -29,7 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -49,6 +49,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
@@ -62,6 +63,7 @@ import com.echonion.nion.reminder.ReminderMessageGenerator
 import com.echonion.nion.reminder.ReminderScheduler
 import com.echonion.nion.reminder.ReminderStore
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
@@ -84,8 +86,12 @@ fun ReminderOverlay(
     app: Application,
     onStartFocus: ((String, String) -> Unit)? = null,
 ) {
-    // 当前待显示的提醒事件，null 表示不显示弹窗
+    // 当前待显示的提醒事件数据，null 表示没有待处理事件
     var currentEvent by remember { mutableStateOf<ReminderEvent?>(null) }
+
+    // 控制 AnimatedVisibility 的可见状态，与 currentEvent 分离以支持退出动画
+    // 关闭时先设为 false 触发退出动画，动画完成后再清空 currentEvent
+    var cardVisible by remember { mutableStateOf(false) }
 
     // 监听提醒事件流
     val nionApp = app as NionApp
@@ -94,12 +100,32 @@ fun ReminderOverlay(
             // 只在当前没有弹窗时才显示新事件，避免覆盖
             if (currentEvent == null) {
                 currentEvent = event
+                // 设为可见，触发进入动画
+                cardVisible = true
                 // 只有 app 在前台时才取消通知栏提醒，避免双重打扰。
                 // 防御性检查：即使 Worker 已经做了前台判断，这里再兜底一次
                 if (nionApp.isInForeground) {
                     NotificationHelper.dismissNotification(app, event.taskId)
                 }
             }
+        }
+    }
+
+    // 退出动画时长（ms），与 AnimatedVisibility 的 exit tween(250) 对齐
+    // 用于在退出动画播放完毕后清空事件数据
+    val exitAnimationDurationMs = 260L
+
+    /**
+     * 关闭悬浮卡片的统一方法。
+     * 先将 cardVisible 设为 false 触发退出动画（向底部滑出 + 淡出），
+     * 等待退出动画播放完毕后再清空 currentEvent，让 Compose 树回收。
+     */
+    fun dismissWithAnimation() {
+        cardVisible = false
+        // 在协程中等待退出动画完成，然后清空事件数据
+        kotlinx.coroutines.MainScope().launch {
+            delay(exitAnimationDurationMs)
+            currentEvent = null
         }
     }
 
@@ -116,32 +142,21 @@ fun ReminderOverlay(
                 ReminderMessageGenerator.generateFromTemplate(event.taskTitle, event.triggerCount)
             }
 
-            // ── 紧迫感颜色渐变：根据触发次数切换卡片色调 ──
-            // triggerCount 1-2：柔和 primaryContainer
-            // triggerCount 3-4：警告 tertiaryContainer
-            // triggerCount 5：紧迫 errorContainer
-            val cardColor = when {
-                event.triggerCount >= 5 -> MaterialTheme.colorScheme.errorContainer
-                event.triggerCount >= 3 -> MaterialTheme.colorScheme.tertiaryContainer
-                else -> MaterialTheme.colorScheme.primaryContainer
-            }
-            val onCardColor = when {
-                event.triggerCount >= 5 -> MaterialTheme.colorScheme.onErrorContainer
-                event.triggerCount >= 3 -> MaterialTheme.colorScheme.onTertiaryContainer
-                else -> MaterialTheme.colorScheme.onPrimaryContainer
-            }
-            // 图标/按钮强调色，与卡片背景形成对比
-            val accentColor = when {
-                event.triggerCount >= 5 -> MaterialTheme.colorScheme.error
-                event.triggerCount >= 3 -> MaterialTheme.colorScheme.tertiary
-                else -> MaterialTheme.colorScheme.primary
-            }
+            // ── 紧迫感颜色渐变：强调色从主题色 primary 线性过渡到 error 红色 ──
+            // triggerCount 1 = 纯 primary（焦橙），5 = 纯 error（红色），中间线性插值
+            // 卡片背景和文字固定不变，只有强调色（图标、按钮、高亮）随紧迫度渐变
+            val progress = ((event.triggerCount - 1).toFloat() / 4f).coerceIn(0f, 1f)
+            val cardColor = MaterialTheme.colorScheme.surface
+            val onCardColor = MaterialTheme.colorScheme.onSurface
+            val accentColor = lerp(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.error, progress)
 
             // 水平滑动偏移量，用于实现滑动关闭手势
             var offsetX by remember { mutableFloatStateOf(0f) }
 
+            // 使用独立的 cardVisible 控制 AnimatedVisibility，
+            // 而不是依赖 currentEvent != null，确保退出动画有足够时间播放
             AnimatedVisibility(
-                visible = currentEvent != null,
+                visible = cardVisible,
                 // 从底部滑入，带弹簧回弹效果，先快后慢
                 enter = slideInVertically(
                     initialOffsetY = { it },
@@ -150,7 +165,7 @@ fun ReminderOverlay(
                         stiffness = Spring.StiffnessMedium,
                     ),
                 ) + fadeIn(animationSpec = tween(200)),
-                // 向底部滑出，快速消失
+                // 向底部滑出收回，与进入动画形成对称的收回效果
                 exit = slideOutVertically(
                     targetOffsetY = { it },
                     animationSpec = tween(250, easing = FastOutSlowInEasing),
@@ -168,7 +183,7 @@ fun ReminderOverlay(
                             detectHorizontalDragGestures(
                                 onDragEnd = {
                                     if (kotlin.math.abs(offsetX) > size.width * 0.4f) {
-                                        dismissEvent(app, event) { currentEvent = null }
+                                        dismissEvent(app, event) { dismissWithAnimation() }
                                     } else {
                                         // 未达到阈值，弹回原位
                                         offsetX = 0f
@@ -234,7 +249,8 @@ fun ReminderOverlay(
                                     )
                                 }
                             }
-                            // 关闭按钮：圆形，半透明背景
+                            // ── 右上角操作按钮组：专注图标 + 关闭按钮 ──
+                            // 专注图标按钮：点击跳转专注页（不自动开始），用于需要专注的任务
                             Surface(
                                 modifier = Modifier
                                     .size(28.dp)
@@ -243,7 +259,39 @@ fun ReminderOverlay(
                                         interactionSource = remember { MutableInteractionSource() },
                                         indication = null,
                                         onClick = {
-                                            dismissEvent(app, event) { currentEvent = null }
+                                            // 终止提醒循环
+                                            ReminderStore.resetTriggerCount(app, event.taskId)
+                                            ReminderScheduler.cancelReminder(app, event.taskId)
+                                            NotificationHelper.dismissNotification(app, event.taskId)
+                                            // 跳转专注页，不自动开始
+                                            onStartFocus?.invoke(event.taskId, event.taskTitle)
+                                            dismissWithAnimation()
+                                        },
+                                    ),
+                                // 使用强调色半透明背景，暗示"可操作"
+                                color = accentColor.copy(alpha = 0.15f),
+                                shape = CircleShape,
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Timer,
+                                        contentDescription = "开始专注",
+                                        modifier = Modifier.size(14.dp),
+                                        tint = accentColor,
+                                    )
+                                }
+                            }
+                            Spacer(modifier = Modifier.width(8.dp))
+                            // 关闭按钮：圆形，半透明背景，点击触发收回动画
+                            Surface(
+                                modifier = Modifier
+                                    .size(28.dp)
+                                    .clip(CircleShape)
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = {
+                                            dismissEvent(app, event) { dismissWithAnimation() }
                                         },
                                     ),
                                 color = onCardColor.copy(alpha = 0.15f),
@@ -283,7 +331,7 @@ fun ReminderOverlay(
                                     color = onCardColor.copy(alpha = 0.12f),
                                     onClick = {
                                         snoozeReminder(app, event.taskId, minutes)
-                                        currentEvent = null
+                                        dismissWithAnimation()
                                     },
                                 ) {
                                     Box(
@@ -303,29 +351,21 @@ fun ReminderOverlay(
                             }
                         }
 
-                        // ── 操作按钮行 ──
+                        // ── 操作按钮行：「知道了」主按钮 ──
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // 「开始做了」主按钮：实心填充，使用强调色
-                            val startLabel = labels.first.ifBlank { "开始做了" }
+                            // 「知道了」主按钮：实心填充，使用强调色，点击终止循环并关闭
+                            val ackLabel = labels.first.ifBlank { "知道了" }
                             Button(
                                 onClick = {
                                     // 终止提醒循环
                                     ReminderStore.resetTriggerCount(app, event.taskId)
                                     ReminderScheduler.cancelReminder(app, event.taskId)
                                     NotificationHelper.dismissNotification(app, event.taskId)
-
-                                    // 如果有跳转专注回调，使用它；否则标记完成
-                                    if (onStartFocus != null) {
-                                        onStartFocus(event.taskId, event.taskTitle)
-                                    } else {
-                                        completeTask(app, event.taskId)
-                                    }
-
-                                    currentEvent = null
+                                    dismissWithAnimation()
                                 },
                                 shape = RoundedCornerShape(12.dp),
                                 colors = ButtonDefaults.buttonColors(
@@ -334,20 +374,14 @@ fun ReminderOverlay(
                                 ),
                                 modifier = Modifier.weight(1f),
                             ) {
-                                Icon(
-                                    Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(startLabel, fontWeight = FontWeight.SemiBold)
+                                Text(ackLabel, fontWeight = FontWeight.SemiBold)
                             }
 
                             // 「今天算了」次按钮（仅 triggerCount < 5 时显示，第 5 次只有一个「知道了」主按钮）
                             if (labels.third.isNotEmpty()) {
                                 TextButton(
                                     onClick = {
-                                        dismissEvent(app, event) { currentEvent = null }
+                                        dismissEvent(app, event) { dismissWithAnimation() }
                                     },
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.weight(1f),

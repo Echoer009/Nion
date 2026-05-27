@@ -49,10 +49,10 @@ object ReminderMessageGenerator {
      */
     fun getActionLabels(triggerCount: Int): Triple<String, String, String> {
         return when (triggerCount) {
-            1 -> Triple("开始做了", "等5分钟", "今天算了")
-            2 -> Triple("开始做了", "等5分钟", "今天算了")
-            3 -> Triple("马上开始", "最后5分钟", "今天算了")
-            4 -> Triple("现在开始", "真的不做了", "")
+            1 -> Triple("知道了", "等5分钟", "")
+            2 -> Triple("知道了", "等5分钟", "")
+            3 -> Triple("知道了", "最后5分钟", "")
+            4 -> Triple("知道了", "真的不做了", "")
             else -> Triple("知道了", "", "")
         }
     }

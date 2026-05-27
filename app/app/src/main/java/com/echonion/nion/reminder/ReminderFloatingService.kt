@@ -29,7 +29,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Alarm
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -48,6 +48,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.ViewRootForInspector
@@ -78,7 +79,7 @@ import com.echonion.nion.ui.theme.NionTheme
  * 1. ReminderWorker 检测到 App 不在前台 → 启动此 Service（携带提醒数据）
  * 2. Service 创建前台通知（保活），然后通过 WindowManager.addView() 添加悬浮窗
  * 3. 悬浮窗使用 ComposeView 渲染与 App 内相同的卡片 UI
- * 4. 用户操作后（开始/稍后/关闭）→ 移除悬浮窗 → 停止 Service
+ * 4. 用户操作后（开始/稍后/关闭）→ 播放收回动画 → 移除悬浮窗 → 停止 Service
  *
  * 前提条件：
  * - AndroidManifest 声明 SYSTEM_ALERT_WINDOW 权限
@@ -137,6 +138,9 @@ class ReminderFloatingService : Service() {
     private var windowManager: WindowManager? = null
     private var floatingView: android.view.View? = null
 
+    // 是否正在播放收回动画，防止重复触发关闭逻辑
+    private var isAnimatingDismiss = false
+
     // 提醒数据
     private var taskId: String = ""
     private var taskTitle: String = ""
@@ -180,7 +184,8 @@ class ReminderFloatingService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        removeFloatingWindow()
+        // Service 销毁时直接移除，不播放动画（可能是系统强制销毁）
+        removeFloatingWindow(animated = false)
         super.onDestroy()
         Log.d(TAG, "悬浮窗 Service 已销毁")
     }
@@ -236,8 +241,8 @@ class ReminderFloatingService : Service() {
      */
     private fun showFloatingWindow() {
         if (floatingView != null) {
-            // 已存在悬浮窗，先移除旧的
-            removeFloatingWindow()
+            // 已存在悬浮窗，先移除旧的（直接移除，不播放动画）
+            removeFloatingWindow(animated = false)
         }
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
@@ -269,8 +274,9 @@ class ReminderFloatingService : Service() {
                         taskTitle = taskTitle,
                         message = message,
                         triggerCount = triggerCount,
-                        onStart = { handleStart() },
+                        onFocus = { handleFocus() },
                         onSnooze = { minutes -> handleSnooze(minutes) },
+                        onAcknowledge = { handleAcknowledge() },
                         onDismiss = { handleDismiss() },
                     )
                 }
@@ -306,14 +312,53 @@ class ReminderFloatingService : Service() {
 
     /**
      * 移除悬浮窗并清理资源。
+     *
+     * @param animated 是否播放收回动画。
+     *   true = 播放向下平移 + 淡出动画后再移除 View 并停止 Service，
+     *         用于用户主动关闭的场景（点击按钮、滑动关闭）。
+     *   false = 直接移除，用于 Service 被系统销毁、替换旧悬浮窗等场景。
      */
-    private fun removeFloatingWindow() {
+    private fun removeFloatingWindow(animated: Boolean = false) {
         floatingView?.let { view ->
-            try {
-                windowManager?.removeView(view)
-            } catch (e: Exception) {
-                Log.w(TAG, "移除悬浮窗失败", e)
+            if (animated && !isAnimatingDismiss) {
+                // 标记正在动画中，防止重复触发
+                isAnimatingDismiss = true
+                // 收回动画：向下平移一段距离并淡出，模拟卡片「收回底部」的效果
+                // translationY 为卡片高度的一半，配合 alpha 淡出
+                view.animate()
+                    .translationY(view.height.toFloat() * 0.5f)
+                    .alpha(0f)
+                    // 300ms 收回动画，先快后慢的减速曲线
+                    .setDuration(300)
+                    .setInterpolator(android.view.animation.DecelerateInterpolator())
+                    .withEndAction {
+                        // 动画结束后真正移除 View 并清理资源
+                        actuallyRemoveView(view)
+                        isAnimatingDismiss = false
+                        // 收回动画结束后停止 Service
+                        stopSelf()
+                    }
+                    .start()
+            } else {
+                // 直接移除（Service 销毁、重复调用等场景）
+                actuallyRemoveView(view)
             }
+        }
+        // 非动画模式立即清空引用；动画模式在 actuallyRemoveView 中清空
+        if (!animated) {
+            floatingView = null
+        }
+    }
+
+    /**
+     * 真正从 WindowManager 移除 View 并清理 Lifecycle 资源。
+     * 被 removeFloatingWindow 的两种模式最终调用。
+     */
+    private fun actuallyRemoveView(view: android.view.View) {
+        try {
+            windowManager?.removeView(view)
+        } catch (e: Exception) {
+            Log.w(TAG, "移除悬浮窗失败", e)
         }
         floatingView = null
 
@@ -326,41 +371,56 @@ class ReminderFloatingService : Service() {
     }
 
     /**
-     * 处理「开始做了」—— 终止循环 + 跳转 App 专注页面 + 关闭悬浮窗。
+     * 处理右上角专注图标 —— 终止循环 + 跳转 App 专注页面（不自动开始）+ 播放收回动画后关闭悬浮窗。
      */
-    private fun handleStart() {
+    private fun handleFocus() {
         // 终止提醒循环
         ReminderStore.resetTriggerCount(this, taskId)
         ReminderScheduler.cancelReminder(this, taskId)
         NotificationHelper.dismissNotification(this, taskId)
 
-        // 跳转 App 专注页面
+        // 跳转 App 专注页面，auto_start_focus=false 让用户自己设置时间
         val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
         if (launchIntent != null) {
             launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
             launchIntent.putExtra("reminder_action", "start_focus")
             launchIntent.putExtra("reminder_task_id", taskId)
             launchIntent.putExtra("focus_task_title", taskTitle)
-            launchIntent.putExtra("auto_start_focus", true)
+            launchIntent.putExtra("auto_start_focus", false)
             startActivity(launchIntent)
         }
 
-        Log.d(TAG, "开始做了: taskId=$taskId")
-        stopSelf()
+        Log.d(TAG, "开始专注: taskId=$taskId")
+        // 播放收回动画，动画结束后自动 stopSelf()
+        removeFloatingWindow(animated = true)
     }
 
     /**
-     * 处理「稍后提醒」—— 取消悬浮窗 + 调度延迟闹钟。
+     * 处理「知道了」主按钮 —— 终止循环 + 关闭悬浮窗，不跳转 App。
+     */
+    private fun handleAcknowledge() {
+        // 终止提醒循环
+        ReminderStore.resetTriggerCount(this, taskId)
+        ReminderScheduler.cancelReminder(this, taskId)
+        NotificationHelper.dismissNotification(this, taskId)
+        Log.d(TAG, "知道了: taskId=$taskId")
+        // 播放收回动画，动画结束后自动 stopSelf()
+        removeFloatingWindow(animated = true)
+    }
+
+    /**
+     * 处理「稍后提醒」—— 播放收回动画 + 调度延迟闹钟后关闭悬浮窗。
      */
     private fun handleSnooze(minutes: Int) {
         NotificationHelper.dismissNotification(this, taskId)
         ReminderScheduler.scheduleSnoozeReminder(this, taskId, minutes)
         Log.d(TAG, "稍后提醒 ${minutes}分钟: taskId=$taskId")
-        stopSelf()
+        // 播放收回动画，动画结束后自动 stopSelf()
+        removeFloatingWindow(animated = true)
     }
 
     /**
-     * 处理关闭/「今天算了」—— 终止循环 + 关闭悬浮窗。
+     * 处理关闭/「今天算了」—— 终止循环 + 播放收回动画后关闭悬浮窗。
      */
     private fun handleDismiss() {
         // 如果是「今天算了」（triggerCount < 5），终止循环
@@ -370,7 +430,8 @@ class ReminderFloatingService : Service() {
         }
         NotificationHelper.dismissNotification(this, taskId)
         Log.d(TAG, "关闭悬浮窗: taskId=$taskId")
-        stopSelf()
+        // 播放收回动画，动画结束后自动 stopSelf()
+        removeFloatingWindow(animated = true)
     }
 }
 
@@ -382,35 +443,27 @@ class ReminderFloatingService : Service() {
  * @param taskTitle 任务标题
  * @param message 提醒文案
  * @param triggerCount 触发次数（1-5）
- * @param onStart 点击「开始做了」回调
+ * @param onFocus 点击右上角专注图标回调，跳转专注页但不自动开始
  * @param onSnooze 点击稍后提醒回调，参数为延迟分钟数
- * @param onDismiss 关闭/「今天算了」回调
+ * @param onAcknowledge 点击「知道了」主按钮回调，终止循环并关闭
+ * @param onDismiss 关闭按钮/滑动关闭回调
  */
 @Composable
 private fun FloatingReminderCard(
     taskTitle: String,
     message: String,
     triggerCount: Int,
-    onStart: () -> Unit,
+    onFocus: () -> Unit,
     onSnooze: (Int) -> Unit,
+    onAcknowledge: () -> Unit,
     onDismiss: () -> Unit,
 ) {
-    // 紧迫度颜色渐变：与 App 内 ReminderOverlay 保持一致
-    val cardColor = when {
-        triggerCount >= 5 -> MaterialTheme.colorScheme.errorContainer
-        triggerCount >= 3 -> MaterialTheme.colorScheme.tertiaryContainer
-        else -> MaterialTheme.colorScheme.primaryContainer
-    }
-    val onCardColor = when {
-        triggerCount >= 5 -> MaterialTheme.colorScheme.onErrorContainer
-        triggerCount >= 3 -> MaterialTheme.colorScheme.onTertiaryContainer
-        else -> MaterialTheme.colorScheme.onPrimaryContainer
-    }
-    val accentColor = when {
-        triggerCount >= 5 -> MaterialTheme.colorScheme.error
-        triggerCount >= 3 -> MaterialTheme.colorScheme.tertiary
-        else -> MaterialTheme.colorScheme.primary
-    }
+    // ── 紧迫感颜色渐变：强调色从主题色 primary 线性过渡到 error 红色 ──
+    // 与 App 内 ReminderOverlay 保持完全一致的插值逻辑
+    val progress = ((triggerCount - 1).toFloat() / 4f).coerceIn(0f, 1f)
+    val cardColor = MaterialTheme.colorScheme.surface
+    val onCardColor = MaterialTheme.colorScheme.onSurface
+    val accentColor = lerp(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.error, progress)
 
     // 按钮文案
     val labels = ReminderMessageGenerator.getActionLabels(triggerCount)
@@ -490,6 +543,27 @@ private fun FloatingReminderCard(
                         )
                     }
                 }
+                // ── 右上角操作按钮组：专注图标 + 关闭按钮 ──
+                // 专注图标按钮：点击跳转专注页（不自动开始），用于需要专注的任务
+                Surface(
+                    modifier = Modifier
+                        .size(28.dp)
+                        .clip(CircleShape),
+                    // 使用强调色半透明背景，暗示"可操作"
+                    color = accentColor.copy(alpha = 0.15f),
+                    shape = CircleShape,
+                    onClick = onFocus,
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.Default.Timer,
+                            contentDescription = "开始专注",
+                            modifier = Modifier.size(14.dp),
+                            tint = accentColor,
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.width(8.dp))
                 // 关闭按钮
                 Surface(
                     modifier = Modifier
@@ -548,15 +622,16 @@ private fun FloatingReminderCard(
                 }
             }
 
-            // ── 操作按钮 ──
+            // ── 操作按钮：「知道了」主按钮 ──
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                val startLabel = labels.first.ifBlank { "开始做了" }
+                // 「知道了」主按钮：实心填充，使用强调色，点击终止循环并关闭
+                val ackLabel = labels.first.ifBlank { "知道了" }
                 Button(
-                    onClick = onStart,
+                    onClick = onAcknowledge,
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(
                         containerColor = accentColor,
@@ -564,13 +639,7 @@ private fun FloatingReminderCard(
                     ),
                     modifier = Modifier.weight(1f),
                 ) {
-                    Icon(
-                        Icons.Default.PlayArrow,
-                        contentDescription = null,
-                        modifier = Modifier.size(16.dp),
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Text(startLabel, fontWeight = FontWeight.SemiBold)
+                    Text(ackLabel, fontWeight = FontWeight.SemiBold)
                 }
 
                 if (labels.third.isNotEmpty()) {
