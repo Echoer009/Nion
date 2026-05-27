@@ -580,6 +580,76 @@ fun SharedTaskList(
 }
 
 /**
+ * 向上扫描找到指定深度的最近祖先项 ID。
+ *
+ * 规则3（保持原有深度）的核心辅助函数。
+ * 被拖拽项保持其原始 depth，需要找到 depth-1 的最近祖先作为新父任务。
+ *
+ * 为防止跨子树误匹配（例如从 A 的子树扫描到 B 的子树中），
+ * 搜索范围限定在当前位置所属的 depth=0 根节点之内：
+ *   1. 先向后扫描找到最近的 depth=0 根节点
+ *   2. 在根节点和当前位置之间搜索 targetDepth 的最近项
+ *   3. 如果精确深度找不到祖先（例如拖到没有子任务的根节点后面），降级返回根节点
+ *
+ * @param items 扁平化的任务项列表
+ * @param fromIndex 被拖拽项在列表中的当前索引
+ * @param targetDepth 目标祖先的深度（通常是被拖拽项的 depth - 1）
+ * @return 目标祖先的任务 ID，targetDepth < 0 时返回 null（顶级任务保持顶级）
+ */
+private fun findAncestorAtDepth(
+    items: List<FlatTaskItem>,
+    fromIndex: Int,
+    targetDepth: Int,
+): String? {
+    if (targetDepth < 0) return null
+
+    /* 定位当前位置所属的 depth=0 根节点索引 */
+    var rootIdx = -1
+    for (i in fromIndex - 1 downTo 0) {
+        if (items[i].depth == 0) {
+            rootIdx = i
+            break
+        }
+    }
+
+    /* 在根节点到当前位置之间搜索目标深度的最近祖先 */
+    for (i in fromIndex - 1 downTo (rootIdx + 1)) {
+        if (items[i].depth == targetDepth) {
+            return items[i].task.id
+        }
+    }
+
+    /* 精确深度未找到 → 降级返回根节点（被拖拽项的深度会自动调整） */
+    if (rootIdx >= 0) return items[rootIdx].task.id
+
+    return null
+}
+
+/**
+ * 从被拖拽项位置向后扫描，跳过其所有后代，找到第一个非后代项。
+ *
+ * 拖拽释放时子任务已重新插入列表并紧跟在被拖拽项后面，
+ * 直接取 currentIdx+1 会拿到自己的子任务而非上下文中的真正下方项。
+ * 本函数跳过所有后代，返回"真实的下方项"供规则2判断父子边界。
+ *
+ * @param items 扁平化的任务项列表
+ * @param draggedIdx 被拖拽项在列表中的索引
+ * @param descendantIds 被拖拽项的所有后代任务 ID 集合（由 collectDescendantIds 生成）
+ * @return 第一个非后代项，如果后面全是后代或到达列表末尾则返回 null
+ */
+private fun findFirstNonDescendantBelow(
+    items: List<FlatTaskItem>,
+    draggedIdx: Int,
+    descendantIds: Set<String>,
+): FlatTaskItem? {
+    var idx = draggedIdx + 1
+    while (idx < items.size && items[idx].task.id in descendantIds) {
+        idx++
+    }
+    return items.getOrNull(idx)
+}
+
+/**
  * 递归收集扁平列表中以 parentId 为根的所有后代任务 ID。
  *
  * @param items 扁平化的任务项列表
@@ -597,27 +667,36 @@ private fun collectDescendantIds(items: List<FlatTaskItem>, parentId: String): S
 }
 
 /**
- * 处理拖拽释放后的层级和排序逻辑。
+ * 拖拽释放后计算被拖拽项的新层级关系和同级排序。
  *
- * **位置 0（列表最顶端）**：统一晋升为主任务（parent_id = null）。
- * 子任务只有拖到此处才能晋升为主任务。
+ * 层级判定规则（优先级从高到低）：
  *
- * **子任务（depth > 0）**：
- *   始终成为上方紧邻项的直接子任务（parent_id = 上方项的 id）。
+ *   规则1 — 列表位置 0 → 晋升为顶级任务（parent_id = null）
+ *   规则2 — 放在父子之间（above.depth < realBelow.depth）→ 变成上方项的子任务
+ *   规则3 — 被拖入更深子树内部（两侧 depth 都 > 自身 depth）→ 自动降级加入子树
+ *   规则4 — 其他所有情况 → 保持原有深度，向上查找目标深度的祖先作为新父任务
  *
- * **主任务（depth == 0）**：
- *   默认保持主任务，仅当"从子树入口进入"时才改变层级：
- *   - 上方是主任务（depth=0）且下方紧接其子任务（depth>0）→ 进入上方主任务的子树
- *   - 其他所有情况（上方是子任务、两个主任务之间、列表末尾）→ 保持主任务，只改变排序
+ * "规则2 — 父子之间"指上方是某个父任务、下方紧跟其子任务的位置，
+ * 即用户明确将任务拖入了某个子树的入口。
+ *
+ * "规则4 — 保持原有深度"的实现：
+ *   被拖拽项保持其拖拽前的 depth，从当前位置向上扫描找到 depth-1 的最近祖先，
+ *   以该项作为新父任务。扫描范围限制在当前子树（最近的 depth=0 根节点）内，
+ *   防止跨子树误匹配。如果精确深度找不到祖先，降级返回根节点（深度自动调整）。
  *
  * 正确覆盖全部场景：
- *   1. "B 放在 A 和 a1 之间" → depth(A)=0, depth(a1)=1 → B 进入 A 的子树 ✓
- *   2. "A 放在 B 和 b1 下面" → depth(b1)=1, below=null → A 保持主任务 ✓
- *   3. "a1 放在 b1 和 1 之间" → a1 是子任务，上方 b1 → 成为 b1 的子任务 ✓
- *   4. "a1 和 1 被移到顶端" → 索引 0 → a1 晋升主任务，其子任务 1 保持不变 ✓
- *   5. "b1 放在 C 下面" → b1 是子任务，上方 C → 成为 C 的子任务 ✓
+ *   1. "a1x(d=2) 拖到 a2(d=1) 和 B(d=0) 之间" → 规则4，保持 d=2，找 d=1 祖先 → a2 的子任务 ✓
+ *   2. "a1(d=1) 拖到 B(d=0) 后面"           → 规则4，保持 d=1，找 d=0 祖先 → B 的子任务 ✓
+ *   3. "a2(d=1) 拖到 A(d=0) 和 a1(d=1) 之间" → 规则2，父子边界 → A 的子任务 ✓
+ *   4. "a1x(d=2) 拖到列表顶部"              → 规则1 → 顶级任务 ✓
+ *   5. "a1(d=1) ↔ a2(d=1) 之间"             → 规则4，保持 d=1，祖先都是 A → 纯排序 ✓
+ *   6. "a(d=0) 放到 b(d=1) 和 c(d=1) 之间"  → 规则3，两侧都 d>0 → 自动降级为子树根的子任务 ✓
+ *   7. "a(d=0) 放到 c(d=1) 后面"            → 规则4，realBelow=null → 保持顶级 ✓
  *
- * @param reorderableItems 拖拽完成后的扁平列表（已包含位置调整）
+ * 注意：拖拽开始时子任务已被收进父任务卡片，释放后才重新插入列表，
+ * 所以 handleDrop 检测规则2时需要跳过这些重插入的后代，找到"真实的下方项"。
+ *
+ * @param reorderableItems 拖拽完成后的扁平列表（子任务已重新插入）
  * @param draggedId 被拖拽项的 ID
  * @param reorderCallback 层级排序回调，传入 (draggedId, newParentId, siblingIds)
  */
@@ -631,36 +710,34 @@ private fun handleDrop(
     val draggedItem = reorderableItems[currentIdx]
 
     /*
-     * 计算拖拽后的新父任务 ID。
-     *
-     * 位置 0 无条件晋升为主任务。
-     * 其他位置按 isMainTask(被拖项) 分支：
-     *   - 子任务：上方项 id 即新父 id
-     *   - 主任务：仅当"明确拖入子树"时才变为子任务，否则保持 null（主任务）
-     *
-     * "从子树入口进入"的判据：
-     *   上方是主任务（depth=0）、下方紧接其子任务（depth>0）—— 正在进入上方主任务的子树。
-     * 其他情况（上方是子任务、两个主任务之间、列表末尾）→ 保持主任务。
+     * 收集被拖拽项的所有后代 ID。
+     * 释放时子任务已重新插入列表（排在拖拽项后面），需要跳过这些后代
+     * 才能找到"真实的下方项"来判断是否处于父子边界。
      */
+    val descendantIds = collectDescendantIds(reorderableItems, draggedId)
+
     val newParentId: String? = if (currentIdx == 0) {
+        /* 规则1: 拖到列表顶部 → 无条件变为顶级任务 */
         null
     } else {
         val aboveItem = reorderableItems[currentIdx - 1]
-        val belowItem = reorderableItems.getOrNull(currentIdx + 1)
+        /* 跳过被拖拽项自身的后代，找到真正的下方项 */
+        val realBelowItem = findFirstNonDescendantBelow(reorderableItems, currentIdx, descendantIds)
 
-        if (draggedItem.depth == 0) {
-            /* 被拖拽的是主任务 —— 仅当"从子树入口进入"时才改变层级：
-             * 唯一触发条件：上方是主任务 + 下方紧接其子任务（depth 差>0），
-             * 表示用户明确将主任务拖入了上方主任务的子树。
-             * 其他情况（拖到子任务后面、两个主任务之间、列表末尾）均保持主任务。 */
-            if (belowItem != null && aboveItem.depth == 0 && belowItem.depth > 0) {
-                aboveItem.task.id
-            } else {
-                null
-            }
-        } else {
-            /* 被拖拽的是子任务 —— 始终成为上方项的直接子任务 */
+        if (realBelowItem != null && aboveItem.depth < realBelowItem.depth) {
+            /* 规则2: 放在父子之间（子树入口）→ 变成上方项的子任务 */
             aboveItem.task.id
+        } else if (aboveItem.depth > draggedItem.depth
+            && realBelowItem != null && realBelowItem.depth > draggedItem.depth
+        ) {
+            /* 规则3: 被拖入更深的子树内部（两侧 depth 都大于自身）→ 自动降级，
+             * 找到同层的最近祖先（即该深层区域的父任务）作为新 parent。
+             * 例：d=0 任务放到两个 d=1 之间 → 加入 d=0 根节点的子树
+             * 例：d=2 任务放到两个 d=3 之间 → 加入 d=2 节点的子树 */
+            findAncestorAtDepth(reorderableItems, currentIdx, draggedItem.depth)
+        } else {
+            /* 规则4: 保持原有深度，向上查找 depth-1 的祖先作为新父任务 */
+            findAncestorAtDepth(reorderableItems, currentIdx, draggedItem.depth - 1)
         }
     }
 
