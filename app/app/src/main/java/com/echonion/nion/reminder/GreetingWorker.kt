@@ -251,13 +251,13 @@ $taskList
 
     /**
      * 获取问候类型的调度时间。
-     * 从 settings 读取，morning 类型使用自定义时间，其他使用默认值。
+     * 所有类型的时间均从 settings 读取，支持用户自定义。
      */
     private fun getGreetingTime(core: NionCore, type: String): String {
         return when (type) {
             "morning" -> core.getSetting("greeting_morning_time") ?: "08:00"
-            "noon" -> "12:00"
-            "evening" -> "21:00"
+            "noon" -> core.getSetting("greeting_noon_time") ?: "12:00"
+            "evening" -> core.getSetting("greeting_evening_time") ?: "21:00"
             else -> "08:00"
         }
     }

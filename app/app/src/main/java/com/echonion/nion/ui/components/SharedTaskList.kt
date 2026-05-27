@@ -159,7 +159,12 @@ fun SharedTaskList(
          true
      }
 
-    val headerCount = 2
+    /* 动态计算 reorderable items 之前的 header item 数量，
+     * 用于将 LazyColumn 绝对索引转换为 reorderableItems 相对索引。
+     * 结构：top_spacer(1) + [overdue_header + overdue items] + [todo_header] */
+    val headerCount = 1 +
+        (if (overdueTasks.isNotEmpty()) 1 + overdueTasks.size else 0) +
+        if (reorderableItems.isNotEmpty()) 1 else 0
 
     val effectiveLastMap by remember {
         derivedStateOf {
@@ -591,14 +596,13 @@ private fun collectDescendantIds(items: List<FlatTaskItem>, parentId: String): S
  *   始终成为上方紧邻项的直接子任务（parent_id = 上方项的 id）。
  *
  * **主任务（depth == 0）**：
- *   默认保持主任务，仅当明确拖入子树时才改变层级：
+ *   默认保持主任务，仅当"从子树入口进入"时才改变层级：
  *   - 上方是主任务（depth=0）且下方紧接其子任务（depth>0）→ 进入上方主任务的子树
- *   - 上方是子任务（depth>0）→ 已在子树内部，成为上方子任务的子任务
- *   - 上方是主任务且下方也是主任务（或无下方）→ 保持主任务，只改变排序
+ *   - 其他所有情况（上方是子任务、两个主任务之间、列表末尾）→ 保持主任务，只改变排序
  *
  * 正确覆盖全部场景：
  *   1. "B 放在 A 和 a1 之间" → depth(A)=0, depth(a1)=1 → B 进入 A 的子树 ✓
- *   2. "B 放在 a1 和 1 之间" → depth(a1)=1 → B 已在子树内，成为 a1 的子任务 ✓
+ *   2. "A 放在 B 和 b1 下面" → depth(b1)=1, below=null → A 保持主任务 ✓
  *   3. "a1 放在 b1 和 1 之间" → a1 是子任务，上方 b1 → 成为 b1 的子任务 ✓
  *   4. "a1 和 1 被移到顶端" → 索引 0 → a1 晋升主任务，其子任务 1 保持不变 ✓
  *   5. "b1 放在 C 下面" → b1 是子任务，上方 C → 成为 C 的子任务 ✓
@@ -624,10 +628,9 @@ private fun handleDrop(
      *   - 子任务：上方项 id 即新父 id
      *   - 主任务：仅当"明确拖入子树"时才变为子任务，否则保持 null（主任务）
      *
-     * "明确拖入子树"的判据：
-     *   (a) 上方是主任务、下方紧接其子任务（depth 差>0）—— 正在进入上方主任务的子树
-     *   (b) 上方本身就是子任务 —— 已经处于子树内部
-     * 不在以上两种情况（两个主任务之间、列表末尾）→ 保持主任务。
+     * "从子树入口进入"的判据：
+     *   上方是主任务（depth=0）、下方紧接其子任务（depth>0）—— 正在进入上方主任务的子树。
+     * 其他情况（上方是子任务、两个主任务之间、列表末尾）→ 保持主任务。
      */
     val newParentId: String? = if (currentIdx == 0) {
         null
@@ -636,14 +639,14 @@ private fun handleDrop(
         val belowItem = reorderableItems.getOrNull(currentIdx + 1)
 
         if (draggedItem.depth == 0) {
-            /* 被拖拽的是主任务 —— 仅当明确拖入子树时才改变层级 */
-            when {
-                /* 上方是主任务（depth=0）且下方紧接其子任务（depth>0）：进入上方主任务的子树 */
-                belowItem != null && aboveItem.depth == 0 && belowItem.depth > 0 -> aboveItem.task.id
-                /* 上方是子任务（depth>0）：已处于子树内部，成为上方子任务的子任务 */
-                aboveItem.depth > 0 -> aboveItem.task.id
-                /* 两个主任务之间（或无下方项）：保持主任务，仅改变排序 */
-                else -> null
+            /* 被拖拽的是主任务 —— 仅当"从子树入口进入"时才改变层级：
+             * 唯一触发条件：上方是主任务 + 下方紧接其子任务（depth 差>0），
+             * 表示用户明确将主任务拖入了上方主任务的子树。
+             * 其他情况（拖到子任务后面、两个主任务之间、列表末尾）均保持主任务。 */
+            if (belowItem != null && aboveItem.depth == 0 && belowItem.depth > 0) {
+                aboveItem.task.id
+            } else {
+                null
             }
         } else {
             /* 被拖拽的是子任务 —— 始终成为上方项的直接子任务 */

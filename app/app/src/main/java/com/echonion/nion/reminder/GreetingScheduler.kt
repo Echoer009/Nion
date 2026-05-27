@@ -49,27 +49,25 @@ object GreetingScheduler {
         // 先取消所有已有问候闹钟
         cancelAll(context)
 
-        // 检查总开关
-        val enabled = core.getSetting("greeting_enabled")
-        if (enabled == "false") {
-            Log.d(TAG, "问候功能已禁用")
-            return
+        // 调度早安问候（独立开关）
+        val morningEnabled = core.getSetting("greeting_morning_enabled")
+        if (morningEnabled != "false") {
+            val morningTime = core.getSetting("greeting_morning_time") ?: "08:00"
+            scheduleGreeting(context, TYPE_MORNING, morningTime)
         }
 
-        // 调度早安问候
-        val morningTime = core.getSetting("greeting_morning_time") ?: "08:00"
-        scheduleGreeting(context, TYPE_MORNING, morningTime)
-
-        // 调度午间检查
-        val noonEnabled = core.getSetting("greeting_noon_enabled") ?: "true"
+        // 调度午间检查（独立开关 + 可自定义时间）
+        val noonEnabled = core.getSetting("greeting_noon_enabled")
         if (noonEnabled != "false") {
-            scheduleGreeting(context, TYPE_NOON, "12:00")
+            val noonTime = core.getSetting("greeting_noon_time") ?: "12:00"
+            scheduleGreeting(context, TYPE_NOON, noonTime)
         }
 
-        // 调度晚间总结
-        val eveningEnabled = core.getSetting("greeting_evening_enabled") ?: "true"
+        // 调度晚间总结（独立开关 + 可自定义时间）
+        val eveningEnabled = core.getSetting("greeting_evening_enabled")
         if (eveningEnabled != "false") {
-            scheduleGreeting(context, TYPE_EVENING, "21:00")
+            val eveningTime = core.getSetting("greeting_evening_time") ?: "21:00"
+            scheduleGreeting(context, TYPE_EVENING, eveningTime)
         }
 
         Log.d(TAG, "问候闹钟重调度完成")
