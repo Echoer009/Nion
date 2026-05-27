@@ -176,20 +176,12 @@ fun SharedTaskList(
         (if (overdueTasks.isNotEmpty()) 1 + overdueTasks.size else 0) +
         if (reorderableItems.isNotEmpty()) 1 else 0
 
-    /* 动态计算每个 item 是否是其所在组的最后一行。
-     * 判据：下一项的 depth <= 当前项的 depth（意味着当前分支已结束），
-     * 或当前项是列表末尾。
-     * 例如 [A(d=0), B(d=1), b(d=2), a(d=1), C(d=0)]:
-     *   b(d=2) → 下一项 a(d=1), 1<=2 → b 是组的最后一行 ✓
-     *   a(d=1) → 下一项 C(d=0), 0<=1 → a 是组的最后一行 ✓
-     * 这比只检查 depth==0 更准确，能正确处理嵌套子任务。 */
     val effectiveLastMap by remember {
         derivedStateOf {
             val map = mutableMapOf<String, Boolean>()
             for (i in reorderableItems.indices) {
                 val item = reorderableItems[i]
-                val isLast = i == reorderableItems.lastIndex ||
-                    reorderableItems[i + 1].depth <= item.depth
+                val isLast = i == reorderableItems.lastIndex || reorderableItems[i + 1].depth == 0
                 map[item.task.id] = isLast
             }
             map
@@ -312,9 +304,7 @@ fun SharedTaskList(
                     /* 长按未移动时（!subsRemoved）移除间距，配合分组卡片整体浮起；
                      * 开始移动后（subsRemoved）子任务已从列表移除，间距无关 */
                     isInDraggedGroup && !subsRemoved -> Modifier
-                    /* 仅主任务（depth==0）才有组顶部间距，防止主任务变子任务后
-                     * 因 isGroupFirst 残留为 true 而多出 8dp */
-                    displayItem.isGroupFirst && displayItem.depth == 0 -> Modifier.padding(top = 8.dp)
+                    displayItem.isGroupFirst -> Modifier.padding(top = 8.dp)
                     displayItem.isGroupLast -> Modifier.padding(bottom = 8.dp)
                     else -> Modifier
                 }
