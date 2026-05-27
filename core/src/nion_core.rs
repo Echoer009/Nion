@@ -122,7 +122,7 @@ impl NionCore {
         })?;
         let mut stmt = db
             .prepare(
-                "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks ORDER BY sort_order ASC, created_at DESC"
+                "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks ORDER BY sort_order ASC, created_at DESC"
             )
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
 
@@ -215,7 +215,7 @@ impl NionCore {
         }
 
         let sql = format!(
-            "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE {} ORDER BY sort_order ASC, created_at DESC",
+            "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE {} ORDER BY sort_order ASC, created_at DESC",
             conditions.join(" AND ")
         );
         let mut stmt = db.prepare(&sql).map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
@@ -230,8 +230,8 @@ impl NionCore {
     }
 
     /// 获取今日需关注的任务（带每日任务完成状态）：
-    /// 1. 截止日期 = 今天的任务（普通任务，看 status 判断完成）
-    /// 2. 设置了每日循环（recurrence_rule='daily'）且未过期（due_date 为空或 >= 今天）的任务
+    /// 1. reminder 日期部分 = 今天的任务（普通任务，看 status 判断完成）
+    /// 2. 设置了每日循环（recurrence_rule='daily'）的任务
     ///    每日任务的完成状态由 daily_completions 表决定，不看 tasks.status
     ///
     /// 参数 date: "YYYY-MM-DD" 格式的日期字符串
@@ -253,8 +253,10 @@ impl NionCore {
             .filter_map(|r| r.ok())
             .collect();
 
-        let sql = "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (due_date = ?1 OR (recurrence_rule = 'daily' AND (due_date IS NULL OR due_date >= ?1))) ORDER BY sort_order ASC, created_at DESC";
-
+        // 查询条件：
+        // 1. reminder 日期部分 = date 的普通任务
+        // 2. 所有每日循环模板任务
+        let sql = "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY sort_order ASC, created_at DESC";
         let mut stmt = db.prepare(sql)
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
 
@@ -293,7 +295,7 @@ impl NionCore {
         })?;
         let mut stmt = db
             .prepare(
-                "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id = ?1 ORDER BY sort_order ASC, created_at ASC"
+                "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id = ?1 ORDER BY sort_order ASC, created_at ASC"
             )
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         let rows = stmt
@@ -311,7 +313,6 @@ impl NionCore {
         title: String,
         description: Option<String>,
         priority: String,
-        due_date: Option<String>,
         category_id: Option<String>,
         parent_id: Option<String>,
         group_id: Option<String>,
@@ -325,8 +326,8 @@ impl NionCore {
         let now = chrono::Utc::now().to_rfc3339();
 
         db.execute(
-            "INSERT INTO tasks (id, title, description, priority, status, due_date, category_id, parent_id, group_id, recurrence_rule, recurrence_reminder_time, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'todo', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
-            params![id, title, description, priority, due_date, category_id, parent_id, group_id, recurrence_rule, recurrence_reminder_time, now, now],
+            "INSERT INTO tasks (id, title, description, priority, status, category_id, parent_id, group_id, recurrence_rule, recurrence_reminder_time, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'todo', ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
+            params![id, title, description, priority, category_id, parent_id, group_id, recurrence_rule, recurrence_reminder_time, now, now],
         )
         .map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
@@ -338,7 +339,6 @@ impl NionCore {
             description,
             priority,
             status: "todo".to_string(),
-            due_date,
             reminder: None,
             parent_id,
             category_id,
@@ -359,7 +359,6 @@ impl NionCore {
         description: Option<String>,
         priority: Option<String>,
         status: Option<String>,
-        due_date: Option<String>,
         category_id: Option<String>,
         reminder: Option<String>,
         group_id: Option<String>,
@@ -393,11 +392,6 @@ impl NionCore {
                 sets.push(format!("completed_at = ?{}", param_values.len() + 1));
                 param_values.push(Box::new(now.clone()));
             }
-        }
-        // 新增：支持修改截止日期、所属清单、提醒时间
-        if let Some(ref v) = due_date {
-            sets.push(format!("due_date = ?{}", param_values.len() + 1));
-            param_values.push(Box::new(v.clone()));
         }
         if let Some(ref v) = category_id {
             sets.push(format!("category_id = ?{}", param_values.len() + 1));
@@ -1034,7 +1028,6 @@ impl NionCore {
             None,       // description
             None,       // priority
             None,       // status
-            None,       // due_date
             None,       // category_id
             None,       // reminder
             None,       // group_id
@@ -1141,7 +1134,7 @@ impl NionCore {
         // 查出所有每日循环模板任务
         let mut stmt = db
             .prepare(
-                "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE recurrence_rule = 'daily' AND parent_id IS NULL",
+                "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE recurrence_rule = 'daily' AND parent_id IS NULL",
             )
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         let daily_tasks: Vec<TaskData> = stmt
@@ -1159,18 +1152,6 @@ impl NionCore {
         let mut result = Vec::new();
 
         for task in daily_tasks {
-            // 如果模板有 due_date 且已过期（due_date < before_date 的前一天），跳过
-            // 注意：这里的 due_date 语义是"此模板从哪天开始生效"的反面——
-            // 原逻辑是 due_date < today 的 daily 任务被视为过期
-            // 我们保持一致：如果 due_date 存在且 < 今天，说明模板本身已过期，不再生成过期记录
-            if let Some(ref dd) = task.due_date {
-                if let Ok(due) = chrono::NaiveDate::parse_from_str(dd, "%Y-%m-%d") {
-                    if due < before {
-                        continue;
-                    }
-                }
-            }
-
             // 计算生效起始日：取 created_at 的日期部分
             let created_date = chrono::NaiveDateTime::parse_from_str(&task.created_at, "%+")
                 .map(|dt| dt.date())
@@ -1180,8 +1161,7 @@ impl NionCore {
                 })
                 .unwrap_or_else(|_| before);
 
-            // 如果有 due_date 且 due_date > before_date，起始日 = before（未来任务不产生过期）
-            // 否则起始日 = max(created_date, before - 365天)
+            // 起始日 = max(created_date, before - 365天)
             let earliest = (before - chrono::Duration::days(365)).max(created_date);
 
             // 查出这个任务的所有完成记录
@@ -1220,7 +1200,7 @@ impl NionCore {
     }
 
     /// 获取指定日期的所有任务（含每日任务的完成状态）
-    /// 用于日程页面：返回 due_date = date 的普通任务 + 所有每日模板（附带该日完成状态）
+    /// 用于日程页面：返回 reminder 日期 = date 的普通任务 + 所有每日模板（附带该日完成状态）
     pub fn get_tasks_for_date(&self, date: String) -> Result<Vec<DailyTaskStatus>, NionError> {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
@@ -1239,9 +1219,9 @@ impl NionCore {
             .collect();
 
         // 查询条件：
-        // 1. due_date = date 的普通任务（非每日循环）
-        // 2. 所有每日循环模板任务（无截止日期或截止日期 >= date）
-        let sql = "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (due_date = ?1 OR (recurrence_rule = 'daily' AND (due_date IS NULL OR due_date >= ?1))) ORDER BY sort_order ASC, created_at DESC";
+        // 1. reminder 日期部分 = date 的普通任务（非每日循环）
+        // 2. 所有每日循环模板任务
+        let sql = "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY sort_order ASC, created_at DESC";
         let mut stmt = db.prepare(sql).map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
         })?;
@@ -1307,10 +1287,10 @@ impl NionCore {
             .filter_map(|r| r.ok())
             .collect();
 
-        // 收集范围内 due_date 落在各天的普通任务统计
+        // 收集范围内 reminder 日期部分落在各天的普通任务统计
         let mut due_stmt = db
             .prepare(
-                "SELECT due_date, COUNT(*), SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) FROM tasks WHERE due_date >= ?1 AND due_date <= ?2 AND (recurrence_rule IS NULL OR recurrence_rule = 'none') AND parent_id IS NULL GROUP BY due_date",
+                "SELECT SUBSTR(reminder, 1, 10) as rd, COUNT(*), SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) FROM tasks WHERE SUBSTR(reminder, 1, 10) >= ?1 AND SUBSTR(reminder, 1, 10) <= ?2 AND (recurrence_rule IS NULL OR recurrence_rule = 'none') AND parent_id IS NULL GROUP BY SUBSTR(reminder, 1, 10)",
             )
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         let due_stats: std::collections::HashMap<String, (i32, i32)> = due_stmt
@@ -1327,8 +1307,8 @@ impl NionCore {
         // 获取所有活跃的每日模板任务数量
         let daily_template_count: i32 = db
             .query_row(
-                "SELECT COUNT(*) FROM tasks WHERE recurrence_rule = 'daily' AND parent_id IS NULL AND (due_date IS NULL OR due_date >= ?1)",
-                params![start_date],
+                "SELECT COUNT(*) FROM tasks WHERE recurrence_rule = 'daily' AND parent_id IS NULL",
+                params![],
                 |row| row.get(0),
             )
             .unwrap_or(0);
@@ -1495,23 +1475,22 @@ fn map_task_row(row: &rusqlite::Row) -> rusqlite::Result<TaskData> {
         description: row.get(2)?,
         priority: row.get(3)?,
         status: row.get(4)?,
-        due_date: row.get(5)?,
-        reminder: row.get(6)?,
-        parent_id: row.get(7)?,
-        category_id: row.get(8)?,
-        group_id: row.get(9)?,
-        created_at: row.get(10)?,
-        updated_at: row.get(11)?,
-        completed_at: row.get(12)?,
-        focus_seconds: row.get(13)?,
-        recurrence_rule: row.get(14)?,
-        recurrence_reminder_time: row.get(15)?,
+        reminder: row.get(5)?,
+        parent_id: row.get(6)?,
+        category_id: row.get(7)?,
+        group_id: row.get(8)?,
+        created_at: row.get(9)?,
+        updated_at: row.get(10)?,
+        completed_at: row.get(11)?,
+        focus_seconds: row.get(12)?,
+        recurrence_rule: row.get(13)?,
+        recurrence_reminder_time: row.get(14)?,
     })
 }
 
 fn query_task(db: &rusqlite::Connection, id: &str) -> Result<TaskData, NionError> {
     db.query_row(
-        "SELECT id, title, description, priority, status, due_date, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE id = ?1",
+        "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE id = ?1",
         params![id],
         |row| map_task_row(row),
     )
@@ -1541,7 +1520,6 @@ mod tests {
             None,
             None,
             None,
-            None,
         ).unwrap();
 
         assert_eq!(task.title, "Test task");
@@ -1565,7 +1543,6 @@ mod tests {
             None,
             None,
             None,
-            None,
         ).unwrap();
 
         let updated = core.update_task(
@@ -1574,7 +1551,6 @@ mod tests {
             None,
             Some("high".to_string()),
             Some("in_progress".to_string()),
-            None,
             None,
             None,
             None,
@@ -1600,7 +1576,6 @@ mod tests {
             None,
             None,
             None,
-            None,
         ).unwrap();
 
         let updated = core.update_task(
@@ -1609,7 +1584,6 @@ mod tests {
             None,
             None,
             Some("done".to_string()),
-            None,
             None,
             None,
             None,
@@ -1628,7 +1602,6 @@ mod tests {
             "Delete me".to_string(),
             None,
             "medium".to_string(),
-            None,
             None,
             None,
             None,
@@ -1658,9 +1631,9 @@ mod tests {
         let core = make_in_memory();
         let cl = core.create_checklist("学习".to_string()).unwrap();
 
-        core.create_task("Task A".to_string(), None, "high".to_string(), None, Some(cl.id.clone()), None, None, None, None).unwrap();
-        core.create_task("Task B".to_string(), None, "low".to_string(), None, None, None, None, None, None).unwrap();
-        core.create_task("Task C".to_string(), None, "medium".to_string(), None, Some(cl.id.clone()), None, None, None, None).unwrap();
+        core.create_task("Task A".to_string(), None, "high".to_string(), Some(cl.id.clone()), None, None, None, None).unwrap();
+        core.create_task("Task B".to_string(), None, "low".to_string(), None, None, None, None, None).unwrap();
+        core.create_task("Task C".to_string(), None, "medium".to_string(), Some(cl.id.clone()), None, None, None, None).unwrap();
 
         let all = core.get_tasks().unwrap();
         assert_eq!(all.len(), 3);
@@ -1676,9 +1649,9 @@ mod tests {
     #[test]
     fn test_subtasks() {
         let core = make_in_memory();
-        let parent = core.create_task("Parent".to_string(), None, "high".to_string(), None, None, None, None, None, None).unwrap();
-        core.create_task("Child 1".to_string(), None, "low".to_string(), None, None, Some(parent.id.clone()), None, None, None).unwrap();
-        core.create_task("Child 2".to_string(), None, "medium".to_string(), None, None, Some(parent.id.clone()), None, None, None).unwrap();
+        let parent = core.create_task("Parent".to_string(), None, "high".to_string(), None, None, None, None, None).unwrap();
+        core.create_task("Child 1".to_string(), None, "low".to_string(), None, Some(parent.id.clone()), None, None, None).unwrap();
+        core.create_task("Child 2".to_string(), None, "medium".to_string(), None, Some(parent.id.clone()), None, None, None).unwrap();
 
         let top = core.get_tasks_by_category(None, None).unwrap();
         assert_eq!(top.len(), 1);
@@ -1693,9 +1666,9 @@ mod tests {
     #[test]
     fn test_update_task_parent() {
         let core = make_in_memory();
-        let parent_a = core.create_task("Parent A".to_string(), None, "high".to_string(), None, None, None, None, None, None).unwrap();
-        let parent_b = core.create_task("Parent B".to_string(), None, "medium".to_string(), None, None, None, None, None, None).unwrap();
-        let child = core.create_task("Child".to_string(), None, "low".to_string(), None, None, Some(parent_a.id.clone()), None, None, None).unwrap();
+        let parent_a = core.create_task("Parent A".to_string(), None, "high".to_string(), None, None, None, None, None).unwrap();
+        let parent_b = core.create_task("Parent B".to_string(), None, "medium".to_string(), None, None, None, None, None).unwrap();
+        let child = core.create_task("Child".to_string(), None, "low".to_string(), None, Some(parent_a.id.clone()), None, None, None).unwrap();
 
         // 初始：Child 是 Parent A 的子任务
         let subs_a = core.get_subtasks(parent_a.id.clone()).unwrap();
@@ -1725,19 +1698,26 @@ mod tests {
             "Single task".to_string(),
             Some("desc".to_string()),
             "high".to_string(),
-            Some("2026-06-01".to_string()),
             None,
             None,
             None,
             None,
             None,
         ).unwrap();
+        // 通过 update_task 设置 reminder
+        let task = core.update_task(
+            task.id.clone(),
+            None, None, None, None,
+            None,
+            Some("2026-06-01T09:00".to_string()),
+            None, None, None,
+        ).unwrap();
 
         // 通过 ID 查询单个任务
         let found = core.get_task(task.id.clone()).unwrap();
         assert_eq!(found.id, task.id);
         assert_eq!(found.title, "Single task");
-        assert_eq!(found.due_date, Some("2026-06-01".to_string()));
+        assert_eq!(found.reminder, Some("2026-06-01T09:00".to_string()));
 
         // 不存在的 ID 应返回错误
         let err = core.get_task("nonexistent".to_string());
@@ -1757,24 +1737,21 @@ mod tests {
             None,
             None,
             None,
-            None,
         ).unwrap();
 
-        // 修改截止日期、所属清单、提醒时间
+        // 修改所属清单、提醒时间
         let updated = core.update_task(
             task.id.clone(),
             None,
             None,
             None,
             None,
-            Some("2026-12-31".to_string()),
             Some(cl.id.clone()),
             Some("2026-12-30T09:00:00Z".to_string()),
             None,
             None,
             None,
         ).unwrap();
-        assert_eq!(updated.due_date, Some("2026-12-31".to_string()));
         assert_eq!(updated.category_id, Some(cl.id));
         assert_eq!(updated.reminder, Some("2026-12-30T09:00:00Z".to_string()));
     }
@@ -1837,11 +1814,11 @@ mod tests {
         let g2 = core.create_group("英语".to_string(), cl.id.clone(), None).unwrap();
 
         // 在不同分组下创建任务
-        core.create_task("背单词".to_string(), None, "high".to_string(), None, Some(cl.id.clone()), None, Some(g1.id.clone()), None, None).unwrap();
-        core.create_task("读课文".to_string(), None, "medium".to_string(), None, Some(cl.id.clone()), None, Some(g1.id.clone()), None, None).unwrap();
-        core.create_task("听力练习".to_string(), None, "low".to_string(), None, Some(cl.id.clone()), None, Some(g2.id.clone()), None, None).unwrap();
+        core.create_task("背单词".to_string(), None, "high".to_string(), Some(cl.id.clone()), None, Some(g1.id.clone()), None, None).unwrap();
+        core.create_task("读课文".to_string(), None, "medium".to_string(), Some(cl.id.clone()), None, Some(g1.id.clone()), None, None).unwrap();
+        core.create_task("听力练习".to_string(), None, "low".to_string(), Some(cl.id.clone()), None, Some(g2.id.clone()), None, None).unwrap();
         // 不属于任何分组的任务
-        core.create_task("自习".to_string(), None, "medium".to_string(), None, Some(cl.id.clone()), None, None, None, None).unwrap();
+        core.create_task("自习".to_string(), None, "medium".to_string(), Some(cl.id.clone()), None, None, None, None).unwrap();
 
         // 获取语文分组的任务
         let chinese_tasks = core.get_tasks_by_category(Some(cl.id.clone()), Some(g1.id.clone())).unwrap();
@@ -1863,7 +1840,7 @@ mod tests {
         let cl = core.create_checklist("学习清单".to_string()).unwrap();
         let g = core.create_group("语文".to_string(), cl.id.clone(), None).unwrap();
 
-        core.create_task("背单词".to_string(), None, "high".to_string(), None, Some(cl.id.clone()), None, Some(g.id.clone()), None, None).unwrap();
+        core.create_task("背单词".to_string(), None, "high".to_string(), Some(cl.id.clone()), None, Some(g.id.clone()), None, None).unwrap();
 
         // 删除分组后，任务仍存在，group_id 被置空
         assert!(core.delete_group(g.id.clone()).unwrap());
@@ -1897,7 +1874,7 @@ mod tests {
         let g1 = core.create_group("语文".to_string(), cl.id.clone(), None).unwrap();
         let g2 = core.create_group("英语".to_string(), cl.id.clone(), None).unwrap();
 
-        let task = core.create_task("某任务".to_string(), None, "medium".to_string(), None, Some(cl.id.clone()), None, Some(g1.id.clone()), None, None).unwrap();
+        let task = core.create_task("某任务".to_string(), None, "medium".to_string(), Some(cl.id.clone()), None, Some(g1.id.clone()), None, None).unwrap();
         assert_eq!(task.group_id, Some(g1.id.clone()));
 
         // 移到英语分组
@@ -1934,24 +1911,23 @@ mod tests {
         let core = make_in_memory();
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let future = chrono::Local::now().checked_add_days(chrono::Days::new(7)).unwrap().format("%Y-%m-%d").to_string();
-        // 任务 A：截止日期 = 今天 → 应出现在"今天"
-        core.create_task("Task A".to_string(), None, "high".to_string(), Some(today.clone()), None, None, None, None, None).unwrap();
-        // 任务 B：截止日期 = 未来 → 不应该出现
-        core.create_task("Task B".to_string(), None, "medium".to_string(), Some(future.clone()), None, None, None, None, None).unwrap();
-        // 任务 C：每日循环，无截止日期 → 应出现在"今天"
-        core.create_task("Task C".to_string(), None, "low".to_string(), None, None, None, None, Some("daily".to_string()), None).unwrap();
-        // 任务 D：每日循环 + due_date = 未来 → 应出现在"今天"
-        core.create_task("Task D".to_string(), None, "medium".to_string(), Some(future.clone()), None, None, None, Some("daily".to_string()), None).unwrap();
-        // 任务 E：不循环 + 无截止日期 → 不应该出现
-        core.create_task("Task E".to_string(), None, "low".to_string(), None, None, None, None, None, None).unwrap();
+        // 任务 A：reminder 日期 = 今天 → 应出现在"今天"
+        let task_a = core.create_task("Task A".to_string(), None, "high".to_string(), None, None, None, None, None).unwrap();
+        core.update_task(task_a.id.clone(), None, None, None, None, None, Some(format!("{}T09:00", today)), None, None, None).unwrap();
+        // 任务 B：reminder 日期 = 未来 → 不应该出现
+        let task_b = core.create_task("Task B".to_string(), None, "medium".to_string(), None, None, None, None, None).unwrap();
+        core.update_task(task_b.id.clone(), None, None, None, None, None, Some(format!("{}T09:00", future)), None, None, None).unwrap();
+        // 任务 C：每日循环，reminder = null → 应出现在"今天"
+        core.create_task("Task C".to_string(), None, "low".to_string(), None, None, None, Some("daily".to_string()), None).unwrap();
+        // 任务 D：不循环 + 无 reminder → 不应该出现
+        core.create_task("Task D".to_string(), None, "low".to_string(), None, None, None, None, None).unwrap();
 
         let today_tasks = core.get_tasks_due_today(today.clone()).unwrap();
-        assert_eq!(today_tasks.len(), 3);
+        assert_eq!(today_tasks.len(), 2);
         // 返回类型改为 DailyTaskStatus，取 .task.title
         let titles: Vec<&str> = today_tasks.iter().map(|t| t.task.title.as_str()).collect();
         assert!(titles.contains(&"Task A"));
         assert!(titles.contains(&"Task C"));
-        assert!(titles.contains(&"Task D"));
         // 每日任务初始状态：未完成
         let task_c = today_tasks.iter().find(|t| t.task.title == "Task C").unwrap();
         assert!(!task_c.completed_for_date);
@@ -1961,26 +1937,15 @@ mod tests {
     fn test_get_tasks_due_today_excludes_subtasks() {
         let core = make_in_memory();
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let parent = core.create_task("Parent".to_string(), None, "high".to_string(), Some(today.clone()), None, None, None, None, None).unwrap();
+        let parent = core.create_task("Parent".to_string(), None, "high".to_string(), None, None, None, None, None).unwrap();
+        core.update_task(parent.id.clone(), None, None, None, None, None, Some(format!("{}T09:00", today)), None, None, None).unwrap();
         // 子任务不应出现在"今天"中（parent_id IS NULL 过滤）
-        core.create_task("Child".to_string(), None, "low".to_string(), Some(today.clone()), None, Some(parent.id.clone()), None, None, None).unwrap();
+        let child = core.create_task("Child".to_string(), None, "low".to_string(), None, Some(parent.id.clone()), None, None, None).unwrap();
+        core.update_task(child.id.clone(), None, None, None, None, None, Some(format!("{}T09:00", today)), None, None, None).unwrap();
 
         let today_tasks = core.get_tasks_due_today(today).unwrap();
         assert_eq!(today_tasks.len(), 1);
         assert_eq!(today_tasks[0].task.title, "Parent");
-    }
-
-    #[test]
-    fn test_get_tasks_due_today_excludes_expired_daily() {
-        let core = make_in_memory();
-        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let past = chrono::Local::now().checked_sub_days(chrono::Days::new(7)).unwrap().format("%Y-%m-%d").to_string();
-
-        // 每日循环 + due_date = 过去 → 已过期，不应该出现
-        core.create_task("Expired Daily".to_string(), None, "medium".to_string(), Some(past), None, None, None, Some("daily".to_string()), None).unwrap();
-
-        let today_tasks = core.get_tasks_due_today(today).unwrap();
-        assert_eq!(today_tasks.len(), 0);
     }
 
     // ==================== 每日任务完成记录测试 ====================
@@ -1990,7 +1955,7 @@ mod tests {
         let core = make_in_memory();
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         // 创建每日任务
-        let task = core.create_task("背单词".to_string(), None, "high".to_string(), None, None, None, None, Some("daily".to_string()), Some("09:00".to_string())).unwrap();
+        let task = core.create_task("背单词".to_string(), None, "high".to_string(), None, None, None, Some("daily".to_string()), Some("09:00".to_string())).unwrap();
 
         // 完成今日
         let comp = core.complete_daily_task(task.id.clone(), today.clone()).unwrap();
@@ -2016,7 +1981,7 @@ mod tests {
     #[test]
     fn test_get_daily_completions_range() {
         let core = make_in_memory();
-        let task = core.create_task("运动".to_string(), None, "medium".to_string(), None, None, None, None, Some("daily".to_string()), None).unwrap();
+        let task = core.create_task("运动".to_string(), None, "medium".to_string(), None, None, None, Some("daily".to_string()), None).unwrap();
 
         // 完成 3 天
         let d1 = chrono::Local::now().checked_sub_days(chrono::Days::new(2)).unwrap().format("%Y-%m-%d").to_string();
@@ -2040,7 +2005,7 @@ mod tests {
         let three_days_ago = chrono::Local::now().checked_sub_days(chrono::Days::new(3)).unwrap().format("%Y-%m-%d").to_string();
 
         // 创建每日任务（created_at = now，但我们手动把 created_at 改到 3 天前）
-        let task = core.create_task("冥想".to_string(), None, "low".to_string(), None, None, None, None, Some("daily".to_string()), None).unwrap();
+        let task = core.create_task("冥想".to_string(), None, "low".to_string(), None, None, None, Some("daily".to_string()), None).unwrap();
 
         // 手动更新 created_at 到 3 天前，让过期检测能覆盖更多天
         {
@@ -2068,12 +2033,14 @@ mod tests {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let future = chrono::Local::now().checked_add_days(chrono::Days::new(7)).unwrap().format("%Y-%m-%d").to_string();
 
-        // 普通任务，截止今天
-        core.create_task("普通任务".to_string(), None, "high".to_string(), Some(today.clone()), None, None, None, None, None).unwrap();
+        // 普通任务，reminder = 今天
+        let normal = core.create_task("普通任务".to_string(), None, "high".to_string(), None, None, None, None, None).unwrap();
+        core.update_task(normal.id.clone(), None, None, None, None, None, Some(format!("{}T09:00", today)), None, None, None).unwrap();
         // 每日任务
-        let daily = core.create_task("每日任务".to_string(), None, "low".to_string(), None, None, None, None, Some("daily".to_string()), None).unwrap();
+        let daily = core.create_task("每日任务".to_string(), None, "low".to_string(), None, None, None, Some("daily".to_string()), None).unwrap();
         // 未来任务（不应出现在今天）
-        core.create_task("未来任务".to_string(), None, "medium".to_string(), Some(future), None, None, None, None, None).unwrap();
+        let future_task = core.create_task("未来任务".to_string(), None, "medium".to_string(), None, None, None, None, None).unwrap();
+        core.update_task(future_task.id.clone(), None, None, None, None, None, Some(format!("{}T09:00", future)), None, None, None).unwrap();
 
         // 完成每日任务今天
         core.complete_daily_task(daily.id.clone(), today.clone()).unwrap();
@@ -2096,9 +2063,10 @@ mod tests {
         let yesterday = chrono::Local::now().checked_sub_days(chrono::Days::new(1)).unwrap().format("%Y-%m-%d").to_string();
 
         // 每日任务
-        let daily = core.create_task("每天阅读".to_string(), None, "medium".to_string(), None, None, None, None, Some("daily".to_string()), None).unwrap();
-        // 普通任务，截止今天
-        core.create_task("今天到期".to_string(), None, "high".to_string(), Some(today.clone()), None, None, None, None, None).unwrap();
+        let daily = core.create_task("每天阅读".to_string(), None, "medium".to_string(), None, None, None, Some("daily".to_string()), None).unwrap();
+        // 普通任务，reminder = 今天
+        let today_task = core.create_task("今天到期".to_string(), None, "high".to_string(), None, None, None, None, None).unwrap();
+        core.update_task(today_task.id.clone(), None, None, None, None, None, Some(format!("{}T09:00", today)), None, None, None).unwrap();
 
         // 完成今天的每日任务
         core.complete_daily_task(daily.id.clone(), today.clone()).unwrap();
@@ -2125,7 +2093,7 @@ mod tests {
         let g = core.create_group("语文".to_string(), cl1.id.clone(), None).unwrap();
 
         // 在分组下创建任务
-        let task = core.create_task("背单词".to_string(), None, "high".to_string(), None, Some(cl1.id.clone()), None, Some(g.id.clone()), None, None).unwrap();
+        let task = core.create_task("背单词".to_string(), None, "high".to_string(), Some(cl1.id.clone()), None, Some(g.id.clone()), None, None).unwrap();
         assert_eq!(task.category_id, Some(cl1.id.clone()));
         assert_eq!(task.group_id, Some(g.id.clone()));
 
@@ -2154,7 +2122,7 @@ mod tests {
 
         // 在清单B/分组Y 下创建目标父任务
         let parent_b = core.create_task(
-            "Parent B".to_string(), None, "medium".to_string(), None,
+            "Parent B".to_string(), None, "medium".to_string(),
             Some(cl2.id.clone()), None, Some(g2.id.clone()), None, None,
         ).unwrap();
         assert_eq!(parent_b.category_id, Some(cl2.id.clone()));
@@ -2162,15 +2130,15 @@ mod tests {
 
         // 在清单A/分组X 下创建一个父任务，带有子任务和孙任务
         let parent_a = core.create_task(
-            "Parent A".to_string(), None, "high".to_string(), None,
+            "Parent A".to_string(), None, "high".to_string(),
             Some(cl1.id.clone()), None, Some(g1.id.clone()), None, None,
         ).unwrap();
         let child = core.create_task(
-            "Child".to_string(), None, "low".to_string(), None,
+            "Child".to_string(), None, "low".to_string(),
             Some(cl1.id.clone()), Some(parent_a.id.clone()), Some(g1.id.clone()), None, None,
         ).unwrap();
         let grandchild = core.create_task(
-            "Grandchild".to_string(), None, "low".to_string(), None,
+            "Grandchild".to_string(), None, "low".to_string(),
             Some(cl1.id.clone()), Some(child.id.clone()), Some(g1.id.clone()), None, None,
         ).unwrap();
 
@@ -2207,11 +2175,11 @@ mod tests {
 
         // 在清单A下创建父+子任务
         let parent = core.create_task(
-            "Parent".to_string(), None, "high".to_string(), None,
+            "Parent".to_string(), None, "high".to_string(),
             Some(cl1.id.clone()), None, None, None, None,
         ).unwrap();
         let child = core.create_task(
-            "Child".to_string(), None, "low".to_string(), None,
+            "Child".to_string(), None, "low".to_string(),
             Some(cl1.id.clone()), Some(parent.id.clone()), None, None, None,
         ).unwrap();
 
@@ -2221,8 +2189,7 @@ mod tests {
         // 通过 update_task 将父任务移到清单B
         core.update_task(
             parent.id.clone(), None, None, None, None,
-            Some("2026-12-31".to_string()), Some(cl2.id.clone()),
-            None, None, None, None,
+            Some(cl2.id.clone()), None, None, None, None,
         ).unwrap();
 
         // 子任务应级联跟随到清单B
@@ -2239,15 +2206,15 @@ mod tests {
 
         // 创建三层嵌套：root → level1 → level2
         let root = core.create_task(
-            "Root".to_string(), None, "high".to_string(), None,
+            "Root".to_string(), None, "high".to_string(),
             Some(cl1.id.clone()), None, None, None, None,
         ).unwrap();
         let level1 = core.create_task(
-            "Level1".to_string(), None, "medium".to_string(), None,
+            "Level1".to_string(), None, "medium".to_string(),
             Some(cl1.id.clone()), Some(root.id.clone()), None, None, None,
         ).unwrap();
         let level2 = core.create_task(
-            "Level2".to_string(), None, "low".to_string(), None,
+            "Level2".to_string(), None, "low".to_string(),
             Some(cl1.id.clone()), Some(level1.id.clone()), None, None, None,
         ).unwrap();
 
@@ -2258,7 +2225,7 @@ mod tests {
 
         // 通过 update_task 把 root 移到清单B
         core.update_task(
-            root.id.clone(), None, None, None, None, None,
+            root.id.clone(), None, None, None, None,
             Some(cl2.id.clone()), None, None, None, None,
         ).unwrap();
 
@@ -2279,11 +2246,11 @@ mod tests {
 
         // 在分组A下创建父+子任务
         let parent = core.create_task(
-            "Parent".to_string(), None, "medium".to_string(), None,
+            "Parent".to_string(), None, "medium".to_string(),
             Some(cl.id.clone()), None, Some(g1.id.clone()), None, None,
         ).unwrap();
         let child = core.create_task(
-            "Child".to_string(), None, "low".to_string(), None,
+            "Child".to_string(), None, "low".to_string(),
             Some(cl.id.clone()), Some(parent.id.clone()), Some(g1.id.clone()), None, None,
         ).unwrap();
 
@@ -2305,11 +2272,11 @@ mod tests {
 
         // 在分组下创建任务，并添加子任务（子任务也在同一分组）
         let parent = core.create_task(
-            "背单词".to_string(), None, "high".to_string(), None,
+            "背单词".to_string(), None, "high".to_string(),
             Some(cl1.id.clone()), None, Some(g.id.clone()), None, None,
         ).unwrap();
         let child = core.create_task(
-            "复习单词".to_string(), None, "medium".to_string(), None,
+            "复习单词".to_string(), None, "medium".to_string(),
             Some(cl1.id.clone()), Some(parent.id.clone()), Some(g.id.clone()), None, None,
         ).unwrap();
 
@@ -2331,11 +2298,11 @@ mod tests {
         let cl = core.create_checklist("清单".to_string()).unwrap();
 
         let parent = core.create_task(
-            "Parent".to_string(), None, "high".to_string(), None,
+            "Parent".to_string(), None, "high".to_string(),
             Some(cl.id.clone()), None, None, None, None,
         ).unwrap();
         let child = core.create_task(
-            "Child".to_string(), None, "low".to_string(), None,
+            "Child".to_string(), None, "low".to_string(),
             Some(cl.id.clone()), Some(parent.id.clone()), None, None, None,
         ).unwrap();
 

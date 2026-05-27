@@ -22,7 +22,6 @@ pub struct TaskData {
     pub description: Option<String>,
     pub priority: String,
     pub status: String,
-    pub due_date: Option<String>,
     pub reminder: Option<String>,
     pub parent_id: Option<String>,
     pub category_id: Option<String>,
