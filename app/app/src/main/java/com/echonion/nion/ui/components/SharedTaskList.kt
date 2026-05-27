@@ -292,7 +292,14 @@ fun SharedTaskList(
                 ReorderableItem(
                     state = reorderableState,
                     key = flatItem.task.id,
-                    animateItemModifier = if (!isInDraggedGroup) Modifier.animateItem() else Modifier,
+                    /* 完成动画：StiffnessLow 慢速 + DampingRatioMedium（0.6）微弱回弹，
+                     * 既柔和不闪烁，又不会弹过头。拖拽中的卡片跳过位移动画。 */
+                    animateItemModifier = if (!isInDraggedGroup) Modifier.animateItem(
+                        placementSpec = spring(
+                            dampingRatio = Spring.DampingRatioLowBouncy,
+                            stiffness = Spring.StiffnessLow,
+                        ),
+                    ) else Modifier,
                 ) { isDragging ->
                     val density = LocalDensity.current
 
@@ -509,9 +516,15 @@ fun SharedTaskList(
             ) { flatItem ->
                 val isSelected = flatItem.task.id in selectedIds
                 val cardShape = remember { RoundedCornerShape(16.dp) }
-                Box(
-                    modifier = Modifier
-                        .animateItem()
+                    /* 已完成区使用与待办区相同的慢速弹簧，确保从待办区滑入已完成区的动画速度一致 */
+                    Box(
+                        modifier = Modifier
+                            .animateItem(
+                                placementSpec = spring(
+                                    dampingRatio = Spring.DampingRatioLowBouncy,
+                                    stiffness = Spring.StiffnessLow,
+                                ),
+                            )
                         .padding(vertical = 4.dp)
                         .then(
                             if (isSelected) Modifier.border(

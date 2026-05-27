@@ -56,22 +56,10 @@ fun FlatTaskRow(
     sharedElementModifier: Modifier = Modifier,
 ) {
     val task = item.task
-    val priorityColor = task.priority.priorityColor
-
-    val cardColor by animateColorAsState(
-        targetValue = if (task.isDone)
-            MaterialTheme.colorScheme.surfaceContainerLow
-        else
-            MaterialTheme.colorScheme.surfaceContainerLowest,
-        animationSpec = tween(300),
-        label = "cardColor",
-    )
 
     if (item.depth == 0) {
         MainTaskRow(
             task = task,
-            cardColor = cardColor,
-            priorityColor = priorityColor,
             isGroupLast = item.isGroupLast,
             onToggleDone = onToggleDone,
             onClick = onClick,
@@ -83,8 +71,6 @@ fun FlatTaskRow(
     } else {
         SubTaskRow(
             item = item,
-            cardColor = cardColor,
-            priorityColor = priorityColor,
             onToggleDone = onToggleDone,
             onClick = onClick,
             isSelected = isSelected,
@@ -144,8 +130,6 @@ private fun Modifier.groupBorder(
 @Composable
 private fun MainTaskRow(
     task: TaskItem,
-    cardColor: Color,
-    priorityColor: Color,
     isGroupLast: Boolean,
     onToggleDone: (TaskItem) -> Unit,
     onClick: (TaskItem) -> Unit,
@@ -201,8 +185,6 @@ private fun MainTaskRow(
 @Composable
 private fun SubTaskRow(
     item: FlatTaskItem,
-    cardColor: Color,
-    priorityColor: Color,
     onToggleDone: (TaskItem) -> Unit,
     onClick: (TaskItem) -> Unit,
     isSelected: Boolean,
@@ -211,9 +193,20 @@ private fun SubTaskRow(
     sharedElementModifier: Modifier = Modifier,
 ) {
     val task = item.task
+    val priorityColor = task.priority.priorityColor
     val checkSize = 18.dp
     val indentPerLevel = 20.dp
     val indent = indentPerLevel * item.depth
+
+    /* 子任务背景色动画：完成后渐变到 surfaceContainerLow，与 SharedTaskCard 一致 */
+    val cardColor by animateColorAsState(
+        targetValue = if (task.isDone)
+            MaterialTheme.colorScheme.surfaceContainerLow
+        else
+            MaterialTheme.colorScheme.surfaceContainerLowest,
+        animationSpec = tween(300),
+        label = "cardColor",
+    )
 
     val shape = if (item.isGroupLast)
         RoundedCornerShape(bottomStart = 12.dp, bottomEnd = 12.dp)
