@@ -44,9 +44,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import com.echonion.nion.ui.task.formatDueDate
 import com.echonion.nion.ui.task.formatReminder
-import com.echonion.nion.ui.task.isOverdue
+import com.echonion.nion.ui.task.isReminderOverdue
 import com.echonion.nion.ui.task.priorityColor
 
 /**
@@ -62,7 +61,6 @@ data class TaskCardModel(
     val priority: String,
     val isDone: Boolean,
     val isDaily: Boolean = false,
-    val dueDate: String? = null,
     val reminderTime: String? = null,
     /** 一次性提醒时间，格式 "YYYY-MM-DDTHH:MM"，由卡片上的铃铛图标 + 完整日期时间展示 */
     val reminder: String? = null,
@@ -215,54 +213,36 @@ fun SharedTaskCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            // 截止日期 + 提醒时间行：日历/时钟/铃铛图标 + 格式化日期，逾期时文字变红
-            // 三种时间信息：dueDate（截止日期）、reminderTime（每日循环时间）、reminder（一次性提醒）
-            val hasDueDate = !model.dueDate.isNullOrBlank()
+            // 提醒时间 + 每日循环时间行：铃铛/时钟图标 + 格式化日期，逾期时文字变红
+            // 两种时间信息：reminder（一次性提醒）、reminderTime（每日循环时间）
             val hasReminderTime = !model.reminderTime.isNullOrBlank()
             val hasReminder = !model.reminder.isNullOrBlank()
-            if (hasDueDate || hasReminderTime || hasReminder) {
+            if (hasReminder || hasReminderTime) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // 截止日期部分：日历图标 + 格式化日期
-                    if (hasDueDate) {
-                        Icon(
-                            Icons.Outlined.CalendarToday,
-                            contentDescription = null,
-                            modifier = Modifier.size(12.dp),
-                            tint = if (model.dueDate.isOverdue()) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = model.dueDate.formatDueDate() ?: "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (model.dueDate.isOverdue()) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    // 一次性提醒部分：铃铛图标 + 格式化的完整日期时间
+                    // 一次性提醒部分：铃铛图标 + 格式化的完整日期时间，逾期变红
                     if (hasReminder) {
-                        if (hasDueDate) Spacer(modifier = Modifier.width(8.dp))
+                        val isOverdue = model.reminder.isReminderOverdue()
                         Icon(
                             Icons.Outlined.Notifications,
                             contentDescription = null,
                             modifier = Modifier.size(12.dp),
-                            tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            tint = if (isOverdue) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = model.reminder.formatReminder() ?: "",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            color = if (isOverdue) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
                     // 每日循环提醒时间部分：时钟图标 + HH:MM 时间
                     if (hasReminderTime) {
-                        if (hasDueDate || hasReminder) Spacer(modifier = Modifier.width(8.dp))
+                        if (hasReminder) Spacer(modifier = Modifier.width(8.dp))
                         Icon(
                             Icons.Outlined.Schedule,
                             contentDescription = null,

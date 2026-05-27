@@ -25,7 +25,6 @@ fun taskToJson(task: TaskData): JSONObject = JSONObject().apply {
     put("description", task.description ?: JSONObject.NULL)
     put("priority", task.priority)
     put("status", task.status)
-    put("due_date", task.dueDate ?: JSONObject.NULL)
     put("reminder", task.reminder ?: JSONObject.NULL)
     put("parent_id", task.parentId ?: JSONObject.NULL)
     put("category_id", task.categoryId ?: JSONObject.NULL)
@@ -270,10 +269,6 @@ object CreateTool : Tool {
                 "enum": ["low", "medium", "high"],
                 "description": "任务优先级（可选，仅 task）：low=低, medium=中, high=高，默认 medium"
             },
-            "due_date": {
-                "type": "string",
-                "description": "任务截止日期，ISO 8601 格式如 2026-06-01（可选，仅 task）"
-            },
             "category_id": {
                 "type": "string",
                 "description": "任务所属清单 ID（可选，仅 task）"
@@ -365,7 +360,6 @@ object CreateTool : Tool {
                             title = title,
                             description = itemParams.optString("description", "").takeIf { it.isNotEmpty() },
                             priority = itemParams.optString("priority", "medium"),
-                            dueDate = itemParams.optString("due_date", "").takeIf { it.isNotEmpty() },
                             categoryId = itemParams.optString("category_id", "").takeIf { it.isNotEmpty() },
                             parentId = itemParams.optString("parent_id", "").takeIf { it.isNotEmpty() },
                             groupId = itemParams.optString("group_id", "").takeIf { it.isNotEmpty() },
@@ -375,7 +369,7 @@ object CreateTool : Tool {
                         // 批量创建也支持 reminder 字段
                         val reminder = itemParams.optString("reminder", "").takeIf { it.isNotEmpty() }
                         val finalTask = if (reminder != null) {
-                            core.updateTask(task.id, null, null, null, null, null, null, reminder, null, null, null)
+                            core.updateTask(task.id, null, null, null, null, null, reminder, null, null, null)
                         } else task
                         results.put(JSONObject().apply {
                             put("index", i)
@@ -439,7 +433,6 @@ object CreateTool : Tool {
             title = title,
             description = params.optString("description", "").takeIf { it.isNotEmpty() },
             priority = params.optString("priority", "medium"),
-            dueDate = params.optString("due_date", "").takeIf { it.isNotEmpty() },
             categoryId = params.optString("category_id", "").takeIf { it.isNotEmpty() },
             parentId = params.optString("parent_id", "").takeIf { it.isNotEmpty() },
             groupId = params.optString("group_id", "").takeIf { it.isNotEmpty() },
@@ -449,7 +442,7 @@ object CreateTool : Tool {
         // 如果指定了 reminder，需要二次更新（createTask 不支持 reminder 参数）
         val reminder = params.optString("reminder", "").takeIf { it.isNotEmpty() }
         val finalTask = if (reminder != null) {
-            core.updateTask(task.id, null, null, null, null, null, null, reminder, null, null, null)
+            core.updateTask(task.id, null, null, null, null, null, reminder, null, null, null)
         } else task
         return JSONObject().apply {
             put("success", true)
@@ -493,7 +486,7 @@ object CreateTool : Tool {
  * Agent 场景示例：
  * - "把任务标为完成" → entity_type="task", id="xxx", status="done"
  * - "把这三个任务都标为完成" → entity_type="task", ids=["id1","id2","id3"], status="done"
- * - "改一下截止日期" → entity_type="task", id="xxx", due_date="2026-12-31"
+     * - "改一下提醒时间" → entity_type="task", id="xxx", reminder="2026-12-31T09:00"
  * - "清单改名" → entity_type="checklist", id="xxx", name="新名称"
  * - "分组改颜色" → entity_type="group", id="xxx", color="#4CAF50"
  */
@@ -501,7 +494,7 @@ object UpdateTool : Tool {
     override val name = "update"
     override val description = "更新实体信息，支持批量。通过 entity_type 指定类型，只传入需要修改的字段即可。" +
         "单个更新传 id；批量更新传 ids 数组，所有实体应用相同的变更字段。" +
-        "task 支持修改 title/description/priority/status/due_date/category_id/reminder/group_id/" +
+        "task 支持修改 title/description/priority/status/category_id/reminder/group_id/" +
         "recurrence_rule（daily=每天循环）/recurrence_reminder_time（HH:MM 提醒时间）；" +
         "checklist 支持修改 name；group 支持修改 name/color。"
 
@@ -540,10 +533,6 @@ object UpdateTool : Tool {
                 "type": "string",
                 "enum": ["todo", "in_progress", "done"],
                 "description": "任务新状态（仅 task）：todo=待办, in_progress=进行中, done=已完成"
-            },
-            "due_date": {
-                "type": "string",
-                "description": "任务新截止日期，ISO 8601 格式（仅 task）"
             },
             "category_id": {
                 "type": "string",
@@ -622,7 +611,6 @@ object UpdateTool : Tool {
                             description = params.optString("description", "").takeIf { it.isNotEmpty() },
                             priority = params.optString("priority", "").takeIf { it.isNotEmpty() },
                             status = params.optString("status", "").takeIf { it.isNotEmpty() },
-                            dueDate = params.optString("due_date", "").takeIf { it.isNotEmpty() },
                             categoryId = params.optString("category_id", "").takeIf { it.isNotEmpty() },
                             reminder = params.optString("reminder", "").takeIf { it.isNotEmpty() },
                             groupId = params.optString("group_id", "").takeIf { it.isNotEmpty() },
@@ -688,7 +676,6 @@ object UpdateTool : Tool {
             description = params.optString("description", "").takeIf { it.isNotEmpty() },
             priority = params.optString("priority", "").takeIf { it.isNotEmpty() },
             status = params.optString("status", "").takeIf { it.isNotEmpty() },
-            dueDate = params.optString("due_date", "").takeIf { it.isNotEmpty() },
             categoryId = params.optString("category_id", "").takeIf { it.isNotEmpty() },
             reminder = params.optString("reminder", "").takeIf { it.isNotEmpty() },
             groupId = params.optString("group_id", "").takeIf { it.isNotEmpty() },
@@ -1016,7 +1003,6 @@ object MoveTool : Tool {
             description = null,
             priority = null,
             status = null,
-            dueDate = null,
             categoryId = checklistId,
             reminder = null,
             groupId = null,
@@ -1044,7 +1030,6 @@ object MoveTool : Tool {
             description = null,
             priority = null,
             status = null,
-            dueDate = null,
             categoryId = group.checklistId,
             reminder = null,
             groupId = groupId,

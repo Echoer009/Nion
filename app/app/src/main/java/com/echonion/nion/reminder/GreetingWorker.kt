@@ -71,7 +71,7 @@ class GreetingWorker(
             // 1. 查询今日任务数据
             val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
             val allTasks = core.getTasks()
-            val todayTasks = allTasks.filter { it.dueDate == today }
+            val todayTasks = allTasks.filter { it.reminder?.substringBefore("T") == today }
             val completedToday = todayTasks.count { it.status == "done" }
             val pendingToday = todayTasks.count { it.status != "done" }
             val highPriorityPending = todayTasks.count { it.status != "done" && it.priority == "high" }

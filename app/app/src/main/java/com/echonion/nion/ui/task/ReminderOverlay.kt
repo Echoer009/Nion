@@ -397,7 +397,7 @@ private fun completeTask(app: Application, taskId: String) {
     kotlinx.coroutines.MainScope().launch {
         try {
             withContext(Dispatchers.IO) {
-                app.core().updateTask(taskId, null, null, null, "done", null, null, null, null, null, null)
+                app.core().updateTask(taskId, null, null, null, "done", null, null, null, null, null)
             }
         } catch (e: Exception) {
             // 静默失败，不影响用户体验

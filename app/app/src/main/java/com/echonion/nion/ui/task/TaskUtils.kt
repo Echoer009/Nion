@@ -20,18 +20,6 @@ val String.priorityLabel: String
         else -> "低"
     }
 
-/** ISO 日期字符串（如 "2026-06-01"）格式化为中文显示（如 "6月1日 周一"） */
-fun String?.formatDueDate(): String? {
-    if (this.isNullOrBlank()) return null
-    return try {
-        val date = LocalDate.parse(this, DateTimeFormatter.ISO_LOCAL_DATE)
-        val weekDays = listOf("周一", "周二", "周三", "周四", "周五", "周六", "周日")
-        "${date.monthValue}月${date.dayOfMonth}日 ${weekDays[date.dayOfWeek.value - 1]}"
-    } catch (_: Exception) {
-        null
-    }
-}
-
 /**
  * 将一次性提醒字符串（"YYYY-MM-DDTHH:MM"）格式化为卡片显示文本。
  *
@@ -51,13 +39,25 @@ fun String?.formatReminder(): String? {
     }
 }
 
-/** 判断截止日期是否已逾期（早于今天） */
-fun String?.isOverdue(): Boolean {
+/** 判断提醒时间是否已逾期（日期部分早于今天） */
+fun String?.isReminderOverdue(): Boolean {
     if (this.isNullOrBlank()) return false
     return try {
-        LocalDate.parse(this, DateTimeFormatter.ISO_LOCAL_DATE) < LocalDate.now()
+        val dateStr = substringBefore("T")
+        LocalDate.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE) < LocalDate.now()
     } catch (_: Exception) {
         false
+    }
+}
+
+/** 从提醒字符串中提取日期部分，格式化为中文（如 "6月15日"），解析失败返回 null */
+fun String?.formatReminderDate(): String? {
+    if (this.isNullOrBlank()) return null
+    return try {
+        val date = LocalDate.parse(substringBefore("T"), DateTimeFormatter.ISO_LOCAL_DATE)
+        "${date.monthValue}月${date.dayOfMonth}日"
+    } catch (_: Exception) {
+        null
     }
 }
 

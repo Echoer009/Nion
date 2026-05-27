@@ -34,7 +34,6 @@ data class ScheduleTaskItem(
     val priority: String,
     val isDone: Boolean,
     val isDaily: Boolean,
-    val dueDate: String?,
     val reminderTime: String?,
     /** 一次性提醒时间，格式 "YYYY-MM-DDTHH:MM"，在卡片上以铃铛图标展示 */
     val reminder: String? = null,
@@ -152,7 +151,6 @@ class ScheduleViewModel(
             priority = task.priority,
             isDone = if (isDaily) completedForDate else (task.status == "done"),
             isDaily = isDaily,
-            dueDate = task.dueDate,
             reminderTime = task.recurrenceReminderTime,
             reminder = task.reminder,
         )
@@ -167,7 +165,6 @@ fun ScheduleTaskItem.toCardModel(): TaskCardModel = TaskCardModel(
     priority = priority,
     isDone = isDone,
     isDaily = isDaily,
-    dueDate = dueDate,
     reminderTime = reminderTime,
     reminder = reminder,
 )

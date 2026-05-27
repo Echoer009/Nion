@@ -39,7 +39,6 @@ data class TaskItem(
     val description: String?,
     val priority: String,
     val isDone: Boolean,
-    val dueDate: String?,
     val createdAt: String,
     val subtasks: List<TaskItem> = emptyList(),
     /** 该任务累计专注秒数，来自 Rust 端 focus_seconds 字段 */
@@ -320,7 +319,6 @@ class TaskViewModel(
         title: String,
         description: String?,
         priority: String,
-        dueDate: String? = null,
         recurrenceRule: String? = null,
         recurrenceReminderTime: String? = null,
         onCreated: ((String) -> Unit) = {},
@@ -330,7 +328,7 @@ class TaskViewModel(
                 // "今天"不是真实清单，创建任务时 category_id 设为 null
                 val realCategoryId = if (activeChecklistId == TODAY_ID) null else activeChecklistId
                 val newTask = withContext(Dispatchers.IO) {
-                    core.createTask(title, description, priority, dueDate, realCategoryId, null, activeGroupId, recurrenceRule, recurrenceReminderTime)
+                    core.createTask(title, description, priority, realCategoryId, null, activeGroupId, recurrenceRule, recurrenceReminderTime)
                 }
                 // 创建成功后调度提醒闹钟
                 scheduleReminderIfNeeded(newTask)
@@ -353,7 +351,7 @@ class TaskViewModel(
                 val parentGroup = activeGroupId
                 val realCategoryId = if (activeChecklistId == TODAY_ID) null else activeChecklistId
                 withContext(Dispatchers.IO) {
-                    core.createTask(title, null, priority, null, realCategoryId, parentId, parentGroup, null, null)
+                    core.createTask(title, null, priority, realCategoryId, parentId, parentGroup, null, null)
                 }
                 tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()
@@ -452,7 +450,7 @@ class TaskViewModel(
                 val allIds = collectIds(updatedTask)
                 withContext(Dispatchers.IO) {
                     for (id in allIds) {
-                        core.updateTask(id, null, null, null, newStatus, null, null, null, null, null, null)
+                        core.updateTask(id, null, null, null, newStatus, null, null, null, null, null)
                     }
                 }
             } catch (e: Exception) {
@@ -470,26 +468,12 @@ class TaskViewModel(
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    core.updateTask(id, title, description, priority, null, null, null, null, null, null, null)
+                    core.updateTask(id, title, description, priority, null, null, null, null, null, null)
                 }
                 tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("更新任务失败: ${e.message}")
-            }
-        }
-    }
-
-    /** 更新任务截止日期，dueDate = null 表示清除日期 */
-    fun updateDueDate(id: String, dueDate: String?) {
-        viewModelScope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    core.updateTask(id, null, null, null, null, dueDate, null, null, null, null, null)
-                }
-                tasks = loadTasksForCurrentView()
-            } catch (e: Exception) {
-                onError("更新日期失败: ${e.message}")
             }
         }
     }
@@ -688,7 +672,7 @@ class TaskViewModel(
     }
 
     /**
-     * 加载今日任务：due_date = 今天 或 每日循环且未过期。
+     * 加载今日任务：reminder 日期 = 今天 或 每日循环任务。
      * 调用 Rust 端 getTasksDueToday 获取 DailyTaskStatus，
      * 每日任务的完成状态由 daily_completions 表决定。
      * 子任务递归加载，不单独筛选。
@@ -923,7 +907,7 @@ class TaskViewModel(
         viewModelScope.launch {
             try {
                 val updated = withContext(Dispatchers.IO) {
-                    core.updateTask(id, null, null, null, null, null, null, reminder, null, null, null)
+                    core.updateTask(id, null, null, null, null, null, reminder, null, null, null)
                 }
                 // 更新提醒后重新调度闹钟
                 scheduleReminderIfNeeded(updated)
@@ -1100,7 +1084,6 @@ private fun DailyTaskStatus.toUi(): TaskItem {
         description = task.description,
         priority = task.priority,
         isDone = if (isDaily) completedForDate else (task.status == "done"),
-        dueDate = task.dueDate,
         createdAt = task.createdAt,
         focusSeconds = task.focusSeconds,
         recurrenceRule = task.recurrenceRule,
@@ -1124,7 +1107,6 @@ private fun TaskData.toUi(): TaskItem {
         description = description,
         priority = priority,
         isDone = if (isDaily) false else (status == "done"),
-        dueDate = dueDate,
         createdAt = createdAt,
         focusSeconds = focusSeconds,
         recurrenceRule = recurrenceRule,
