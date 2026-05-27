@@ -300,12 +300,12 @@ fun SharedTaskList(
                     groupIds.all { it in selectedIds }
                 }
 
+                /* 统一用 isGroupFirst 的 top=8dp 作为组间距；
+                 * 不再使用 isGroupLast 的 bottom padding，避免"有子任务组"与
+                 * "无子任务组"相邻时出现 16dp 双重间距 */
                 val spacingModifier = when {
-                    /* 长按未移动时（!subsRemoved）移除间距，配合分组卡片整体浮起；
-                     * 开始移动后（subsRemoved）子任务已从列表移除，间距无关 */
                     isInDraggedGroup && !subsRemoved -> Modifier
                     displayItem.isGroupFirst -> Modifier.padding(top = 8.dp)
-                    displayItem.isGroupLast -> Modifier.padding(bottom = 8.dp)
                     else -> Modifier
                 }
 
