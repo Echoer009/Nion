@@ -83,34 +83,52 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.echonion.nion.ui.task.FlatTaskItem
+import com.echonion.nion.ui.task.TaskItem
+import com.echonion.nion.ui.task.flattenWithGroupInfo
+import com.echonion.nion.ui.task.toUi
 import uniffi.nion_core.NionCore
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
 
-data class FocusTask(
-    val id: String,
-    val title: String,
-    /** 该任务累计专注秒数 */
-    val focusSeconds: Long,
-)
-
+/**
+ * 专注任务选择的 ViewModel —— 加载所有未完成任务（含子任务层级）。
+ *
+ * 数据流：
+ * 1. core.getTasks() 单次查询获取所有任务
+ * 2. 按 parentId 构建父子树结构
+ * 3. 复用 flattenWithGroupInfo() 展平为 FlatTaskItem 列表
+ * 4. 展平过程自动跳过已完成任务，但保留其未完成子任务
+ */
 class FocusSetupViewModel(private val core: NionCore) : ViewModel() {
-    var tasks by mutableStateOf<List<FocusTask>>(emptyList())
+    /** 展平后的待办任务列表（含层级深度信息），用于专注任务选择面板 */
+    var flatTasks by mutableStateOf<List<FlatTaskItem>>(emptyList())
         private set
 
-    /** 从数据库加载未完成的任务列表 */
+    /** 从数据库递归加载所有任务（含子任务），展平为带层级信息的列表 */
     fun loadTasks() {
         viewModelScope.launch {
             try {
                 val loaded = withContext(Dispatchers.IO) {
-                    core.getTasks()
-                        .filter { it.status != "done" }
-                        .map { FocusTask(it.id, it.title, it.focusSeconds) }
+                    val allTasks = core.getTasks()
+                    // 按 parentId 分组，用于构建父子树
+                    val childrenMap = allTasks.groupBy { it.parentId }
+                    // 根任务：parentId == null
+                    val roots = allTasks.filter { it.parentId == null }
+                    // 递归构建任务树：TaskData → TaskItem（含 subtasks 子树）
+                    fun buildTree(td: uniffi.nion_core.TaskData): TaskItem {
+                        val children = childrenMap[td.id] ?: emptyList()
+                        return td.toUi().copy(
+                            subtasks = children.map { buildTree(it) }
+                        )
+                    }
+                    val tree = roots.map { buildTree(it) }
+                    // 展平为 FlatTaskItem 列表（自动跳过已完成任务）
+                    flattenWithGroupInfo(tree)
                 }
-                // 按累计专注时长降序排列，时长越高越靠前
-                tasks = loaded.sortedByDescending { it.focusSeconds }
+                flatTasks = loaded
             } catch (_: Exception) {}
         }
     }
@@ -595,13 +613,16 @@ fun FocusScreen(
 }
 
 /**
- * 任务选择面板覆盖层 —— 深橘色背景从时钟中心向外扩展，内部显示任务卡片列表。
+ * 任务选择面板覆盖层 —— 背景从时钟中心向外扩展，内部显示带层级的任务列表。
  *
  * 动画原理：
  * - expandFraction 从 0 → 1：一个圆形遮罩从时钟大小扩展到覆盖全屏，
  *   视觉上像是从时钟中心「长出来」
  * - expandFraction 从 1 → 0：反向收缩回时钟中心
- * - 深橘色背景随扩展比例渐变出现
+ * - 背景随扩展比例渐变出现
+ *
+ * 任务列表按父子层级展示，主任务（depth=0）显示标题+累计专注时长，
+ * 子任务（depth>0）缩进显示仅标题，方便用户定位和选择。
  *
  * @param expandFraction 展开比例，0=时钟大小，1=全屏
  * @param panelAlpha 任务列表内容的透明度
@@ -623,14 +644,11 @@ private fun TaskPanelOverlay(
     val primaryColor = MaterialTheme.colorScheme.primary
     val panelBg = MaterialTheme.colorScheme.surface
 
-    // 计算所有任务中的最大专注秒数，用于归一化颜色深度
-    val maxFocusSeconds = vm.tasks.maxOfOrNull { it.focusSeconds }?.coerceAtLeast(1L) ?: 1L
-
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
-        // 扩展的深橘色圆形背景
+        // 扩展的圆形背景
         // 初始大小 = 时钟 300dp，最终覆盖全屏
         // 使用 graphicsLayer 的 scaleX/scaleY 配合 clip 实现圆形扩展效果
         val initialSize = 300.dp
@@ -661,7 +679,7 @@ private fun TaskPanelOverlay(
                 modifier = Modifier
                     .fillMaxSize()
                     .graphicsLayer { alpha = panelAlpha }
-                    .padding(horizontal = 32.dp)
+                    .padding(horizontal = 24.dp)
                     .padding(top = 120.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
             ) {
@@ -681,7 +699,7 @@ private fun TaskPanelOverlay(
 
                 Spacer(modifier = Modifier.height(24.dp))
 
-                if (vm.tasks.isEmpty()) {
+                if (vm.flatTasks.isEmpty()) {
                     Text(
                         "暂无待办任务",
                         style = MaterialTheme.typography.bodyLarge,
@@ -692,30 +710,57 @@ private fun TaskPanelOverlay(
                     LazyColumn(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .heightIn(max = 360.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                            .weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(6.dp),
                     ) {
-                        // 不关联任务选项
+                        // "不关联任务"选项卡
                         item {
-                            TaskCardRow(
-                                title = "不关联任务",
-                                subtitle = "空任务专注",
-                                colorFraction = 0f,
-                                selected = selectedTaskId == null,
+                            val noneSelected = selectedTaskId == null
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(16.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                                border = if (noneSelected) BorderStroke(2.dp, primaryColor) else null,
                                 onClick = { onSelectTask(null, null) },
-                            )
+                            ) {
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 20.dp, vertical = 16.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Column(modifier = Modifier.weight(1f)) {
+                                        Text(
+                                            "不关联任务",
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            fontWeight = if (noneSelected) FontWeight.Bold else FontWeight.Normal,
+                                            color = if (noneSelected) primaryColor else MaterialTheme.colorScheme.onSurface,
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        Text(
+                                            "空任务专注",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = if (noneSelected) primaryColor.copy(alpha = 0.7f)
+                                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                    }
+                                    if (noneSelected) {
+                                        Icon(
+                                            Icons.Default.Check,
+                                            contentDescription = null,
+                                            tint = primaryColor,
+                                            modifier = Modifier.size(22.dp),
+                                        )
+                                    }
+                                }
+                            }
                         }
-                        items(vm.tasks, key = { it.id }) { task ->
-                            // colorFraction: 0~1，累计时长越高值越大，颜色越深
-                            val colorFraction = if (maxFocusSeconds > 0) {
-                                task.focusSeconds.toFloat() / maxFocusSeconds.toFloat()
-                            } else 0f
-                            TaskCardRow(
-                                title = task.title,
-                                subtitle = formatFocusTime(task.focusSeconds),
-                                colorFraction = colorFraction,
-                                selected = selectedTaskId == task.id,
-                                onClick = { onSelectTask(task.id, task.title) },
+                        // 层级任务列表
+                        items(vm.flatTasks, key = { it.task.id }) { item ->
+                            HierarchicalTaskCard(
+                                item = item,
+                                selectedTaskId = selectedTaskId,
+                                onSelectTask = onSelectTask,
                             )
                         }
                     }
@@ -744,91 +789,82 @@ private fun formatFocusTime(seconds: Long): String {
 }
 
 /**
- * 任务卡片行 —— 纯白半透明卡片在米白背景上，累计专注越久越透明。
+ * 层级任务卡片 —— 根据深度缩进，展示父子任务关系。
  *
- * 选中态使用主题橙半透明背景 + 主题橙边框 + 主题橙文字。
+ * depth=0 为主任务，使用较大卡片和完整信息（标题 + 累计专注时长）；
+ * depth>0 为子任务，缩进显示，仅展示标题，卡片更紧凑。
+ * 选中态使用主题色边框 + 加粗文字 + 勾选图标。
  *
- * @param title 任务标题
- * @param subtitle 副标题（如累计时长）
- * @param colorFraction 颜色深度比例 0~1，0=最实（纯白），1=最透明
- * @param selected 是否被选中
- * @param onClick 点击回调
+ * @param item 展平后的任务项（含深度和父子关系信息）
+ * @param selectedTaskId 当前选中的任务 ID
+ * @param onSelectTask 点击选择任务的回调，传入 (任务ID, 任务标题)
  */
 @Composable
-private fun TaskCardRow(
-    title: String,
-    subtitle: String,
-    colorFraction: Float,
-    selected: Boolean,
-    onClick: () -> Unit,
+private fun HierarchicalTaskCard(
+    item: FlatTaskItem,
+    selectedTaskId: String?,
+    onSelectTask: (taskId: String?, taskTitle: String?) -> Unit,
 ) {
     val primaryColor = MaterialTheme.colorScheme.primary
-    val cardWhite = MaterialTheme.colorScheme.surfaceContainerLowest
-    // 卡片背景：纯白 → 透明（融入米白色背景），专注越久越透明
-    val cardColor = lerpColor(
-        cardWhite,
-        cardWhite.copy(alpha = 0f),
-        colorFraction,
-    )
-    // 选中状态：仅描边 + 文字变色 + 打勾，不添加背景色
-    val borderColor = if (selected) primaryColor else Color.Transparent
+    val isSelected = selectedTaskId == item.task.id
+    val depth = item.depth
 
-    Surface(
-        modifier = Modifier.fillMaxWidth(),
-        shape = RoundedCornerShape(16.dp),
-        color = cardColor,
-        border = if (selected) BorderStroke(2.dp, borderColor) else null,
-        onClick = onClick,
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp, vertical = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
+    Row(modifier = Modifier.fillMaxWidth()) {
+        // 根据 depth 缩进：每层 20.dp，子任务视觉上嵌套在父任务下方
+        if (depth > 0) {
+            Spacer(modifier = Modifier.width((depth * 20).dp))
+        }
+        Surface(
+            modifier = Modifier.weight(1f),
+            // 主任务使用大圆角，子任务使用小圆角以视觉区分层级
+            shape = RoundedCornerShape(if (depth == 0) 16.dp else 12.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerLowest,
+            border = if (isSelected) BorderStroke(2.dp, primaryColor) else null,
+            onClick = { onSelectTask(item.task.id, item.task.title) },
         ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    title,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    color = if (selected) primaryColor else MaterialTheme.colorScheme.onSurface,
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    subtitle,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = if (selected) primaryColor.copy(alpha = 0.7f)
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (selected) {
-                Icon(
-                    Icons.Default.Check,
-                    contentDescription = null,
-                    tint = primaryColor,
-                    modifier = Modifier.size(22.dp),
-                )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(
+                        // 子任务内边距更紧凑
+                        horizontal = if (depth == 0) 20.dp else 14.dp,
+                        vertical = if (depth == 0) 16.dp else 10.dp,
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        item.task.title,
+                        // 子任务使用较小字号
+                        style = if (depth == 0) MaterialTheme.typography.bodyLarge
+                            else MaterialTheme.typography.bodyMedium,
+                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        color = if (isSelected) primaryColor
+                            else MaterialTheme.colorScheme.onSurface,
+                    )
+                    // 主任务显示累计专注时长副标题，子任务不显示
+                    if (depth == 0) {
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            formatFocusTime(item.task.focusSeconds),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (isSelected) primaryColor.copy(alpha = 0.7f)
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                }
+                // 选中时显示勾选图标
+                if (isSelected) {
+                    Icon(
+                        Icons.Default.Check,
+                        contentDescription = null,
+                        tint = primaryColor,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
             }
         }
     }
-}
-
-/**
- * 在两个颜色之间线性插值。
- *
- * @param start 起始颜色
- * @param end 结束颜色
- * @param fraction 插值比例 0~1
- * @return 插值后的颜色
- */
-private fun lerpColor(start: Color, end: Color, fraction: Float): Color {
-    val f = fraction.coerceIn(0f, 1f)
-    return Color(
-        red = start.red + (end.red - start.red) * f,
-        green = start.green + (end.green - start.green) * f,
-        blue = start.blue + (end.blue - start.blue) * f,
-        alpha = start.alpha + (end.alpha - start.alpha) * f,
-    )
 }
