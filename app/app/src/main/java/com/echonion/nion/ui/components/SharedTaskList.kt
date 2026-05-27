@@ -119,35 +119,45 @@ fun SharedTaskList(
     /** 拖拽浮起时的圆角形状，让 graphicsLayer 的阴影也跟随圆角而非直角 */
     val dragCardShape = remember { RoundedCornerShape(12.dp) }
 
-    /**
-     * 同步 todoItems 到 reorderableItems — 使用 remember(todoItems) 在 composition 阶段同步执行，
-     * 确保 reorderableItems 与 todoItems 在同一帧内一致，避免 todo/done 区出现重复 key 导致闪退。
-     *
-     * 增量 diff（只移除离开的、只添加新来的）避免 clear()+addAll() 导致的全部 item 闪动。
-     * 拖拽期间（draggedGroupId != null）跳过同步，由 onDragStopped 回调负责最终同步。
-     *
-     * 注意：在 composition 中修改 SnapshotStateList 会触发一次额外的重组，
-     * 但第二次重组时 newIds == currentIds（已同步），不再修改，因此收敛为 2 次重组。
-     */
+     /**
+      * 同步 todoItems 到 reorderableItems — 使用 remember(todoItems) 在 composition 阶段同步执行，
+      * 确保 reorderableItems 与 todoItems 在同一帧内一致，避免 todo/done 区出现重复 key 导致闪退。
+      *
+      * 增量 diff（只移除离开的、只添加新来的）避免 clear()+addAll() 导致的全部 item 闪动。
+      * 拖拽期间（draggedGroupId != null）跳过同步，由 onDragStopped 回调负责最终同步。
+      *
+      * 关键优化：当 ID 集合相同但顺序不同时（拖拽重排后的中间态，异步 moveAndReorderTasks
+      * 尚未完成），跳过重排以避免将 reorderableItems 回滚到拖拽前的旧顺序。
+      * 等 async 完成后 todoItems 更新为正确的新顺序，此时再同步。
+      * 内容同步（depth、parentId、isGroupLast 等字段）始终执行，确保元数据及时更新。
+      */
      remember(todoItems) {
          if (draggedGroupId == null) {
              val newIds = todoItems.map { it.task.id }
              val currentIds = reorderableItems.map { it.task.id }
              if (newIds != currentIds) {
-                 // 只移除已离开待办列表的 item（完成或删除）
-                 reorderableItems.removeAll { it.task.id !in newIds }
-                 // 只添加新来的 item，插入到正确位置
-                 for ((idx, item) in todoItems.withIndex()) {
-                     if (item.task.id !in currentIds) {
-                         reorderableItems.add(idx.coerceAtMost(reorderableItems.size), item)
+                 val newIdSet = newIds.toSet()
+                 val currentIdSet = currentIds.toSet()
+                 if (newIdSet == currentIdSet) {
+                     /* ID 集合相同但顺序不同 —— 拖拽重排的中间态，
+                      * 异步 moveAndReorderTasks 尚未完成，todoItems 还是旧顺序。
+                      * 跳过重排，保留 reorderableItems 的拖拽后顺序，
+                      * 等 async 完成后 todoItems 更新为新顺序再同步。 */
+                 } else {
+                     /* ID 集合不同（有新增或删除）—— 全量同步 */
+                     reorderableItems.removeAll { it.task.id !in newIds }
+                     for ((idx, item) in todoItems.withIndex()) {
+                         if (item.task.id !in currentIds) {
+                             reorderableItems.add(idx.coerceAtMost(reorderableItems.size), item)
+                         }
                      }
+                     val targetOrder = newIds.withIndex().associate { (i, id) -> id to i }
+                     reorderableItems.sortBy { targetOrder[it.task.id] ?: Int.MAX_VALUE }
                  }
-                 // 对已有 item 按新列表顺序重排
-                 val targetOrder = newIds.withIndex().associate { (i, id) -> id to i }
-                 reorderableItems.sortBy { targetOrder[it.task.id] ?: Int.MAX_VALUE }
              }
-             // 同步已有 item 的内容变更（reminder、title 等字段变化时更新）
-             // 解决：设置提醒后卡片不刷新铃铛图标的问题
+             /* 内容同步始终执行：更新 depth、parentId、isGroupLast 等字段。
+              * 即使跳过了重排，也需要将 todoItems 中已更新的元数据同步到 reorderableItems，
+              * 确保 UI（间距、缩进等）及时反映最新状态。 */
              for (i in todoItems.indices) {
                  val newItem = todoItems[i]
                  val currentIdx = reorderableItems.indexOfFirst { it.task.id == newItem.task.id }
