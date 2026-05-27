@@ -30,3 +30,7 @@ Thumbs.db
 
 # Env
 .env
+
+# OpenCode
+opencode.json
+plans/
