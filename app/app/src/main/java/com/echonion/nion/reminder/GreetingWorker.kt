@@ -140,7 +140,11 @@ class GreetingWorker(
             }
             val companionName = core.getSetting("companion_name") ?: "Nion"
             val promptTemplate = core.getSetting(promptKey) ?: defaultPrompt
-            val systemPrompt = promptTemplate.replace("{name}", companionName)
+            // 自动注入人设：先加载 prompt_persona 作为 system prompt 的前缀，
+            // 然后拼接场景规则（问候模板），确保所有后台 LLM 调用都带有人设
+            val persona = (core.getSetting(PromptDefaults.KEY_PERSONA) ?: PromptDefaults.PERSONA)
+                .replace("{name}", companionName)
+            val systemPrompt = persona + "\n\n" + promptTemplate
 
             val taskList = if (taskTitles.isNotEmpty()) {
                 taskTitles.joinToString("\n") { "- $it" }

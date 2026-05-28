@@ -10,6 +10,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.echonion.nion.NionApp
+import com.echonion.nion.ui.companion.PromptDefaults
 import org.json.JSONArray
 import uniffi.nion_core.NionCore
 import java.time.LocalDateTime
@@ -200,7 +201,11 @@ class BatchReminderWorker(
         val client = ReminderLlmClient.fromCore(core)
         if (client != null) {
             val companionName = core.getSetting("companion_name") ?: "Nion"
-            val systemPrompt = "你是 $companionName，用户的 AI 伙伴。用户在 $periodStart-$periodEnd 有多个任务密集到期。请发一条简短提醒（2-3句话），帮助用户规划。不要用 Markdown。"
+            // 自动注入人设：先加载 prompt_persona 作为前缀，再拼接密集提醒场景规则
+            val persona = (core.getSetting(PromptDefaults.KEY_PERSONA) ?: PromptDefaults.PERSONA)
+                .replace("{name}", companionName)
+            val rulePrompt = "用户在 $periodStart-$periodEnd 有多个任务密集到期。请发一条简短提醒（2-3句话），帮助用户规划。不要用 Markdown。"
+            val systemPrompt = persona + "\n\n" + rulePrompt
             val taskList = taskInfos.joinToString("\n") { (title, priority, time) ->
                 val p = when (priority) { "high" -> "高优"; "medium" -> "中优"; else -> "低优" }
                 if (time.isNotEmpty()) "- $title ($p, $time)" else "- $title ($p)"

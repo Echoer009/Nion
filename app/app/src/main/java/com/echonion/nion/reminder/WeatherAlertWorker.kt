@@ -106,10 +106,12 @@ class WeatherAlertWorker(
 
             // 从 settings 读取用户自定义的天气预警提示词模板
             val companionName = core.getSetting("companion_name") ?: "Nion"
-            val template = core.getSetting(PromptDefaults.KEY_WEATHER_ALERT) ?: PromptDefaults.WEATHER_ALERT
-            val systemPrompt = template
+            // 自动注入人设：先加载 prompt_persona 作为前缀，再拼接天气预警场景规则
+            val persona = (core.getSetting(PromptDefaults.KEY_PERSONA) ?: PromptDefaults.PERSONA)
                 .replace("{name}", companionName)
-                .replace("{severity}", severityDesc)
+            val template = core.getSetting(PromptDefaults.KEY_WEATHER_ALERT) ?: PromptDefaults.WEATHER_ALERT
+            val rulePrompt = template.replace("{severity}", severityDesc)
+            val systemPrompt = persona + "\n\n" + rulePrompt
 
             val reasonsText = alert.reasons.joinToString("\n") { "- $it" }
             val userMsg = """当前天气：${com.echonion.nion.ui.companion.weather.weatherDescription(current.weatherCode)}，${current.temperature}°C
