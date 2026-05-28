@@ -136,6 +136,24 @@ pub struct AttachmentData {
     pub created_at: String,
 }
 
+/// 表情包 —— 用户上传的表情图片，AI 可在回复中用 <标签名> 引用
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct StickerData {
+    pub id: String,
+    /// 表情标签，如 "开心"。AI 使用时拼接为 <开心>
+    pub tag: String,
+    /// 原始文件名（用于显示）
+    pub file_name: String,
+    /// 应用内部存储中的文件路径（绝对路径）
+    pub file_path: String,
+    /// MIME 类型，如 "image/jpeg"、"image/png" 等
+    pub mime_type: String,
+    /// 文件大小（字节）
+    pub file_size: i64,
+    /// 创建时间，RFC 3339 格式
+    pub created_at: String,
+}
+
 /// 对话记录 —— 存储一次完整的聊天会话
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
 pub struct ConversationData {

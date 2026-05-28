@@ -86,6 +86,15 @@ impl NionCore {
                 task_id TEXT NOT NULL,
                 seconds INTEGER NOT NULL,
                 created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS stickers (
+                id TEXT PRIMARY KEY,
+                tag TEXT NOT NULL UNIQUE,
+                file_name TEXT NOT NULL,
+                file_path TEXT NOT NULL,
+                mime_type TEXT NOT NULL,
+                file_size INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL
             );"
         ).map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
@@ -256,7 +265,9 @@ impl NionCore {
         // 查询条件：
         // 1. reminder 日期部分 = date 的普通任务
         // 2. 所有每日循环模板任务
-        let sql = "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY sort_order ASC, created_at DESC";
+        // 排序：按时间从早到晚 → 手动排序 → 创建时间倒序
+        // COALESCE 取优先级：reminder 的时间部分 > recurrence_reminder_time > '99:99'(排最后)
+        let sql = "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY COALESCE(SUBSTR(reminder, 12, 5), recurrence_reminder_time, '99:99') ASC, sort_order ASC, created_at DESC";
         let mut stmt = db.prepare(sql)
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
 
@@ -589,6 +600,122 @@ impl NionCore {
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })
+    }
+
+    // ==================== 表情包管理 ====================
+
+    /// 添加表情包。图片文件应已复制到内部存储，此方法仅写入数据库。
+    /// tag 必须唯一，重复会返回 DatabaseError。
+    pub fn create_sticker(
+        &self,
+        tag: String,
+        file_name: String,
+        file_path: String,
+        mime_type: String,
+        file_size: i64,
+    ) -> Result<StickerData, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        let id = Uuid::new_v4().to_string();
+        let now = chrono::Utc::now().to_rfc3339();
+        db.execute(
+            "INSERT INTO stickers (id, tag, file_name, file_path, mime_type, file_size, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![id, tag, file_name, file_path, mime_type, file_size, now],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        Ok(StickerData {
+            id,
+            tag,
+            file_name,
+            file_path,
+            mime_type,
+            file_size,
+            created_at: now,
+        })
+    }
+
+    /// 获取所有表情包，按创建时间升序排列
+    pub fn get_stickers(&self) -> Result<Vec<StickerData>, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        let mut stmt = db
+            .prepare(
+                "SELECT id, tag, file_name, file_path, mime_type, file_size, created_at
+                 FROM stickers ORDER BY created_at ASC",
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(StickerData {
+                    id: row.get(0)?,
+                    tag: row.get(1)?,
+                    file_name: row.get(2)?,
+                    file_path: row.get(3)?,
+                    mime_type: row.get(4)?,
+                    file_size: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })
+    }
+
+    /// 根据标签查找表情包
+    pub fn get_sticker_by_tag(&self, tag: String) -> Result<Option<StickerData>, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        let mut stmt = db
+            .prepare(
+                "SELECT id, tag, file_name, file_path, mime_type, file_size, created_at
+                 FROM stickers WHERE tag = ?1",
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let result = stmt
+            .query_row(params![tag], |row| {
+                Ok(StickerData {
+                    id: row.get(0)?,
+                    tag: row.get(1)?,
+                    file_name: row.get(2)?,
+                    file_path: row.get(3)?,
+                    mime_type: row.get(4)?,
+                    file_size: row.get(5)?,
+                    created_at: row.get(6)?,
+                })
+            })
+            .ok();
+        Ok(result)
+    }
+
+    /// 删除表情包，同时删除磁盘上的图片文件
+    pub fn delete_sticker(&self, id: String) -> Result<bool, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        // 先查询文件路径，用于删除磁盘文件
+        let file_path: Option<String> = db
+            .prepare("SELECT file_path FROM stickers WHERE id = ?1")
+            .and_then(|mut stmt| {
+                let mut rows = stmt.query(params![id])?;
+                match rows.next()? {
+                    Some(row) => row.get(0),
+                    None => Ok(None),
+                }
+            })
+            .ok()
+            .flatten();
+        let deleted = db
+            .execute("DELETE FROM stickers WHERE id = ?1", params![id])
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        // 删除磁盘文件
+        if let Some(path) = file_path {
+            std::fs::remove_file(&path).ok();
+        }
+        Ok(deleted > 0)
     }
 
     /// 更新任务的父任务 ID（用于拖拽改变层级关系）
@@ -1221,7 +1348,9 @@ impl NionCore {
         // 查询条件：
         // 1. reminder 日期部分 = date 的普通任务（非每日循环）
         // 2. 所有每日循环模板任务
-        let sql = "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY sort_order ASC, created_at DESC";
+        // 排序：按时间从早到晚 → 手动排序 → 创建时间倒序
+        // COALESCE 取优先级：reminder 的时间部分 > recurrence_reminder_time > '99:99'(排最后)
+        let sql = "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY COALESCE(SUBSTR(reminder, 12, 5), recurrence_reminder_time, '99:99') ASC, sort_order ASC, created_at DESC";
         let mut stmt = db.prepare(sql).map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
         })?;
