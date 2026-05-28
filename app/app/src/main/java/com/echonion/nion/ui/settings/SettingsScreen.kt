@@ -28,7 +28,6 @@ import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -148,14 +147,15 @@ fun SettingsScreen(
             )
 
             // 定位权限（天气功能需要）
-            ElevatedCard(
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerLowest,
             ) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
@@ -202,9 +202,10 @@ fun SettingsScreen(
             }
 
             // 悬浮窗提醒权限开关
-            ElevatedCard(
+            Surface(
                 modifier = Modifier.fillMaxWidth(),
                 shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerLowest,
             ) {
                 val hasOverlayPermission = remember {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -227,7 +228,7 @@ fun SettingsScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
@@ -286,10 +287,11 @@ private fun ThemeOptionCard(
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
-    ElevatedCard(
+    Surface(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
     ) {
         Row(
             modifier = Modifier
