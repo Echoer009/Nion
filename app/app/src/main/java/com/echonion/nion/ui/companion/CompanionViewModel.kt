@@ -16,6 +16,8 @@ import com.echonion.nion.ui.companion.sticker.StickerService
 import com.echonion.nion.ui.companion.tools.ToolExecutor
 import com.echonion.nion.ui.companion.tools.ToolResult
 import com.echonion.nion.ui.companion.tools.MemoryTool
+import com.echonion.nion.preset.CharacterPreset
+import com.echonion.nion.preset.CharacterPresetInitializer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -159,8 +161,8 @@ class CompanionViewModel(
     var isInitialized by mutableStateOf(false)
         private set
 
-    /** 伙伴显示名称，可从编辑页修改，默认 "Nion" */
-    var companionName by mutableStateOf("Nion")
+    /** 伙伴显示名称，可从编辑页修改，默认从 CharacterPreset 获取 */
+    var companionName by mutableStateOf(PromptDefaults.DEFAULT_COMPANION_NAME)
         private set
 
     // ── 提示词状态（7 个独立卡片，分别存储在 settings 表） ──
@@ -324,6 +326,11 @@ class CompanionViewModel(
          */
         viewModelScope.launch {
             Log.d("NionCompanion", "[init] loadSettings 开始（isInitialized=$isInitialized）")
+            // 首次启动时导入角色预设（头像、表情包、人设提示词等）
+            // 必须在 loadSettings 之前执行，确保预设数据已写入 DB
+            withContext(Dispatchers.IO) {
+                CharacterPresetInitializer.initializeIfNeeded(app, core, CharacterPreset.current())
+            }
             loadSettings()
             Log.d("NionCompanion", "[init] loadSettings 完成 → isInitialized=$isInitialized, provider=${currentProvider?.name}, apiKey=${if (apiKey != null) "已配置" else "未配置"}")
             loadChatMessages()

@@ -3,21 +3,39 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# ── Flavor 参数 ──
+# 用法: ./deploy.sh [standard|character]
+# 默认: standard
+FLAVOR="${1:-standard}"
+if [[ "$FLAVOR" != "standard" && "$FLAVOR" != "character" ]]; then
+    echo "用法: $0 [standard|character]"
+    echo "  standard  —— 通用 Nion 版本（默认）"
+    echo "  character —— 类脑娘内置版本"
+    exit 1
+fi
+
+# 将 flavor 首字母大写，用于 Gradle task 命名（如 assembleStandardDebug）
+FLAVOR_CAPITALIZED="${FLAVOR^}"
+
 # 自动检测环境：Git Bash（Windows 原生 adb.exe）或 WSL2（usbipd 透传）
 # Git Bash 下 uname 输出 MINGW，WSL 下输出 Linux
 if [[ "$(uname)" == MINGW* || "$(uname)" == MSYS* ]]; then
     # ---------- Windows Git Bash 环境 ----------
-    # adb.exe 路径：$HOME/AppData/Local/Android/Sdk/platform-tools/adb.exe
     ADB="$HOME/AppData/Local/Android/Sdk/platform-tools/adb.exe"
-    APK_PATH="/d/nion/app/app/build/outputs/apk/debug/app-debug.apk"
+    APK_PATH="/d/nion/app/app/build/outputs/apk/$FLAVOR/debug/app-$FLAVOR-debug.apk"
 else
     # ---------- WSL2 环境 ----------
     ADB=~/android-sdk/platform-tools/adb
-    APK_PATH="$PROJECT_DIR/app/app/build/outputs/apk/debug/app-debug.apk"
+    APK_PATH="$PROJECT_DIR/app/app/build/outputs/apk/$FLAVOR/debug/app-$FLAVOR-debug.apk"
 fi
 
-PACKAGE="com.echonion.nion"
-ACTIVITY="$PACKAGE/.MainActivity"
+# character flavor 使用不同的 applicationId，需要对应不同的包名
+if [[ "$FLAVOR" == "character" ]]; then
+    PACKAGE="com.echonion.nion.character"
+else
+    PACKAGE="com.echonion.nion"
+fi
+ACTIVITY="com.echonion.nion/.MainActivity"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -29,6 +47,9 @@ step() { echo -e "${CYAN}[$1] $2${NC}"; }
 ok()   { echo -e "${GREEN}  ✓ $1${NC}"; }
 warn() { echo -e "${YELLOW}  ⚠ $1${NC}"; }
 fail() { echo -e "${RED}  ✗ $1${NC}"; }
+
+echo -e "${CYAN}Flavor: $FLAVOR (${FLAVOR_CAPITALIZED})${NC}"
+echo ""
 
 TOTAL_STEPS=4
 
@@ -76,7 +97,6 @@ fi
 
 # 验证设备已连接
 DEVICE_OUTPUT=$("$ADB" devices 2>/dev/null)
-# 只统计状态为 "device" 的项（排除 unauthorized、offline 等非 Android 设备）
 DEVICE_LIST=$(echo "$DEVICE_OUTPUT" | grep -E '[[:space:]]+device$' | awk '{print $1}')
 DEVICE_COUNT=$(echo "$DEVICE_LIST" | grep -c . || true)
 if [ "$DEVICE_COUNT" -eq 0 ]; then
@@ -87,7 +107,6 @@ if [ "$DEVICE_COUNT" -eq 0 ]; then
     echo "    3. 手机上已允许 USB 调试授权弹窗"
     exit 1
 fi
-# 多设备时取第一个真机（跳过 emulator）
 TARGET_DEVICE=$(echo "$DEVICE_LIST" | grep -v 'emulator' | head -1)
 if [ -z "$TARGET_DEVICE" ]; then
     TARGET_DEVICE=$(echo "$DEVICE_LIST" | head -1)
@@ -97,7 +116,6 @@ ok "设备已连接 ($DEVICE_COUNT 台, 目标: $TARGET_DEVICE)"
 # ---------- 2. 检查 .so 新鲜度 ----------
 step 2/$TOTAL_STEPS "检查 .so 新鲜度"
 
-# 检查 core/src 中是否有比 .so 更新的 .rs 文件
 STALE_SRC=$(find "$PROJECT_DIR/core/src" -name '*.rs' -newer "$PROJECT_DIR/app/app/src/main/jniLibs/arm64-v8a/libnion_core.so" 2>/dev/null | head -1)
 if [ -n "$STALE_SRC" ]; then
     warn "Rust 源码比 .so 更新，自动重新编译 ..."
@@ -112,8 +130,8 @@ else
 fi
 
 # ---------- 3. 构建 APK ----------
-step 3/$TOTAL_STEPS "构建 APK"
-BUILD_OUTPUT=$(cd "$PROJECT_DIR/app" && ./gradlew assembleDebug 2>&1)
+step 3/$TOTAL_STEPS "构建 APK ($FLAVOR)"
+BUILD_OUTPUT=$(cd "$PROJECT_DIR/app" && ./gradlew "assemble${FLAVOR_CAPITALIZED}Debug" 2>&1)
 BUILD_EXIT=$?
 if [ $BUILD_EXIT -ne 0 ]; then
     fail "构建失败:"
@@ -123,21 +141,17 @@ fi
 APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
 ok "构建完成 ($APK_SIZE)"
 
-# ---------- 3. 安装并启动 ----------
+# ---------- 4. 安装并启动 ----------
 step 4/$TOTAL_STEPS "安装到手机"
 
-# 构建 adb 目标参数（多设备时需要 -s 指定）
 ADB_TARGET=()
 if [ "$DEVICE_COUNT" -gt 1 ]; then
     ADB_TARGET=(-s "$TARGET_DEVICE")
 fi
 
-# 先 force-stop 防止旧 session 导致 install 卡死
 "$ADB" "${ADB_TARGET[@]}" shell am force-stop "$PACKAGE" 2>/dev/null || true
 
-# 安装 APK，超时 60 秒
 if ! timeout 60 "$ADB" "${ADB_TARGET[@]}" install -r "$APK_PATH" 2>&1 | grep -q "Success"; then
-    # 重试一次：kill-server 后重新连接
     warn "首次安装失败，重试中..."
     "$ADB" kill-server 2>/dev/null || true
     sleep 1
@@ -151,9 +165,9 @@ if ! timeout 60 "$ADB" "${ADB_TARGET[@]}" install -r "$APK_PATH" 2>&1 | grep -q 
 fi
 ok "安装完成"
 
-# 启动应用
 "$ADB" "${ADB_TARGET[@]}" shell am start -n "$ACTIVITY" >/dev/null 2>&1
 ok "应用已启动"
 
 echo ""
-echo -e "${GREEN}部署完成！查看日志: $ADB logcat -s NionApp:D TaskViewModel:D${NC}"
+echo -e "${GREEN}部署完成！Flavor: $FLAVOR${NC}"
+echo -e "${GREEN}查看日志: $ADB logcat -s NionApp:D TaskViewModel:D${NC}"

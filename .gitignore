@@ -34,3 +34,6 @@ Thumbs.db
 # OpenCode
 opencode.json
 plans/
+
+# 角色素材（不提交到仓库）
+BrainGirl/

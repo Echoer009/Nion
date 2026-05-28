@@ -17,6 +17,21 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    flavorDimensions += "character"
+
+    productFlavors {
+        // 标准版 —— 通用 Nion，无内置角色预设
+        create("standard") {
+            dimension = "character"
+        }
+        // 类脑娘版 —— 内置类脑娘角色卡、头像、表情包
+        create("character") {
+            dimension = "character"
+            applicationIdSuffix = ".character"
+            versionNameSuffix = "-character"
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = false

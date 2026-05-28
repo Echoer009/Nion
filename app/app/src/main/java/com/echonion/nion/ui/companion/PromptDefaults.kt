@@ -1,10 +1,15 @@
 package com.echonion.nion.ui.companion
 
+import com.echonion.nion.preset.CharacterPreset
+
 /**
  * 提示词默认值集中管理。
  *
  * 首次启动时逐条检查 settings 表，缺失的 key 自动写入默认值。
  * 用户编辑后覆盖，"恢复默认"按钮读取此处的值重置。
+ *
+ * 优先使用 CharacterPreset（flavor 级别的角色预设），
+ * 无预设时回退到通用默认值。
  */
 object PromptDefaults {
 
@@ -27,16 +32,21 @@ object PromptDefaults {
     /** 密集提醒提示词 key */
     const val KEY_BATCH_REMINDER = "prompt_batch_reminder"
 
-    // ── 默认提示词 ──────────────────────────────────────────────────
+    // ── 当前 flavor 的角色预设 ──────────────────────────────────────
 
-    /** 人设 —— 角色、性格、语言风格 */
-    val PERSONA = """
+    /** 当前 flavor 提供的角色预设，standard flavor 为空实现 */
+    private val preset: CharacterPreset by lazy { CharacterPreset.current() }
+
+    // ── 通用默认提示词（无预设时的回退值）─────────────────────────────
+
+    /** 人设 —— 通用回退值 */
+    private val FALLBACK_PERSONA = """
 你是 {name}，一个温暖友好的 AI 伴侣，同时也是用户的私人任务管理助手。
 用中文回复，语气温暖简洁。
     """.trimIndent()
 
-    /** 回复格式 —— AI 可用的 Markdown 格式和展示规则 */
-    val FORMAT = """
+    /** 回复格式 —— 通用回退值 */
+    private val FALLBACK_FORMAT = """
 你可以使用以下 Markdown 格式，它们会被正确渲染：
 - 标题：# ~ ######
 - 粗体：**文字**
@@ -58,8 +68,8 @@ object PromptDefaults {
 展示数据对比时用表格
     """.trimIndent()
 
-    /** 早安问候 */
-    val GREETING_MORNING = """
+    /** 早安问候 —— 通用回退值 */
+    private val FALLBACK_GREETING_MORNING = """
 你是 {name}，用户的 AI 伙伴。现在是早上，新的一天开始了。
 请给用户发一条简短的问候（2-3句话）。
 规则：
@@ -70,8 +80,8 @@ object PromptDefaults {
 - 如果提供了天气信息，结合天气给出实用建议（如带伞、穿衣、防晒等）
     """.trimIndent()
 
-    /** 午间检查 */
-    val GREETING_NOON = """
+    /** 午间检查 —— 通用回退值 */
+    private val FALLBACK_GREETING_NOON = """
 你是 {name}，用户的 AI 伙伴。现在是中午，午饭时间。
 请给用户发一条简短的问候（2-3句话）。
 规则：
@@ -82,8 +92,8 @@ object PromptDefaults {
 - 如果提供了天气信息，结合天气给出实用建议（如带伞、穿衣、防晒等）
     """.trimIndent()
 
-    /** 晚间总结 */
-    val GREETING_EVENING = """
+    /** 晚间总结 —— 通用回退值 */
+    private val FALLBACK_GREETING_EVENING = """
 你是 {name}，用户的 AI 伙伴。现在是晚上，一天快结束了。
 请给用户发一条简短的问候（2-3句话）。
 规则：
@@ -94,8 +104,8 @@ object PromptDefaults {
 - 如果提供了天气信息，结合天气给出实用建议（如带伞、穿衣、防晒等）
     """.trimIndent()
 
-    /** 任务提醒 */
-    val REMINDER = """
+    /** 任务提醒 —— 通用回退值 */
+    private val FALLBACK_REMINDER = """
 你是 {name}，用户的 AI 伙伴。现在需要你给用户发一条任务提醒消息。
 当前紧迫度级别：{level}/5（1=温和，5=最后通牒）
 语气要求：{tone}
@@ -107,8 +117,8 @@ object PromptDefaults {
 - 如果是最后一级（5），温柔告别即可，不要催促
     """.trimIndent()
 
-    /** 天气预警 */
-    val WEATHER_ALERT = """
+    /** 天气预警 —— 通用回退值 */
+    private val FALLBACK_WEATHER_ALERT = """
 你是 {name}，用户的 AI 伙伴。你需要根据天气预警信息，给用户发一条简短温馨的提醒。
 规则：
 - 不要用 Markdown 格式
@@ -118,6 +128,29 @@ object PromptDefaults {
 - 2-3句话即可
 - 给出实用建议（如带伞、加衣服、避免户外活动等）
     """.trimIndent()
+
+    // ── 对外暴露的默认值（优先 preset，回退通用）─────────────────────
+
+    /** 人设 —— 优先使用角色预设，无预设则使用通用默认 */
+    val PERSONA: String get() = preset.personaPrompt ?: FALLBACK_PERSONA
+
+    /** 回复格式 */
+    val FORMAT: String get() = preset.formatPrompt ?: FALLBACK_FORMAT
+
+    /** 早安问候 */
+    val GREETING_MORNING: String get() = preset.greetingMorning ?: FALLBACK_GREETING_MORNING
+
+    /** 午间检查 */
+    val GREETING_NOON: String get() = preset.greetingNoon ?: FALLBACK_GREETING_NOON
+
+    /** 晚间总结 */
+    val GREETING_EVENING: String get() = preset.greetingEvening ?: FALLBACK_GREETING_EVENING
+
+    /** 任务提醒 */
+    val REMINDER: String get() = preset.reminderPrompt ?: FALLBACK_REMINDER
+
+    /** 天气预警 */
+    val WEATHER_ALERT: String get() = preset.weatherAlertPrompt ?: FALLBACK_WEATHER_ALERT
 
     // ── 模板变量说明（UI 展示用） ────────────────────────────────────
 
@@ -155,14 +188,22 @@ object PromptDefaults {
     /**
      * 所有提示词 key 与默认值的映射。
      * 用于首次启动迁移：逐条检查 settings 表，缺失的 key 自动写入默认值。
+     * 优先使用角色预设值，无预设时使用通用默认值。
      */
-    val ALL_DEFAULTS: Map<String, String> = mapOf(
-        KEY_PERSONA to PERSONA,
-        KEY_FORMAT to FORMAT,
-        KEY_GREETING_MORNING to GREETING_MORNING,
-        KEY_GREETING_NOON to GREETING_NOON,
-        KEY_GREETING_EVENING to GREETING_EVENING,
-        KEY_REMINDER to REMINDER,
-        KEY_WEATHER_ALERT to WEATHER_ALERT,
-    )
+    val ALL_DEFAULTS: Map<String, String> by lazy {
+        mapOf(
+            KEY_PERSONA to PERSONA,
+            KEY_FORMAT to FORMAT,
+            KEY_GREETING_MORNING to GREETING_MORNING,
+            KEY_GREETING_NOON to GREETING_NOON,
+            KEY_GREETING_EVENING to GREETING_EVENING,
+            KEY_REMINDER to REMINDER,
+            KEY_WEATHER_ALERT to WEATHER_ALERT,
+        )
+    }
+
+    /**
+     * 默认伙伴名称。有预设返回预设名称，无预设返回 "Nion"。
+     */
+    val DEFAULT_COMPANION_NAME: String get() = preset.companionName ?: "Nion"
 }
