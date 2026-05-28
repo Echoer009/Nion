@@ -4,7 +4,6 @@ import android.app.Activity
 import android.app.Application
 import android.os.Bundle
 import android.util.Log
-import com.echonion.nion.reminder.BatchReminderWorker
 import com.echonion.nion.reminder.GreetingScheduler
 import com.echonion.nion.reminder.NotificationHelper
 import com.echonion.nion.reminder.ReminderEvent
@@ -107,13 +106,6 @@ class NionApp : Application() {
             GreetingScheduler.rescheduleAll(this, core)
         } catch (e: Exception) {
             Log.e("NionApp", "重调度问候闹钟失败", e)
-        }
-
-        // 扫描并调度批量提醒（密集时段检测）
-        try {
-            BatchReminderWorker.scheduleBatchReminders(this, core)
-        } catch (e: Exception) {
-            Log.e("NionApp", "调度批量提醒失败", e)
         }
 
         // 启动天气预警定时检查（每小时检查一次天气）

@@ -46,7 +46,7 @@ import androidx.compose.ui.unit.dp
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun NionBottomSheet(
+internal fun NionBottomSheet(
     onDismiss: () -> Unit,
     title: String,
     content: @Composable () -> Unit,
@@ -106,7 +106,7 @@ private fun NionBottomSheet(
 
 /** 弹窗底部的操作按钮行：取消（文字按钮）+ 确认（实心按钮） */
 @Composable
-private fun SheetButtonRow(
+internal fun SheetButtonRow(
     onDismiss: () -> Unit,
     confirmLabel: String,
     confirmEnabled: Boolean,
