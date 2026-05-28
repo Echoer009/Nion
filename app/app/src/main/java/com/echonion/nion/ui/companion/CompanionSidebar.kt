@@ -821,11 +821,12 @@ private fun ExpandablePromptCard(
             },
             label = "card_$cardKey",
         ) { expanded ->
-            // 卡片容器：sharedBounds 实现背景从折叠尺寸变形到展开尺寸
+            // 卡片容器：sharedElement 实现从折叠尺寸到展开尺寸的变形动画，
+            // 保持圆角裁剪贯穿整个动画过程，避免收起时出现直角→圆角的跳变
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .sharedBounds(
+                    .sharedElement(
                         sharedContentState = rememberSharedContentState("container_$cardKey"),
                         animatedVisibilityScope = this@AnimatedContent,
                         boundsTransform = { _, _ ->
@@ -833,7 +834,7 @@ private fun ExpandablePromptCard(
                         },
                     ),
                 color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                shape = MaterialTheme.shapes.medium,
+                shape = RoundedCornerShape(16.dp),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     // ── 标题行：点击展开/折叠 ──
@@ -846,15 +847,12 @@ private fun ExpandablePromptCard(
                     ) {
                         // 标题 + 预览
                         Column(modifier = Modifier.weight(1f)) {
+                            // 标题不使用 sharedElement，随容器一起淡入淡出，
+                            // 避免飞行动画导致标题在展开过程中侵入编辑框区域
                             Text(
                                 title,
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Medium,
-                                // sharedElement 让标题在变形过程中保持位置锚定
-                                modifier = Modifier.sharedElement(
-                                    sharedContentState = rememberSharedContentState("title_$cardKey"),
-                                    animatedVisibilityScope = this@AnimatedContent,
-                                ),
                             )
                             // 折叠时显示前两行预览
                             if (!expanded && text.isNotBlank()) {
@@ -991,7 +989,8 @@ private fun ExpandableReminderCard(
             Surface(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .sharedBounds(
+                    // sharedElement 保持圆角裁剪贯穿动画全过程，与日程日历弹窗效果一致
+                    .sharedElement(
                         sharedContentState = rememberSharedContentState("container_$cardKey"),
                         animatedVisibilityScope = this@AnimatedContent,
                         boundsTransform = { _, _ ->
@@ -999,7 +998,7 @@ private fun ExpandableReminderCard(
                         },
                     ),
                 color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                shape = MaterialTheme.shapes.medium,
+                shape = RoundedCornerShape(16.dp),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     // ── 标题行 ──
@@ -1012,14 +1011,12 @@ private fun ExpandableReminderCard(
                     ) {
                         // 标题 + 描述
                         Column(modifier = Modifier.weight(1f)) {
+                            // 标题不使用 sharedElement，随容器淡入淡出，
+                            // 避免飞行动画导致标题侵入编辑框区域
                             Text(
                                 title,
                                 style = MaterialTheme.typography.bodyLarge,
                                 fontWeight = FontWeight.Medium,
-                                modifier = Modifier.sharedElement(
-                                    sharedContentState = rememberSharedContentState("title_$cardKey"),
-                                    animatedVisibilityScope = this@AnimatedContent,
-                                ),
                             )
                             Text(
                                 description,
