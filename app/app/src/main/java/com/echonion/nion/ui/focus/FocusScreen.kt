@@ -30,6 +30,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,6 +42,8 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -83,6 +86,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import com.echonion.nion.ui.task.ChecklistItem
 import com.echonion.nion.ui.task.FlatTaskItem
 import com.echonion.nion.ui.task.TaskItem
 import com.echonion.nion.ui.task.flattenWithGroupInfo
@@ -94,42 +98,93 @@ import kotlin.math.roundToInt
 import kotlin.math.sin
 
 /**
- * 专注任务选择的 ViewModel —— 加载所有未完成任务（含子任务层级）。
+ * 专注任务选择的 ViewModel —— 加载清单列表和未完成任务（含子任务层级），
+ * 支持按清单筛选。
  *
  * 数据流：
- * 1. core.getTasks() 单次查询获取所有任务
- * 2. 按 parentId 构建父子树结构
- * 3. 复用 flattenWithGroupInfo() 展平为 FlatTaskItem 列表
- * 4. 展平过程自动跳过已完成任务，但保留其未完成子任务
+ * 1. core.getChecklists() 获取所有清单，用于筛选 UI
+ * 2. 根据 selectedChecklistId 决定查询方式：
+ *    - null（全部）→ core.getTasks() 获取所有任务
+ *    - 具体清单 ID → core.getTasksByCategory(id, null) 仅获取该清单根任务
+ * 3. 按 parentId 构建父子树结构
+ * 4. 复用 flattenWithGroupInfo() 展平为 FlatTaskItem 列表
+ * 5. 展平过程自动跳过已完成任务，但保留其未完成子任务
  */
 class FocusSetupViewModel(private val core: NionCore) : ViewModel() {
     /** 展平后的待办任务列表（含层级深度信息），用于专注任务选择面板 */
     var flatTasks by mutableStateOf<List<FlatTaskItem>>(emptyList())
         private set
 
-    /** 从数据库递归加载所有任务（含子任务），展平为带层级信息的列表 */
+    /** 所有清单列表，用于筛选 UI 的 FilterChip 渲染 */
+    var checklists by mutableStateOf<List<ChecklistItem>>(emptyList())
+        private set
+
+    /** 当前选中的清单 ID，null 表示显示全部清单的任务 */
+    var selectedChecklistId by mutableStateOf<String?>(null)
+        private set
+
+    /** 从数据库加载清单列表和任务列表 */
     fun loadTasks() {
         viewModelScope.launch {
             try {
-                val loaded = withContext(Dispatchers.IO) {
-                    val allTasks = core.getTasks()
-                    // 按 parentId 分组，用于构建父子树
-                    val childrenMap = allTasks.groupBy { it.parentId }
-                    // 根任务：parentId == null
-                    val roots = allTasks.filter { it.parentId == null }
-                    // 递归构建任务树：TaskData → TaskItem（含 subtasks 子树）
-                    fun buildTree(td: uniffi.nion_core.TaskData): TaskItem {
-                        val children = childrenMap[td.id] ?: emptyList()
-                        return td.toUi().copy(
-                            subtasks = children.map { buildTree(it) }
-                        )
+                // 并行加载清单列表和任务列表
+                val (loadedChecklists, loadedTasks) = withContext(Dispatchers.IO) {
+                    val cls = core.getChecklists().map {
+                        ChecklistItem(id = it.id, name = it.name)
                     }
-                    val tree = roots.map { buildTree(it) }
-                    // 展平为 FlatTaskItem 列表（自动跳过已完成任务）
-                    flattenWithGroupInfo(tree)
+                    val tasks = loadTasksForChecklist(selectedChecklistId)
+                    Pair(cls, tasks)
                 }
-                flatTasks = loaded
+                checklists = loadedChecklists
+                flatTasks = loadedTasks
             } catch (_: Exception) {}
+        }
+    }
+
+    /**
+     * 切换清单筛选，重新加载任务列表。
+     * @param id 清单 ID，null 表示显示全部清单的任务
+     */
+    fun setChecklistFilter(id: String?) {
+        selectedChecklistId = id
+        loadTasks()
+    }
+
+    /**
+     * 根据清单 ID 加载对应的任务树并展平。
+     * checklistId = null 时加载全部任务，否则只加载该清单的根任务。
+     */
+    private fun loadTasksForChecklist(checklistId: String?): List<FlatTaskItem> {
+        // 获取根任务列表：null 用 getTasks()（含子任务），具体清单用 getTasksByCategory（仅根任务）
+        val rootTasks = if (checklistId == null) {
+            core.getTasks()
+        } else {
+            core.getTasksByCategory(checklistId, null)
+        }
+
+        if (checklistId == null) {
+            // 全部清单模式：getTasks() 返回所有任务（含子任务），从全量中构建父子树
+            val childrenMap = rootTasks.groupBy { it.parentId }
+            val roots = rootTasks.filter { it.parentId == null }
+            fun buildTree(td: uniffi.nion_core.TaskData): TaskItem {
+                val children = childrenMap[td.id] ?: emptyList()
+                return td.toUi().copy(
+                    subtasks = children.map { buildTree(it) }
+                )
+            }
+            val tree = roots.map { buildTree(it) }
+            return flattenWithGroupInfo(tree)
+        } else {
+            // 单清单模式：根任务从 getTasksByCategory 获取，子任务递归加载
+            fun loadChildren(parentId: String): List<TaskItem> {
+                return core.getSubtasks(parentId).map { task ->
+                    task.toUi().copy(subtasks = loadChildren(task.id))
+                }
+            }
+            val tree = rootTasks.map { root ->
+                root.toUi().copy(subtasks = loadChildren(root.id))
+            }
+            return flattenWithGroupInfo(tree)
         }
     }
 }
@@ -690,6 +745,44 @@ private fun TaskPanelOverlay(
                     fontWeight = FontWeight.Bold,
                     color = primaryColor,
                 )
+
+                // 清单筛选 Chip 行：紧跟标题下方，横向滚动
+                // "全部" chip + 每个清单一个 chip，点击切换筛选并重新加载任务
+                if (vm.checklists.isNotEmpty()) {
+                    Spacer(modifier = Modifier.height(12.dp))
+                    LazyRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        // "全部" chip：selectedChecklistId == null 时选中
+                        item {
+                            val isAll = vm.selectedChecklistId == null
+                            FilterChip(
+                                selected = isAll,
+                                onClick = { vm.setChecklistFilter(null) },
+                                label = { Text("全部") },
+                                colors = if (isAll) FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = primaryColor,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                ) else FilterChipDefaults.filterChipColors(),
+                            )
+                        }
+                        // 各清单 chip
+                        items(vm.checklists, key = { it.id }) { checklist ->
+                            val isSelected = vm.selectedChecklistId == checklist.id
+                            FilterChip(
+                                selected = isSelected,
+                                onClick = { vm.setChecklistFilter(checklist.id) },
+                                label = { Text(checklist.name) },
+                                colors = if (isSelected) FilterChipDefaults.filterChipColors(
+                                    selectedContainerColor = primaryColor,
+                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                                ) else FilterChipDefaults.filterChipColors(),
+                            )
+                        }
+                    }
+                }
+
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     "不选择则以空任务专注",
