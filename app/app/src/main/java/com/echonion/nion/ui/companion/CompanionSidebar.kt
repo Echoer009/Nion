@@ -4,8 +4,13 @@ package com.echonion.nion.ui.companion
 import android.util.Log
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -47,17 +52,21 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Bookmarks
+import androidx.compose.material.icons.outlined.SentimentSatisfied
 import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.AlertDialog
@@ -71,6 +80,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -90,8 +100,11 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import kotlinx.coroutines.launch
 import uniffi.nion_core.ConversationData
+import uniffi.nion_core.StickerData
 import org.json.JSONArray
+import com.echonion.nion.ui.companion.sticker.StickersPanel
 import com.echonion.nion.ui.companion.tools.MemoryTool
+import com.echonion.nion.ui.task.WheelSpinner
 import com.echonion.nion.ui.theme.NionColors
 
 /**
@@ -156,6 +169,7 @@ fun CompanionSidebar(
         panelMode == "switch" -> "switch"
         panelMode == "memories" -> "memories"
         panelMode == "preferences" -> "preferences"
+        panelMode == "stickers" -> "stickers"
         viewModel.currentProvider != null && viewModel.apiKey != null -> "chat"
         // 兜底：API 未配置时显示设置引导页
         else -> "setup"
@@ -253,12 +267,17 @@ fun CompanionSidebar(
                     onBack = { panelMode = null },
                     onMemoriesClick = { panelMode = "memories" },
                     onPreferencesClick = { panelMode = "preferences" },
+                    onStickersClick = { panelMode = "stickers" },
                 )
                 "preferences" -> PreferencesPanel(
                     viewModel = viewModel,
                     onClose = { panelMode = "profile" },
                 )
                 "memories" -> MemoriesPanel(
+                    viewModel = viewModel,
+                    onClose = { panelMode = null },
+                )
+                "stickers" -> StickersPanel(
                     viewModel = viewModel,
                     onClose = { panelMode = null },
                 )
@@ -413,30 +432,52 @@ private fun CompanionAvatar(
 }
 
 /**
- * 伙伴资料编辑页面 —— 编辑名字、系统提示词、头像。
+ * 伙伴资料编辑页面 —— 编辑名字、头像、提示词卡片、问候/提醒设置。
+ *
+ * 提示词分为两组卡片：
+ * - "伙伴设定"：人设 + 回复格式
+ * - "提醒设定"：3 个问候卡片 + 任务提醒 + 天气预警
+ *
+ * 每张卡片折叠时显示标题和预览，展开后显示编辑区域。
+ * 文本类提示词在返回时批量保存，开关和时间立即保存。
  *
  * @param viewModel 伙伴 ViewModel
  * @param onBack 点击返回按钮时触发，保存编辑内容并返回上一级
  * @param onMemoriesClick 点击记忆按钮时触发，打开记忆面板
  * @param onPreferencesClick 点击"关于你"按钮时触发，打开用户偏好面板
+ * @param onStickersClick 点击表情包按钮时触发，打开表情包管理面板
  */
+@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun ProfileContent(
     viewModel: CompanionViewModel,
     onBack: () -> Unit,
     onMemoriesClick: () -> Unit,
     onPreferencesClick: () -> Unit,
+    onStickersClick: () -> Unit,
 ) {
+    val context = LocalContext.current
+
+    // ── 名字编辑状态 ──
     var name by remember { mutableStateOf(viewModel.companionName) }
-    var prompt by remember { mutableStateOf(viewModel.companionPrompt) }
+
+    // ── 各提示词本地编辑状态（返回时统一保存） ──
+    var editingPersona by remember { mutableStateOf(viewModel.promptPersona) }
+    var editingFormat by remember { mutableStateOf(viewModel.promptFormat) }
+    var editingGreetingMorning by remember { mutableStateOf(viewModel.promptGreetingMorning) }
+    var editingGreetingNoon by remember { mutableStateOf(viewModel.promptGreetingNoon) }
+    var editingGreetingEvening by remember { mutableStateOf(viewModel.promptGreetingEvening) }
+    var editingReminder by remember { mutableStateOf(viewModel.promptReminder) }
+    var editingWeatherAlert by remember { mutableStateOf(viewModel.promptWeatherAlert) }
+
+    // 当前展开的卡片 key，null 表示全部折叠
+    var expandedCard by remember { mutableStateOf<String?>(null) }
 
     // 系统图片选择器：选取头像图片
-    val context = LocalContext.current
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
         if (uri != null) {
-            // 尝试获取持久化读取权限，以便下次启动仍能加载
             try {
                 context.contentResolver.takePersistableUriPermission(
                     uri,
@@ -447,25 +488,33 @@ private fun ProfileContent(
         }
     }
 
-    // 返回并保存：将当前编辑的内容写回 ViewModel 后返回
+    // 返回并保存：将所有编辑内容写回 ViewModel 后返回
     val backAndSave: () -> Unit = {
-        viewModel.updateCompanionInfo(name.trim(), prompt.trim())
+        viewModel.updateCompanionInfo(name.trim())
+        viewModel.updatePrompt(PromptDefaults.KEY_PERSONA, editingPersona.trim())
+        viewModel.updatePrompt(PromptDefaults.KEY_FORMAT, editingFormat.trim())
+        viewModel.updatePrompt(PromptDefaults.KEY_GREETING_MORNING, editingGreetingMorning.trim())
+        viewModel.updatePrompt(PromptDefaults.KEY_GREETING_NOON, editingGreetingNoon.trim())
+        viewModel.updatePrompt(PromptDefaults.KEY_GREETING_EVENING, editingGreetingEvening.trim())
+        viewModel.updatePrompt(PromptDefaults.KEY_REMINDER, editingReminder.trim())
+        viewModel.updatePrompt(PromptDefaults.KEY_WEATHER_ALERT, editingWeatherAlert.trim())
         onBack()
     }
 
+    SharedTransitionLayout {
+    val sts = this@SharedTransitionLayout
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
             .padding(vertical = 24.dp, horizontal = 16.dp),
     ) {
-        // 顶部导航栏：返回按钮 + 居中占位 + 右侧功能按钮
+        // ── 顶部导航栏 ──
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 左侧：返回按钮
             IconButton(onClick = backAndSave) {
                 Icon(
                     Icons.Default.ArrowBack,
@@ -473,9 +522,17 @@ private fun ProfileContent(
                     modifier = Modifier.size(20.dp),
                 )
             }
-            // 右侧按钮组：关于你 + 记忆
             Row(verticalAlignment = Alignment.CenterVertically) {
-                // "关于你"按钮：打开用户偏好面板，查看和编辑 Nion 了解的用户偏好
+                // 表情包按钮：打开表情包管理面板
+                IconButton(onClick = onStickersClick) {
+                    Icon(
+                        Icons.Outlined.SentimentSatisfied,
+                        contentDescription = "表情包",
+                        modifier = Modifier.size(20.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                // "关于你"按钮：打开用户偏好面板
                 IconButton(onClick = onPreferencesClick) {
                     Icon(
                         Icons.Outlined.Bookmarks,
@@ -484,7 +541,7 @@ private fun ProfileContent(
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
-                // 记忆按钮：打开 Nion 的笔记本，查看 AI 自动记录的关于用户的信息
+                // 记忆按钮：打开 Nion 的笔记本
                 IconButton(onClick = onMemoriesClick) {
                     Icon(
                         Icons.Outlined.AutoAwesome,
@@ -498,7 +555,7 @@ private fun ProfileContent(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // 头像区域 —— 居中展示，点击可更换头像
+        // ── 头像区域 ──
         Column(
             modifier = Modifier.fillMaxWidth(),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -519,7 +576,7 @@ private fun ProfileContent(
 
         Spacer(modifier = Modifier.height(28.dp))
 
-        // 名字输入框
+        // ── 名字输入框 ──
         OutlinedTextField(
             value = name,
             onValueChange = { name = it },
@@ -528,19 +585,560 @@ private fun ProfileContent(
             modifier = Modifier.fillMaxWidth(),
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        // 系统提示词输入框 —— 多行，定义 AI 的角色和回复风格
-        OutlinedTextField(
-            value = prompt,
-            onValueChange = { prompt = it },
-            label = { Text("系统提示词") },
-            minLines = 4,
-            maxLines = 8,
-            modifier = Modifier.fillMaxWidth(),
+        // ══════════════════════════════════════════════════════════════
+        // 伙伴设定
+        // ══════════════════════════════════════════════════════════════
+        SectionHeader("伙伴设定")
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 人设卡片
+        ExpandablePromptCard(
+            cardKey = "persona",
+            title = "人设",
+            text = editingPersona,
+            isExpanded = expandedCard == PromptDefaults.KEY_PERSONA,
+            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_PERSONA) null else PromptDefaults.KEY_PERSONA },
+            onTextChange = { editingPersona = it },
+            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_PERSONA].orEmpty(),
+            onReset = {
+                val default = PromptDefaults.PERSONA
+                editingPersona = default
+                viewModel.updatePrompt(PromptDefaults.KEY_PERSONA, default)
+            },
+            sharedTransitionScope = sts,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 回复格式卡片
+        ExpandablePromptCard(
+            cardKey = "format",
+            title = "回复格式",
+            text = editingFormat,
+            isExpanded = expandedCard == PromptDefaults.KEY_FORMAT,
+            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_FORMAT) null else PromptDefaults.KEY_FORMAT },
+            onTextChange = { editingFormat = it },
+            variables = emptyList(),
+            onReset = {
+                val default = PromptDefaults.FORMAT
+                editingFormat = default
+                viewModel.updatePrompt(PromptDefaults.KEY_FORMAT, default)
+            },
+            sharedTransitionScope = sts,
+        )
+
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // ══════════════════════════════════════════════════════════════
+        // 提醒设定
+        // ══════════════════════════════════════════════════════════════
+        SectionHeader("提醒设定")
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 早安问候卡片（开关 + 时间 + 提示词）
+        ExpandableReminderCard(
+            cardKey = "greeting_morning",
+            title = "早安问候",
+            description = if (viewModel.morningEnabled) "每天 ${viewModel.morningTime} 汇总今日待办" else "已关闭",
+            enabled = viewModel.morningEnabled,
+            time = viewModel.morningTime,
+            promptText = editingGreetingMorning,
+            isExpanded = expandedCard == PromptDefaults.KEY_GREETING_MORNING,
+            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_GREETING_MORNING) null else PromptDefaults.KEY_GREETING_MORNING },
+            onEnabledChange = { viewModel.updateGreetingEnabled("morning", it, context) },
+            onTimeChange = { viewModel.updateGreetingTime("morning", it, context) },
+            onPromptChange = { editingGreetingMorning = it },
+            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_GREETING_MORNING].orEmpty(),
+            onReset = {
+                val default = PromptDefaults.GREETING_MORNING
+                editingGreetingMorning = default
+                viewModel.updatePrompt(PromptDefaults.KEY_GREETING_MORNING, default)
+            },
+            sharedTransitionScope = sts,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 午间检查卡片
+        ExpandableReminderCard(
+            cardKey = "greeting_noon",
+            title = "午间检查",
+            description = if (viewModel.noonEnabled) "每天 ${viewModel.noonTime} 检查上午完成情况" else "已关闭",
+            enabled = viewModel.noonEnabled,
+            time = viewModel.noonTime,
+            promptText = editingGreetingNoon,
+            isExpanded = expandedCard == PromptDefaults.KEY_GREETING_NOON,
+            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_GREETING_NOON) null else PromptDefaults.KEY_GREETING_NOON },
+            onEnabledChange = { viewModel.updateGreetingEnabled("noon", it, context) },
+            onTimeChange = { viewModel.updateGreetingTime("noon", it, context) },
+            onPromptChange = { editingGreetingNoon = it },
+            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_GREETING_NOON].orEmpty(),
+            onReset = {
+                val default = PromptDefaults.GREETING_NOON
+                editingGreetingNoon = default
+                viewModel.updatePrompt(PromptDefaults.KEY_GREETING_NOON, default)
+            },
+            sharedTransitionScope = sts,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 晚间总结卡片
+        ExpandableReminderCard(
+            cardKey = "greeting_evening",
+            title = "晚间总结",
+            description = if (viewModel.eveningEnabled) "每天 ${viewModel.eveningTime} 总结今日成就" else "已关闭",
+            enabled = viewModel.eveningEnabled,
+            time = viewModel.eveningTime,
+            promptText = editingGreetingEvening,
+            isExpanded = expandedCard == PromptDefaults.KEY_GREETING_EVENING,
+            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_GREETING_EVENING) null else PromptDefaults.KEY_GREETING_EVENING },
+            onEnabledChange = { viewModel.updateGreetingEnabled("evening", it, context) },
+            onTimeChange = { viewModel.updateGreetingTime("evening", it, context) },
+            onPromptChange = { editingGreetingEvening = it },
+            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_GREETING_EVENING].orEmpty(),
+            onReset = {
+                val default = PromptDefaults.GREETING_EVENING
+                editingGreetingEvening = default
+                viewModel.updatePrompt(PromptDefaults.KEY_GREETING_EVENING, default)
+            },
+            sharedTransitionScope = sts,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 任务提醒卡片（仅提示词，无开关/时间）
+        ExpandablePromptCard(
+            cardKey = "reminder",
+            title = "任务提醒",
+            text = editingReminder,
+            isExpanded = expandedCard == PromptDefaults.KEY_REMINDER,
+            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_REMINDER) null else PromptDefaults.KEY_REMINDER },
+            onTextChange = { editingReminder = it },
+            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_REMINDER].orEmpty(),
+            onReset = {
+                val default = PromptDefaults.REMINDER
+                editingReminder = default
+                viewModel.updatePrompt(PromptDefaults.KEY_REMINDER, default)
+            },
+            sharedTransitionScope = sts,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 天气预警卡片（开关 + 提示词，无时间）
+        ExpandableReminderCard(
+            cardKey = "weather_alert",
+            title = "天气预警",
+            description = if (viewModel.weatherAlertEnabled) "下雨、降温、大风等天气变化时提醒你" else "已关闭",
+            enabled = viewModel.weatherAlertEnabled,
+            time = null,
+            promptText = editingWeatherAlert,
+            isExpanded = expandedCard == PromptDefaults.KEY_WEATHER_ALERT,
+            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_WEATHER_ALERT) null else PromptDefaults.KEY_WEATHER_ALERT },
+            onEnabledChange = { viewModel.updateWeatherAlertEnabled(it, context) },
+            onTimeChange = null,
+            onPromptChange = { editingWeatherAlert = it },
+            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_WEATHER_ALERT].orEmpty(),
+            onReset = {
+                val default = PromptDefaults.WEATHER_ALERT
+                editingWeatherAlert = default
+                viewModel.updatePrompt(PromptDefaults.KEY_WEATHER_ALERT, default)
+            },
+            sharedTransitionScope = sts,
         )
 
         Spacer(modifier = Modifier.height(16.dp))
+    }
+    } // SharedTransitionLayout end
+} // ProfileContent end
+
+/**
+ * 分组标题。
+ *
+ * @param title 标题文本，如"伙伴设定"、"提醒设定"
+ */
+@Composable
+private fun SectionHeader(title: String) {
+    Text(
+        title,
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+    )
+}
+
+/**
+ * 可展开的提示词卡片 —— 使用共享元素变形动画。
+ *
+ * 折叠时显示标题 + 内容预览（前两行）+ 展开箭头，
+ * 展开后显示多行编辑框 + 模板变量说明 + "恢复默认"按钮。
+ * 卡片容器通过 sharedBounds 实现折叠/展开尺寸变形，
+ * 标题和箭头通过 sharedElement 在变形过程中保持位置锚定。
+ *
+ * @param cardKey 卡片唯一标识，用于 shared element key 生成
+ * @param title 卡片标题
+ * @param text 当前编辑内容
+ * @param isExpanded 是否展开
+ * @param onToggleExpand 点击标题行切换展开/折叠
+ * @param onTextChange 编辑内容变更回调
+ * @param variables 模板变量说明列表，如 listOf("{name}" to "伙伴名字")
+ * @param onReset 恢复默认按钮回调
+ * @param sharedTransitionScope SharedTransitionLayout 提供的作用域
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun ExpandablePromptCard(
+    cardKey: String,
+    title: String,
+    text: String,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onTextChange: (String) -> Unit,
+    variables: List<Pair<String, String>>,
+    onReset: () -> Unit,
+    sharedTransitionScope: SharedTransitionScope,
+) {
+    with(sharedTransitionScope) {
+        AnimatedContent(
+            targetState = isExpanded,
+            transitionSpec = {
+                if (targetState) {
+                    // 展开：内容淡入 + 容器弹簧变形
+                    (fadeIn(tween(300, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(180, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                } else {
+                    // 收起：内容淡出 + 容器弹簧变形
+                    (fadeIn(tween(250, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(400, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                }
+            },
+            label = "card_$cardKey",
+        ) { expanded ->
+            // 卡片容器：sharedBounds 实现背景从折叠尺寸变形到展开尺寸
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .sharedBounds(
+                        sharedContentState = rememberSharedContentState("container_$cardKey"),
+                        animatedVisibilityScope = this@AnimatedContent,
+                        boundsTransform = { _, _ ->
+                            spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                        },
+                    ),
+                color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                shape = MaterialTheme.shapes.medium,
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // ── 标题行：点击展开/折叠 ──
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onToggleExpand() }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        // 标题 + 预览
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                title,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                // sharedElement 让标题在变形过程中保持位置锚定
+                                modifier = Modifier.sharedElement(
+                                    sharedContentState = rememberSharedContentState("title_$cardKey"),
+                                    animatedVisibilityScope = this@AnimatedContent,
+                                ),
+                            )
+                            // 折叠时显示前两行预览
+                            if (!expanded && text.isNotBlank()) {
+                                Text(
+                                    text.lines().take(2).joinToString("\n"),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        // 展开/折叠箭头
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = if (expanded) "收起" else "展开",
+                            modifier = Modifier
+                                .size(24.dp)
+                                .rotate(if (expanded) 180f else 0f)
+                                .sharedElement(
+                                    sharedContentState = rememberSharedContentState("chevron_$cardKey"),
+                                    animatedVisibilityScope = this@AnimatedContent,
+                                ),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    // ── 展开内容（仅 expanded 状态下组合） ──
+                    if (expanded) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                                .padding(bottom = 16.dp),
+                        ) {
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // 多行编辑框
+                            OutlinedTextField(
+                                value = text,
+                                onValueChange = onTextChange,
+                                minLines = 3,
+                                maxLines = 10,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+
+                            // 模板变量说明
+                            if (variables.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "可用变量：" + variables.joinToString(", ") { "${it.first} ${it.second}" },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // 恢复默认按钮
+                            TextButton(onClick = onReset) {
+                                Text("恢复默认")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 可展开的提醒设置卡片 —— 使用共享元素变形动画（带开关 + 可选时间选择 + 提示词编辑）。
+ *
+ * 折叠时显示标题 + 描述 + Switch + 展开箭头，
+ * 展开后显示开关行 + 时间选择器（仅 time != null 且 enabled 时） + 提示词编辑框 + 变量说明 + 恢复默认。
+ * 卡片容器通过 sharedBounds 实现折叠/展开尺寸变形。
+ *
+ * @param cardKey 卡片唯一标识，用于 shared element key 生成
+ * @param title 卡片标题
+ * @param description 折叠时的副标题描述
+ * @param enabled 当前开关状态
+ * @param time 当前时间 "HH:MM"，null 表示无时间选择器
+ * @param promptText 当前提示词编辑内容
+ * @param isExpanded 是否展开
+ * @param onToggleExpand 切换展开/折叠
+ * @param onEnabledChange 开关状态变更回调（立即保存）
+ * @param onTimeChange 时间变更回调（立即保存），null 表示无时间选择器
+ * @param onPromptChange 提示词编辑变更回调
+ * @param variables 模板变量说明列表
+ * @param onReset 恢复默认按钮回调
+ * @param sharedTransitionScope SharedTransitionLayout 提供的作用域
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun ExpandableReminderCard(
+    cardKey: String,
+    title: String,
+    description: String,
+    enabled: Boolean,
+    time: String?,
+    promptText: String,
+    isExpanded: Boolean,
+    onToggleExpand: () -> Unit,
+    onEnabledChange: (Boolean) -> Unit,
+    onTimeChange: ((String) -> Unit)?,
+    onPromptChange: (String) -> Unit,
+    variables: List<Pair<String, String>>,
+    onReset: () -> Unit,
+    sharedTransitionScope: SharedTransitionScope,
+) {
+    // 时间选择器的选中值，初始化为当前时间
+    val parts = time?.split(":") ?: listOf("0", "0")
+    val currentHour = parts.getOrElse(0) { "0" }.toIntOrNull() ?: 0
+    val currentMinute = parts.getOrElse(1) { "0" }.toIntOrNull() ?: 0
+    var selectedHour by remember(time) { mutableStateOf(currentHour) }
+    var selectedMinute by remember(time) { mutableStateOf(currentMinute) }
+
+    with(sharedTransitionScope) {
+        AnimatedContent(
+            targetState = isExpanded,
+            transitionSpec = {
+                if (targetState) {
+                    (fadeIn(tween(300, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(180, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                } else {
+                    (fadeIn(tween(250, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(400, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                }
+            },
+            label = "card_$cardKey",
+        ) { expanded ->
+            Surface(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .sharedBounds(
+                        sharedContentState = rememberSharedContentState("container_$cardKey"),
+                        animatedVisibilityScope = this@AnimatedContent,
+                        boundsTransform = { _, _ ->
+                            spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                        },
+                    ),
+                color = MaterialTheme.colorScheme.surfaceContainerLowest,
+                shape = MaterialTheme.shapes.medium,
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // ── 标题行 ──
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onToggleExpand() }
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        // 标题 + 描述
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                title,
+                                style = MaterialTheme.typography.bodyLarge,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.sharedElement(
+                                    sharedContentState = rememberSharedContentState("title_$cardKey"),
+                                    animatedVisibilityScope = this@AnimatedContent,
+                                ),
+                            )
+                            Text(
+                                description,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            )
+                        }
+                        // 开关（点击开关不触发展开，只切换开关）
+                        Switch(
+                            checked = enabled,
+                            onCheckedChange = onEnabledChange,
+                        )
+                        // 展开/折叠箭头
+                        Icon(
+                            Icons.Default.KeyboardArrowDown,
+                            contentDescription = if (expanded) "收起" else "展开",
+                            modifier = Modifier
+                                .size(24.dp)
+                                .rotate(if (expanded) 180f else 0f)
+                                .sharedElement(
+                                    sharedContentState = rememberSharedContentState("chevron_$cardKey"),
+                                    animatedVisibilityScope = this@AnimatedContent,
+                                ),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    // ── 展开内容（仅 expanded 状态下组合） ──
+                    if (expanded) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp)
+                                .padding(bottom = 16.dp),
+                        ) {
+                            Spacer(modifier = Modifier.height(4.dp))
+
+                            // 时间选择器（仅当 time != null 且 enabled 时显示）
+                            if (time != null && enabled && onTimeChange != null) {
+                                Text(
+                                    "提醒时间",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    WheelSpinner(
+                                        items = (0..23).map { "%02d".format(it) },
+                                        initialIndex = selectedHour,
+                                        visibleItemCount = 3,
+                                        itemHeight = 40.dp,
+                                        onSelected = { index ->
+                                            selectedHour = index
+                                            val newTime = String.format("%02d:%02d", index, selectedMinute)
+                                            onTimeChange(newTime)
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        circular = true,
+                                    )
+                                    Text(
+                                        ":",
+                                        style = MaterialTheme.typography.headlineMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        modifier = Modifier.padding(horizontal = 8.dp),
+                                    )
+                                    WheelSpinner(
+                                        items = (0..59).map { "%02d".format(it) },
+                                        initialIndex = selectedMinute,
+                                        visibleItemCount = 3,
+                                        itemHeight = 40.dp,
+                                        onSelected = { index ->
+                                            selectedMinute = index
+                                            val newTime = String.format("%02d:%02d", selectedHour, index)
+                                            onTimeChange(newTime)
+                                        },
+                                        modifier = Modifier.weight(1f),
+                                        circular = true,
+                                    )
+                                }
+
+                                Spacer(modifier = Modifier.height(12.dp))
+                            }
+
+                            // 提示词编辑框
+                            OutlinedTextField(
+                                value = promptText,
+                                onValueChange = onPromptChange,
+                                minLines = 3,
+                                maxLines = 10,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+
+                            // 模板变量说明
+                            if (variables.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                Text(
+                                    "可用变量：" + variables.joinToString(", ") { "${it.first} ${it.second}" },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // 恢复默认按钮
+                            TextButton(onClick = onReset) {
+                                Text("恢复默认")
+                            }
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -856,7 +1454,7 @@ private fun ChatContent(
                         animationSpec = tween(350),
                     ),
                 ) {
-                    MessageBubble(message)
+                    MessageBubble(message, stickers = viewModel.stickers)
                 }
             }
             // 流式输出气泡 —— 有流式文本时实时展示正在生成的 AI 回复
@@ -865,6 +1463,7 @@ private fun ChatContent(
                     StreamingMessageBubble(
                         text = streamingText,
                         timestamp = streamingTimestamp,
+                        stickers = viewModel.stickers,
                     )
                 }
             }
@@ -972,9 +1571,10 @@ private fun ChatContent(
  * 用户消息使用纯文本渲染。
  *
  * @param message 要渲染的消息数据
+ * @param stickers 表情包列表，用于在 AI 回复中渲染 <标签名> 为行内图片
  */
 @Composable
-private fun MessageBubble(message: ChatMessage) {
+private fun MessageBubble(message: ChatMessage, stickers: List<StickerData> = emptyList()) {
     val isUser = message.isFromUser
     // 工具消息：简洁状态行（小字、灰色、左侧图标），不渲染气泡
     if (message.isToolMessage) {
@@ -1058,6 +1658,7 @@ private fun MessageBubble(message: ChatMessage) {
                             lineHeight = 22.sp,
                             color = textColor,
                         ),
+                        stickers = stickers,
                     )
                 }
             }
@@ -1082,11 +1683,13 @@ private fun MessageBubble(message: ChatMessage) {
  *
  * @param text      当前已累积的流式文本
  * @param timestamp 流式开始时间
+ * @param stickers  表情包列表，用于渲染 <标签名> 为行内图片
  */
 @Composable
 private fun StreamingMessageBubble(
     text: String,
     timestamp: String,
+    stickers: List<StickerData> = emptyList(),
 ) {
     Column(
         modifier = Modifier.fillMaxWidth(),
@@ -1110,6 +1713,7 @@ private fun StreamingMessageBubble(
                         lineHeight = 22.sp,
                         color = MaterialTheme.colorScheme.onSurface,
                     ),
+                    stickers = stickers,
                 )
             }
         }
@@ -1265,9 +1869,12 @@ private fun ConversationItem(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(modifier = Modifier.height(4.dp))
-            // 显示对话消息数量和更新时间的简短摘要
+            // 显示对话消息数量和更新时间的简短摘要（排除工具状态消息，只计用户消息和 AI 回复）
             val msgCount = try {
-                JSONArray(conversation.messages).length()
+                val arr = JSONArray(conversation.messages)
+                (0 until arr.length()).count { i ->
+                    !arr.getJSONObject(i).optBoolean("isToolMessage", false)
+                }
             } catch (_: Exception) { 0 }
             Text(
                 "$msgCount 条消息 · ${conversation.updatedAt.take(10)}",

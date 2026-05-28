@@ -1,6 +1,8 @@
 package com.echonion.nion.ui.companion
 
 import android.util.Log
+import android.graphics.BitmapFactory
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -8,9 +10,12 @@ import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.HorizontalDivider
@@ -22,8 +27,16 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckBox
 import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
@@ -36,6 +49,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import uniffi.nion_core.StickerData
+import com.echonion.nion.ui.companion.sticker.StickerService
 
 private const val TAG = "MarkdownText"
 
@@ -58,6 +73,7 @@ private const val TAG = "MarkdownText"
  * @param content  Markdown 原始文本
  * @param modifier 修饰符
  * @param style    普通文本的文字样式
+ * @param stickers 可用的表情包列表，用于将 <标签名> 渲染为行内图片
  */
 @Composable
 fun MarkdownText(
@@ -67,8 +83,11 @@ fun MarkdownText(
         fontSize = 15.sp,
         lineHeight = 22.sp,
     ),
+    stickers: List<StickerData> = emptyList(),
 ) {
     val textColor = style.color
+    // 构建标签名 → 表情包的映射表，供 parseInline 和渲染使用
+    val stickerMap = remember(stickers) { stickers.associateBy { it.tag } }
 
     val blocks = try {
         parseBlocks(content)
@@ -81,13 +100,13 @@ fun MarkdownText(
     Column(modifier = modifier) {
         for ((index, block) in blocks.withIndex()) {
             when (block) {
-                is MdBlock.Header -> HeaderBlock(block, textColor)
+                is MdBlock.Header -> HeaderBlock(block, textColor, stickerMap)
                 is MdBlock.CodeBlock -> CodeBlockBlock(block, textColor)
-                is MdBlock.ListBlock -> ListBlockBlock(block, style, textColor)
-                is MdBlock.TaskListBlock -> TaskListBlockBlock(block, style, textColor)
-                is MdBlock.Blockquote -> BlockquoteBlock(block, style, textColor)
-                is MdBlock.TableBlock -> TableBlockBlock(block, style, textColor)
-                is MdBlock.Paragraph -> ParagraphBlock(block, style, textColor)
+                is MdBlock.ListBlock -> ListBlockBlock(block, style, textColor, stickerMap)
+                is MdBlock.TaskListBlock -> TaskListBlockBlock(block, style, textColor, stickerMap)
+                is MdBlock.Blockquote -> BlockquoteBlock(block, style, textColor, stickerMap)
+                is MdBlock.TableBlock -> TableBlockBlock(block, style, textColor, stickerMap)
+                is MdBlock.Paragraph -> ParagraphBlock(block, style, textColor, stickerMap)
                 is MdBlock.HorizontalRule -> HorizontalRuleBlock()
             }
             if (index < blocks.size - 1) Spacer(modifier = Modifier.height(8.dp))
@@ -402,7 +421,11 @@ private fun parseCells(line: String): List<String>? {
  * H1-H4 用 Bold 字重，H5-H6 用 SemiBold。字号随级别递减。
  */
 @Composable
-private fun HeaderBlock(block: MdBlock.Header, textColor: androidx.compose.ui.graphics.Color) {
+private fun HeaderBlock(
+    block: MdBlock.Header,
+    textColor: androidx.compose.ui.graphics.Color,
+    stickerMap: Map<String, StickerData> = emptyMap(),
+) {
     val fontSize = when (block.level) {
         1 -> 20.sp
         2 -> 18.sp
@@ -412,11 +435,9 @@ private fun HeaderBlock(block: MdBlock.Header, textColor: androidx.compose.ui.gr
         else -> 13.sp
     }
     val fontWeight = if (block.level <= 4) FontWeight.Bold else FontWeight.SemiBold
-    Text(
-        text = block.text,
-        style = MaterialTheme.typography.bodyMedium.copy(fontSize = fontSize, fontWeight = fontWeight),
-        color = textColor,
-    )
+    val style = MaterialTheme.typography.bodyMedium.copy(fontSize = fontSize, fontWeight = fontWeight)
+    val parsed = parseInline(block.text, style, textColor, stickerMap)
+    StickerAwareText(parsed, style, textColor, stickerMap)
 }
 
 /**
@@ -456,15 +477,16 @@ private fun ListBlockBlock(
     block: MdBlock.ListBlock,
     baseStyle: TextStyle,
     textColor: androidx.compose.ui.graphics.Color,
+    stickerMap: Map<String, StickerData> = emptyMap(),
 ) {
     Column {
         for ((index, item) in block.items.withIndex()) {
             Row(modifier = Modifier.fillMaxWidth()) {
-                // 有序列表使用 "1. " 格式，无序列表使用 "•  " 圆点
                 val marker = if (block.ordered) "${index + 1}. " else "\u2022  "
                 Text(text = marker, style = baseStyle, color = textColor)
                 Spacer(modifier = Modifier.width(4.dp))
-                Text(text = parseInline(item, baseStyle, textColor), style = baseStyle)
+                val parsed = parseInline(item, baseStyle, textColor, stickerMap)
+                StickerAwareText(parsed, baseStyle, textColor, stickerMap)
             }
             if (index < block.items.size - 1) {
                 Spacer(modifier = Modifier.height(4.dp))
@@ -483,15 +505,13 @@ private fun TaskListBlockBlock(
     block: MdBlock.TaskListBlock,
     baseStyle: TextStyle,
     textColor: androidx.compose.ui.graphics.Color,
+    stickerMap: Map<String, StickerData> = emptyMap(),
 ) {
     Column {
         for ((index, item) in block.items.withIndex()) {
             Row(modifier = Modifier.fillMaxWidth()) {
-                // 已完成项使用半透明颜色表示"已完成"状态
                 val itemColor = if (item.checked) textColor.copy(alpha = 0.6f) else textColor
-                // Material 图标：已完成为实心 CheckBox，未完成为空心 CheckBoxOutlineBlank
-                // 图标大小与正文字号一致，居中对齐文字基线
-                val iconSize = with(androidx.compose.ui.platform.LocalDensity.current) {
+                val iconSize = with(LocalDensity.current) {
                     baseStyle.fontSize.toDp()
                 }
                 Icon(
@@ -503,11 +523,8 @@ private fun TaskListBlockBlock(
                     tint = itemColor,
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    text = parseInline(item.text, baseStyle, itemColor),
-                    style = baseStyle,
-                    color = itemColor,
-                )
+                val parsed = parseInline(item.text, baseStyle, itemColor, stickerMap)
+                StickerAwareText(parsed, baseStyle, itemColor, stickerMap)
             }
             if (index < block.items.size - 1) {
                 Spacer(modifier = Modifier.height(4.dp))
@@ -527,6 +544,7 @@ private fun BlockquoteBlock(
     block: MdBlock.Blockquote,
     baseStyle: TextStyle,
     textColor: androidx.compose.ui.graphics.Color,
+    stickerMap: Map<String, StickerData> = emptyMap(),
 ) {
     Row(
         modifier = Modifier
@@ -547,12 +565,9 @@ private fun BlockquoteBlock(
         Column(modifier = Modifier.clipToBounds()) {
             for ((index, line) in block.lines.withIndex()) {
                 if (line.isNotBlank()) {
-                    Text(
-                        text = parseInline(line, baseStyle, textColor),
-                        style = baseStyle.copy(
-                            color = textColor.copy(alpha = 0.85f),
-                        ),
-                    )
+                    val quoteColor = textColor.copy(alpha = 0.85f)
+                    val parsed = parseInline(line, baseStyle, quoteColor, stickerMap)
+                    StickerAwareText(parsed, baseStyle.copy(color = quoteColor), quoteColor, stickerMap)
                 }
                 if (index < block.lines.size - 1) {
                     Spacer(modifier = Modifier.height(2.dp))
@@ -572,6 +587,7 @@ private fun TableBlockBlock(
     block: MdBlock.TableBlock,
     baseStyle: TextStyle,
     textColor: androidx.compose.ui.graphics.Color,
+    stickerMap: Map<String, StickerData> = emptyMap(),
 ) {
     val header = block.header
     val rows = block.rows
@@ -618,15 +634,13 @@ private fun TableBlockBlock(
                 Row(modifier = Modifier.fillMaxWidth()) {
                     for (colIndex in header.indices) {
                         val cellText = row.getOrElse(colIndex) { "" }
-                        Text(
-                            text = parseInline(cellText, baseStyle, textColor),
+                        val parsed = parseInline(cellText, baseStyle, textColor, stickerMap)
+                        StickerAwareText(
+                            parsed, baseStyle, textColor, stickerMap,
                             modifier = Modifier
                                 .weight(1f)
                                 .padding(horizontal = 10.dp, vertical = 10.dp),
-                            style = baseStyle,
-                            color = textColor,
                             textAlign = getCellAlignment(block.alignments, colIndex),
-                            softWrap = true,
                             maxLines = 5,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -658,8 +672,10 @@ private fun ParagraphBlock(
     block: MdBlock.Paragraph,
     baseStyle: TextStyle,
     textColor: androidx.compose.ui.graphics.Color,
+    stickerMap: Map<String, StickerData> = emptyMap(),
 ) {
-    Text(text = parseInline(block.text, baseStyle, textColor), style = baseStyle)
+    val parsed = parseInline(block.text, baseStyle, textColor, stickerMap)
+    StickerAwareText(parsed, baseStyle, textColor, stickerMap)
 }
 
 /** 渲染水平分割线：全宽细线，上下留间距 */
@@ -673,23 +689,177 @@ private fun HorizontalRuleBlock() {
     Spacer(modifier = Modifier.height(4.dp))
 }
 
+// ──────────── 表情包内联渲染 ────────────
+
+/** 匹配表情包标签的正则：<tag> 格式，tag 不含尖括号 */
+private val STICKER_TAG_REGEX = Regex("""<([^<>]+)>""")
+
+/**
+ * 表情包内联解析结果 —— 包含解析后的 AnnotatedString 和发现的表情包标签集合。
+ *
+ * @param annotatedString 解析后的富文本
+ * @param foundStickerTags 文本中发现的表情包标签名集合
+ * @param stickerOffsets \uFFFC 占位符在 AnnotatedString 中的偏移量 → 对应标签名
+ */
+private data class InlineParseResult(
+    val annotatedString: AnnotatedString,
+    val foundStickerTags: Set<String>,
+    val stickerOffsets: Map<Int, String>,
+)
+
+/**
+ * 支持表情包的 Text 组件 —— 渲染文本并用 overlay 方式在 \uFFFC 占位符位置覆盖表情图片。
+ * 通过 StickerService.loadForRender() 自适应采样解码，消除锯齿。
+ *
+ * @param result parseInline 的解析结果
+ * @param style  文本样式
+ * @param color  文本颜色
+ * @param stickerMap 标签名 → 表情包数据的映射
+ * @param modifier 修饰符
+ * @param textAlign 文本对齐方式
+ * @param maxLines  最大行数
+ * @param overflow  文本溢出处理方式
+ */
+@Composable
+private fun StickerAwareText(
+    result: InlineParseResult,
+    style: TextStyle,
+    color: androidx.compose.ui.graphics.Color,
+    stickerMap: Map<String, StickerData>,
+    modifier: Modifier = Modifier,
+    textAlign: androidx.compose.ui.text.style.TextAlign? = null,
+    maxLines: Int = Int.MAX_VALUE,
+    overflow: TextOverflow = TextOverflow.Clip,
+) {
+    // 无表情包时使用普通 Text，避免 overlay 开销
+    if (result.stickerOffsets.isEmpty()) {
+        Text(
+            text = result.annotatedString,
+            style = style,
+            color = color,
+            modifier = modifier,
+            textAlign = textAlign,
+            maxLines = maxLines,
+            overflow = overflow,
+            softWrap = true,
+        )
+        return
+    }
+
+    // 从 TextLayoutResult 中获取每个 \uFFFC 占位符的像素矩形
+    val density = LocalDensity.current
+    var stickerRects by remember(result.annotatedString) {
+        mutableStateOf<List<Rect>>(emptyList())
+    }
+    val offsetTagPairs = result.stickerOffsets.entries.sortedBy { it.key }
+
+    Box(modifier = modifier) {
+        Text(
+            text = result.annotatedString,
+            style = style,
+            color = color,
+            textAlign = textAlign,
+            maxLines = maxLines,
+            overflow = overflow,
+            softWrap = true,
+            onTextLayout = { textLayoutResult ->
+                // 遍历所有占位符偏移量，获取其像素矩形
+                val rects = offsetTagPairs.mapNotNull { (offset, _) ->
+                    try {
+                        textLayoutResult.getBoundingBox(offset)
+                    } catch (_: Exception) { null }
+                }
+                stickerRects = rects
+            },
+        )
+
+        // 在占位符位置覆盖表情图片（通过 StickerService 自适应采样，消除锯齿）
+        for ((index, rect) in stickerRects.withIndex()) {
+            if (index >= offsetTagPairs.size) break
+            val tag = offsetTagPairs[index].value
+            val sticker = stickerMap[tag] ?: continue
+            // 自适应采样解码：targetSizePx 基于占位符高度 × density
+            val targetPx = with(density) { (rect.height * density.density).toInt().coerceAtLeast(48) }
+            val bitmap = remember(sticker.filePath) {
+                StickerService.loadForRender(sticker.filePath, targetPx)
+            }
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "<$tag>",
+                    modifier = Modifier
+                        .offset(
+                            x = with(density) { rect.left.toDp() },
+                            y = with(density) { rect.top.toDp() },
+                        )
+                        .size(
+                            width = with(density) { rect.width.toDp() },
+                            height = with(density) { rect.height.toDp() },
+                        )
+                        .scale(1.2f), // 视觉放大 20%，不改变布局尺寸
+                    contentScale = ContentScale.Fit,
+                )
+            }
+        }
+    }
+}
+
 // ──────────── 内联解析 ────────────
 
 /**
  * 字符级扫描器，解析段落内内联 Markdown 并构建 AnnotatedString。
  *
- * 支持：**粗体**、*斜体*、`代码`、~~删除线~~、[链接](url)
+ * 支持：**粗体**、*斜体*、`代码`、~~删除线~~、[链接](url)、<表情包标签>
  * 注意：本函数非 @Composable，不可调用 MaterialTheme 等 Composable API。
  */
 private fun parseInline(
     raw: String,
     style: TextStyle,
     color: androidx.compose.ui.graphics.Color,
-): AnnotatedString {
-    return buildAnnotatedString {
-        withStyle(SpanStyle(color = color)) {
-            var i = 0
-            while (i < raw.length) {
+    stickerMap: Map<String, StickerData> = emptyMap(),
+): InlineParseResult {
+    // 预扫描所有 <tag> 匹配位置，用于字符级扫描器快速判断
+    val tagMatches = STICKER_TAG_REGEX.findAll(raw).toList()
+    val stickerPositions = mutableMapOf<Int, Pair<Int, String>>() // startPos → (endPos, tag)
+    for (match in tagMatches) {
+        val tag = match.groupValues[1]
+        if (stickerMap.containsKey(tag)) {
+            stickerPositions[match.range.first] = match.range.last + 1 to tag
+        }
+    }
+    val foundTags = mutableSetOf<String>()
+    // 记录每个 \uFFFC 占位符在 AnnotatedString 中的偏移量 → 标签名
+    val stickerOffsetMap = mutableMapOf<Int, String>()
+
+    val annotated = buildAnnotatedString {
+        var i = 0
+        while (i < raw.length) {
+            // 优先检查当前位置是否是已知的表情包标签（在 withStyle 外部处理）
+            val stickerInfo = stickerPositions[i]
+            if (stickerInfo != null) {
+                val (endPos, tag) = stickerInfo
+                foundTags.add(tag)
+                // 记录当前偏移量（即占位符将要被 append 的位置）
+                stickerOffsetMap[length] = tag
+                // 占位符需要占据空间（供 onTextLayout 定位），但必须透明不可见
+                // 占位符 fontSize 取 1.7x 与 lineHeight 的较小值，确保不破坏行高
+                val placeholderSize = (style.fontSize.value * 1.7f)
+                val safeSize = if (style.lineHeight.isSp)
+                    // lineHeight = 22sp, base=15sp, 取安全上限=lineHeight: 22 vs 25.5→22sp
+                    placeholderSize.coerceAtMost(style.lineHeight.value).sp
+                else
+                    placeholderSize.sp
+                withStyle(SpanStyle(
+                    fontSize = safeSize,
+                    color = androidx.compose.ui.graphics.Color.Transparent,
+                )) {
+                    append("\uFFFC")
+                }
+                i = endPos
+                continue
+            }
+            // 非表情包内容，统一用基础颜色样式包裹
+            withStyle(SpanStyle(color = color)) {
                 when {
                     // **粗体**
                     raw.startsWith("**", i) -> {
@@ -761,4 +931,5 @@ private fun parseInline(
             }
         }
     }
+    return InlineParseResult(annotated, foundTags, stickerOffsetMap)
 }

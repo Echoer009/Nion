@@ -12,6 +12,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.CreationExtras
 import com.echonion.nion.NionApp
 import com.echonion.nion.core
+import com.echonion.nion.ui.companion.sticker.StickerService
 import com.echonion.nion.ui.companion.tools.ToolExecutor
 import com.echonion.nion.ui.companion.tools.ToolResult
 import com.echonion.nion.ui.companion.tools.MemoryTool
@@ -24,6 +25,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.nion_core.NionCore
 import uniffi.nion_core.ConversationData
+import uniffi.nion_core.StickerData
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import java.util.UUID
@@ -161,8 +163,55 @@ class CompanionViewModel(
     var companionName by mutableStateOf("Nion")
         private set
 
-    /** 伙伴系统提示词，定义 AI 的行为和语气，可从编辑页修改 */
-    var companionPrompt by mutableStateOf("")
+    // ── 提示词状态（7 个独立卡片，分别存储在 settings 表） ──
+
+    /** 人设提示词 —— 定义 AI 的角色、性格、语言 */
+    var promptPersona by mutableStateOf("")
+        private set
+    /** 回复格式提示词 —— 定义 AI 可用的 Markdown 格式和展示规则 */
+    var promptFormat by mutableStateOf("")
+        private set
+    /** 早安问候提示词 */
+    var promptGreetingMorning by mutableStateOf("")
+        private set
+    /** 午间检查提示词 */
+    var promptGreetingNoon by mutableStateOf("")
+        private set
+    /** 晚间总结提示词 */
+    var promptGreetingEvening by mutableStateOf("")
+        private set
+    /** 任务提醒提示词 */
+    var promptReminder by mutableStateOf("")
+        private set
+    /** 天气预警提示词 */
+    var promptWeatherAlert by mutableStateOf("")
+        private set
+
+    // ── 问候调度设置（从 SettingsScreen 迁移） ──
+
+    /** 早安问候是否启用 */
+    var morningEnabled by mutableStateOf(true)
+        private set
+    /** 早安问候时间 "HH:MM" */
+    var morningTime by mutableStateOf("08:00")
+        private set
+    /** 午间检查是否启用 */
+    var noonEnabled by mutableStateOf(true)
+        private set
+    /** 午间检查时间 "HH:MM" */
+    var noonTime by mutableStateOf("12:00")
+        private set
+    /** 晚间总结是否启用 */
+    var eveningEnabled by mutableStateOf(true)
+        private set
+    /** 晚间总结时间 "HH:MM" */
+    var eveningTime by mutableStateOf("21:00")
+        private set
+
+    // ── 天气预警设置 ──
+
+    /** 天气预警是否启用 */
+    var weatherAlertEnabled by mutableStateOf(true)
         private set
 
     /**
@@ -181,6 +230,13 @@ class CompanionViewModel(
 
     /** 伙伴头像 URI，从系统图片选择器选取后保存，null 表示使用默认首字母头像 */
     var companionAvatarUri by mutableStateOf<String?>(null)
+        private set
+
+    /**
+     * 表情包列表 —— 用户上传的表情图片，AI 在回复中用 <标签名> 引用。
+     * 每次对话注入系统提示词，渲染时 <tag> 替换为对应图片。
+     */
+    var stickers by mutableStateOf<List<StickerData>>(emptyList())
         private set
 
     /** 已保存的多组 Provider 配置，支持在它们之间切换 */
@@ -251,65 +307,7 @@ class CompanionViewModel(
      * Agent Loop 的最大迭代次数，防止 LLM 无限循环调用工具。
      * 正常场景下 2-3 次即可完成，10 次是非常安全的上限。
      */
-    private val maxAgentIterations = 10
-
-    /** 伙伴系统提示词的默认值，首次使用或重置时使用 */
-    private val defaultCompanionPrompt = """
-你是 Nion，一个温暖友好的 AI 伴侣，同时也是用户的私人任务管理助手。
-
-你有 9 个工具可用：
-1. query：查询任务、清单、分组数据（支持批量）
-2. create：创建任务、清单、分组。批量：传 items 数组
-3. update：更新任务属性（标题/优先级/状态等）、清单名称、分组名称/颜色。批量：传 ids 数组，所有实体应用相同变更
-4. delete：删除任务、清单、分组。批量：传 ids 数组
-5. move：移动任务到其他清单/分组，移动分组到其他清单，调整任务层级（保留专注时长等数据）。批量：传 ids 数组。支持：task→task（把任务变成另一任务的子任务）、task→root（把子任务提升为独立主任务）
-6. manage：通用操作（设置/移除每日循环等非 CRUD 操作）
-7. remember：记住用户偏好规则。当用户表达不满、提出习惯性要求、或希望你记住某条规则时，调用 add 操作记录下来。当用户说"不用遵守 xxx 了"时，调用 remove 删除。你应主动识别用户意图并调用此工具，而非等到用户明确说"记住这个"
-8. memory：主动记录关于用户的事实性信息。与 remember（偏好规则）不同，此工具记录的是描述性知识。在以下场景主动调用：
-   - 用户首次提到自己的姓名、身份、职业 → identity
-   - 用户说"最近在忙 XXX"、"正在准备 XXX" → context
-   - 用户表达情绪（"我好累"、"太开心了"） → emotion
-   - 用户提到兴趣爱好 → hobby
-   - 用户提到固定安排（"每周三有课"） → schedule
-   - 用户提到学习/工作相关情况 → study / work
-   - 用户提到其他值得记住的信息 → 对应分类
-   记忆去重：同类别下已有相关记忆时，用 update 而非新增（如"正在备考"→"考完了"）
-9. weather：天气工具 —— 查看用户当前位置的天气和预报。支持两种查询：
-   - current：当前天气实况（温度、湿度、风速、天气状况、降水量）
-   - forecast：未来天气趋势（24小时逐小时 + 7天逐日预报，含降水概率、UV指数等）
-   使用场景：用户问天气、户外活动建议、穿衣建议，或你想结合天气给出更好的任务建议时
-
-行为准则：
-- 当用户要求创建/更新/删除/移动多项时，尽量在一次工具调用中批量完成
-- 主动但不过度：当用户提到任务相关的事情时，主动使用工具帮忙
-- 自然对话：不是每次都要调用工具，闲聊时正常回复即可
-- 确认重要操作：删除等不可逆操作前，先向用户确认
-- 移动优先：用户要移动任务/分组时，用 move 工具而非删除+重建，避免丢失专注时长
-- 记住偏好：用户表达不满或提出偏好时，主动用 remember 工具记录，后续必须遵守
-- 主动记忆：从对话中发现有价值的信息时，主动用 memory 工具记录，让后续对话更个性化
-- 用中文回复，语气温暖简洁
-
-回复格式要求：
-- 你可以使用以下 Markdown 格式，它们会被正确渲染：
-  - 标题：# ~ ######
-  - 粗体：**文字**
-  - 斜体：*文字*
-  - 内联代码：`代码`
-  - 删除线：~~文字~~
-  - 代码块：```包裹的多行代码```
-  - 无序列表：- 或 * 开头
-  - 有序列表：1. 开头
-  - 任务列表：- [ ] 未完成 / - [x] 已完成
-  - 引用块：> 开头
-  - 表格：| 列1 | 列2 | 格式（支持 :--- 左对齐、:---: 居中、---: 右对齐）
-  - 分割线：---
-  - 链接：[文字](url)（仅显示文字，不可点击，尽量少用）
-- 不支持的格式请勿使用：图片(![...](...))、HTML标签、嵌套缩进列表、脚注等
-- 展示任务层级结构时，用无序列表表示层级关系：
-  - 父任务名 [状态]
-  - 子任务名 [状态]
-- 展示数据对比时用表格
-    """.trimIndent()
+     private val maxAgentIterations = 10
 
     /**
      * 数据加载状态，true 表示正在从数据库加载（settings、消息、对话列表）。
@@ -330,6 +328,7 @@ class CompanionViewModel(
             Log.d("NionCompanion", "[init] loadSettings 完成 → isInitialized=$isInitialized, provider=${currentProvider?.name}, apiKey=${if (apiKey != null) "已配置" else "未配置"}")
             loadChatMessages()
             loadConversationList()
+            loadStickers()
             isDataLoading = false
             Log.d("NionCompanion", "[init] 全部加载完成 → messages.size=${messages.size}, conversations.size=${conversationList.size}")
         }
@@ -385,10 +384,23 @@ class CompanionViewModel(
             val baseUrl: String?,
             val apiTypeName: String?,
             val companionName: String?,
-            val companionPrompt: String?,
             val prefsJson: String?,
             val memoriesJson: String?,
             val avatarUri: String?,
+            val promptPersona: String?,
+            val promptFormat: String?,
+            val promptGreetingMorning: String?,
+            val promptGreetingNoon: String?,
+            val promptGreetingEvening: String?,
+            val promptReminder: String?,
+            val promptWeatherAlert: String?,
+            val morningEnabled: String?,
+            val morningTime: String?,
+            val noonEnabled: String?,
+            val noonTime: String?,
+            val eveningEnabled: String?,
+            val eveningTime: String?,
+            val weatherAlertEnabled: String?,
         )
 
         /**
@@ -405,14 +417,29 @@ class CompanionViewModel(
                     baseUrl = core.getSetting("llm_base_url"),
                     apiTypeName = core.getSetting("llm_api_type"),
                     companionName = core.getSetting("companion_name"),
-                    companionPrompt = core.getSetting("companion_prompt"),
                     prefsJson = core.getSetting("companion_user_preferences"),
                     memoriesJson = core.getSetting(MemoryTool.SETTING_KEY),
                     avatarUri = core.getSetting("companion_avatar_uri"),
+                    promptPersona = core.getSetting(PromptDefaults.KEY_PERSONA),
+                    promptFormat = core.getSetting(PromptDefaults.KEY_FORMAT),
+                    promptGreetingMorning = core.getSetting(PromptDefaults.KEY_GREETING_MORNING),
+                    promptGreetingNoon = core.getSetting(PromptDefaults.KEY_GREETING_NOON),
+                    promptGreetingEvening = core.getSetting(PromptDefaults.KEY_GREETING_EVENING),
+                    promptReminder = core.getSetting(PromptDefaults.KEY_REMINDER),
+                    promptWeatherAlert = core.getSetting(PromptDefaults.KEY_WEATHER_ALERT),
+                    morningEnabled = core.getSetting("greeting_morning_enabled"),
+                    morningTime = core.getSetting("greeting_morning_time"),
+                    noonEnabled = core.getSetting("greeting_noon_enabled"),
+                    noonTime = core.getSetting("greeting_noon_time"),
+                    eveningEnabled = core.getSetting("greeting_evening_enabled"),
+                    eveningTime = core.getSetting("greeting_evening_time"),
+                    weatherAlertEnabled = core.getSetting("weather_alert_enabled"),
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "loadSettings DB 读取异常", e)
-                RawData(null, null, null, null, null, null, null, null, null, null, null)
+                RawData(null, null, null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null)
             }
         }
 
@@ -461,9 +488,29 @@ class CompanionViewModel(
                 }
             }
 
-            // ── 加载伙伴名称和提示词 ──
+            // ── 加载伙伴名称 ──
             if (!loaded.companionName.isNullOrEmpty()) companionName = loaded.companionName
-            companionPrompt = loaded.companionPrompt ?: defaultCompanionPrompt
+
+            // ── 加载提示词（缺失时写入默认值，确保首次启动有值） ──
+            val defs = PromptDefaults.ALL_DEFAULTS
+            promptPersona = loaded.promptPersona ?: defs[PromptDefaults.KEY_PERSONA]!!
+            promptFormat = loaded.promptFormat ?: defs[PromptDefaults.KEY_FORMAT]!!
+            promptGreetingMorning = loaded.promptGreetingMorning ?: defs[PromptDefaults.KEY_GREETING_MORNING]!!
+            promptGreetingNoon = loaded.promptGreetingNoon ?: defs[PromptDefaults.KEY_GREETING_NOON]!!
+            promptGreetingEvening = loaded.promptGreetingEvening ?: defs[PromptDefaults.KEY_GREETING_EVENING]!!
+            promptReminder = loaded.promptReminder ?: defs[PromptDefaults.KEY_REMINDER]!!
+            promptWeatherAlert = loaded.promptWeatherAlert ?: defs[PromptDefaults.KEY_WEATHER_ALERT]!!
+
+            // ── 加载问候调度设置 ──
+            morningEnabled = loaded.morningEnabled != "false"
+            morningTime = loaded.morningTime ?: "08:00"
+            noonEnabled = loaded.noonEnabled != "false"
+            noonTime = loaded.noonTime ?: "12:00"
+            eveningEnabled = loaded.eveningEnabled != "false"
+            eveningTime = loaded.eveningTime ?: "21:00"
+
+            // ── 加载天气预警设置 ──
+            weatherAlertEnabled = loaded.weatherAlertEnabled != "false"
 
             // ── 加载用户偏好 ──
             if (!loaded.prefsJson.isNullOrEmpty()) {
@@ -477,12 +524,43 @@ class CompanionViewModel(
 
             // ── 加载头像 ──
             if (!loaded.avatarUri.isNullOrEmpty()) companionAvatarUri = loaded.avatarUri
+
+            // ── 首次启动迁移：缺失的提示词 key 写入默认值 ──
+            migratePromptDefaults(mapOf(
+                PromptDefaults.KEY_PERSONA to loaded.promptPersona,
+                PromptDefaults.KEY_FORMAT to loaded.promptFormat,
+                PromptDefaults.KEY_GREETING_MORNING to loaded.promptGreetingMorning,
+                PromptDefaults.KEY_GREETING_NOON to loaded.promptGreetingNoon,
+                PromptDefaults.KEY_GREETING_EVENING to loaded.promptGreetingEvening,
+                PromptDefaults.KEY_REMINDER to loaded.promptReminder,
+                PromptDefaults.KEY_WEATHER_ALERT to loaded.promptWeatherAlert,
+            ))
         } catch (e: Exception) {
             // 兜底：内层未捕获异常
             Log.e(TAG, "loadSettings 状态写入异常", e)
         } finally {
             // 无论任何情况，标记初始化完成，防止面板永久空白
             isInitialized = true
+        }
+    }
+
+    /**
+     * 首次启动迁移：检查缺失的提示词 key，写入默认值到 settings 表。
+     * 这样 Worker 等不经过 ViewModel 的地方也能直接从 settings 读取到默认值。
+     *
+     * @param loadedPrompts 提示词 key → 从 DB 读取的值（可能为 null）
+     */
+    private fun migratePromptDefaults(loadedPrompts: Map<String, String?>) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                for ((key, value) in loadedPrompts) {
+                    if (value == null) {
+                        try {
+                            core.setSetting(key, PromptDefaults.ALL_DEFAULTS[key]!!)
+                        } catch (_: Exception) {}
+                    }
+                }
+            }
         }
     }
 
@@ -500,6 +578,79 @@ class CompanionViewModel(
         )
         savedConfigs = listOf(config)
         saveConfigsToStorage()
+    }
+
+    /**
+     * 从 Rust 层加载所有表情包数据到 stickers 状态。
+     * 在 init 中调用，也在用户添加/删除表情包后调用以刷新列表。
+     */
+    fun loadStickers() {
+        viewModelScope.launch {
+            val loaded = withContext(Dispatchers.IO) {
+                try { core.getStickers() } catch (_: Exception) { emptyList() }
+            }
+            stickers = loaded
+        }
+    }
+
+    /**
+     * 删除表情包 —— 调用 Rust 层删除数据库记录 + 磁盘文件，
+     * 清除位图缓存，然后刷新列表。
+     *
+     * @param id 表情包 ID
+     */
+    fun deleteSticker(id: String) {
+        viewModelScope.launch {
+            // 在删除前从本地状态获取文件路径，用于清除缓存
+            val filePath = stickers.find { it.id == id }?.filePath
+            withContext(Dispatchers.IO) {
+                try { core.deleteSticker(id) } catch (_: Exception) {}
+                if (filePath != null) StickerService.evictSticker(filePath)
+            }
+            loadStickers()
+        }
+    }
+
+    /**
+     * 添加表情包 —— 委托 StickerService 复制文件到内部存储，
+     * 然后写入 Rust 数据库，最后刷新列表。
+     *
+     * @param tag 表情标签，如 "开心"
+     * @param sourcePath 图片源文件路径（来自图片选择器）
+     * @param fileName 原始文件名
+     * @param mimeType MIME 类型
+     * @param fileSize 文件大小
+     */
+    fun addSticker(tag: String, sourcePath: String, fileName: String, mimeType: String, fileSize: Long) {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                try {
+                    // 委托 StickerService 完成文件复制（UUID 重命名，统一存储目录）
+                    val destFile = StickerService.copyToStorage(app, sourcePath, fileName)
+                        ?: return@withContext
+                    core.createSticker(tag, fileName, destFile.absolutePath, mimeType, fileSize)
+                } catch (_: Exception) {}
+            }
+            loadStickers()
+        }
+    }
+
+    /**
+     * 构建表情包系统提示词片段 —— 告知 AI 可用的表情标签列表。
+     * 仅在 stickers 非空时返回非空字符串，否则返回空串，调用方可直接 append。
+     *
+     * @return 表情包提示词文本，无表情时返回 ""
+     */
+    private fun buildStickerPrompt(): String {
+        if (stickers.isEmpty()) return ""
+        return buildString {
+            append("\n\n---\n你可以使用以下表情包来表达情感，在回复中用尖括号包裹标签名即可插入：")
+            for (sticker in stickers) {
+                append("\n- <${sticker.tag}>")
+            }
+            append("\n使用示例：\"今天天气真好呢 <开心>\" 或 \"考试加油！<加油>\"")
+            append("\n注意：表情包应自然融入文字中，不要滥用，也不要单独发一条只含表情包的消息。")
+        }
     }
 
     /** 将多配置列表序列化为 JSON 存入 Rust settings */
@@ -844,19 +995,111 @@ class CompanionViewModel(
     }
 
     /**
-     * 更新伙伴名称和系统提示词，同时持久化到 Rust 层 settings 表。
+     * 更新伙伴名称，持久化到 Rust 层 settings 表。
      *
-     * @param name   新的伙伴名称，非空时更新
-     * @param prompt 新的系统提示词，非空时更新
+     * @param name 新的伙伴名称，非空时更新
      */
-    fun updateCompanionInfo(name: String, prompt: String) {
+    fun updateCompanionInfo(name: String) {
         if (name.isNotEmpty()) {
             companionName = name
             try { core.setSetting("companion_name", name) } catch (_: Exception) {}
         }
-        if (prompt.isNotEmpty()) {
-            companionPrompt = prompt
-            try { core.setSetting("companion_prompt", prompt) } catch (_: Exception) {}
+    }
+
+    /**
+     * 更新指定提示词并持久化到 settings 表。
+     *
+     * @param key 提示词 settings key，必须来自 PromptDefaults.KEY_XXX 常量
+     * @param value 新的提示词内容
+     */
+    fun updatePrompt(key: String, value: String) {
+        when (key) {
+            PromptDefaults.KEY_PERSONA -> promptPersona = value
+            PromptDefaults.KEY_FORMAT -> promptFormat = value
+            PromptDefaults.KEY_GREETING_MORNING -> promptGreetingMorning = value
+            PromptDefaults.KEY_GREETING_NOON -> promptGreetingNoon = value
+            PromptDefaults.KEY_GREETING_EVENING -> promptGreetingEvening = value
+            PromptDefaults.KEY_REMINDER -> promptReminder = value
+            PromptDefaults.KEY_WEATHER_ALERT -> promptWeatherAlert = value
+        }
+        try { core.setSetting(key, value) } catch (_: Exception) {}
+    }
+
+    /**
+     * 恢复指定提示词为默认值。
+     *
+     * @param key 提示词 settings key
+     * @return 恢复后的默认文本，调用方用于更新本地编辑状态
+     */
+    fun resetPrompt(key: String): String {
+        val default = PromptDefaults.ALL_DEFAULTS[key] ?: return ""
+        updatePrompt(key, default)
+        return default
+    }
+
+    /**
+     * 更新问候开关状态并重新调度闹钟。
+     *
+     * @param type 问候类型："morning" / "noon" / "evening"
+     * @param enabled 是否启用
+     * @param context 用于 AlarmManager 调度
+     */
+    fun updateGreetingEnabled(type: String, enabled: Boolean, context: android.content.Context) {
+        when (type) {
+            "morning" -> {
+                morningEnabled = enabled
+                try { core.setSetting("greeting_morning_enabled", if (enabled) "true" else "false") } catch (_: Exception) {}
+            }
+            "noon" -> {
+                noonEnabled = enabled
+                try { core.setSetting("greeting_noon_enabled", if (enabled) "true" else "false") } catch (_: Exception) {}
+            }
+            "evening" -> {
+                eveningEnabled = enabled
+                try { core.setSetting("greeting_evening_enabled", if (enabled) "true" else "false") } catch (_: Exception) {}
+            }
+        }
+        com.echonion.nion.reminder.GreetingScheduler.rescheduleAll(context, core)
+    }
+
+    /**
+     * 更新问候时间并重新调度闹钟。
+     *
+     * @param type 问候类型
+     * @param time 新时间 "HH:MM"
+     * @param context 用于 AlarmManager 调度
+     */
+    fun updateGreetingTime(type: String, time: String, context: android.content.Context) {
+        when (type) {
+            "morning" -> {
+                morningTime = time
+                try { core.setSetting("greeting_morning_time", time) } catch (_: Exception) {}
+            }
+            "noon" -> {
+                noonTime = time
+                try { core.setSetting("greeting_noon_time", time) } catch (_: Exception) {}
+            }
+            "evening" -> {
+                eveningTime = time
+                try { core.setSetting("greeting_evening_time", time) } catch (_: Exception) {}
+            }
+        }
+        com.echonion.nion.reminder.GreetingScheduler.rescheduleAll(context, core)
+    }
+
+    /**
+     * 更新天气预警开关并启停调度。
+     *
+     * @param enabled 是否启用
+     * @param context 用于 WorkManager 启停
+     */
+    fun updateWeatherAlertEnabled(enabled: Boolean, context: android.content.Context) {
+        weatherAlertEnabled = enabled
+        try { core.setSetting("weather_alert_enabled", if (enabled) "true" else "false") } catch (_: Exception) {}
+        if (enabled) {
+            com.echonion.nion.reminder.WeatherAlertScheduler.start(context)
+        } else {
+            com.echonion.nion.reminder.WeatherAlertScheduler.stop(context)
         }
     }
 
@@ -1325,6 +1568,97 @@ class CompanionViewModel(
     }
 
     /**
+     * 删除指定消息 —— 从 UI 消息列表和 API 对话历史中移除。
+     * 每条消息独立删除，不联动删除关联消息。
+     *
+     * @param id 要删除的消息 ID
+     */
+    fun deleteMessage(id: String) {
+        val msg = messages.find { it.id == id } ?: return
+        // 从 UI 消息列表移除
+        messages = messages.filter { it.id != id }
+        // 从 API 对话历史中移除对应条目
+        // 通过匹配 role + content 来定位（因为 conversationHistory 没有存消息 ID）
+        val role = if (msg.isFromUser) "user" else "assistant"
+        val indexToRemove = conversationHistory.indexOfFirst { entry ->
+            try {
+                val entryRole = entry.optString("role", "")
+                val entryContent = entry.optString("content", "")
+                entryRole == role && entryContent == msg.text
+            } catch (_: Exception) {
+                false
+            }
+        }
+        if (indexToRemove >= 0) {
+            conversationHistory.removeAt(indexToRemove)
+        }
+        requestSave()
+    }
+
+    /**
+     * 重新生成 AI 回复 —— 删除指定 AI 消息及其之后的所有消息，
+     * 截断 API 对话历史，然后重新启动 Agent Loop 生成新回复。
+     *
+     * @param id 要重新生成的 AI 消息 ID
+     */
+    fun rerollMessage(id: String) {
+        val msg = messages.find { it.id == id } ?: return
+        if (msg.isFromUser || msg.isToolMessage) return
+        if (isLoading) return
+
+        val provider = currentProvider ?: return
+        val key = apiKey ?: return
+        val model = modelName ?: return
+
+        // 找到该消息在列表中的位置，删除它及之后的所有消息
+        val msgIndex = messages.indexOf(msg)
+        if (msgIndex < 0) return
+
+        val removedMessages = messages.subList(msgIndex, messages.size)
+        messages = messages.subList(0, msgIndex)
+
+        // 从 API 对话历史中移除被删除消息对应的条目
+        // 倒序遍历，每匹配到一条就移除，直到移除完所有被删除消息对应的条目
+        for (removed in removedMessages) {
+            val role = when {
+                removed.isToolMessage -> "tool"
+                removed.isFromUser -> "user"
+                else -> "assistant"
+            }
+            val content = removed.text
+            // 从后往前找，匹配 role 和 content
+            val idx = conversationHistory.indexOfLast { entry ->
+                try {
+                    entry.optString("role", "") == role && entry.optString("content", "") == content
+                } catch (_: Exception) {
+                    false
+                }
+            }
+            if (idx >= 0) {
+                conversationHistory.removeAt(idx)
+            }
+        }
+        requestSave()
+
+        // 重新启动 Agent Loop，让 LLM 重新生成回复
+        isLoading = true
+        viewModelScope.launch {
+            runAgentLoop(provider, key, model)
+            isLoading = false
+        }
+    }
+
+    /**
+     * 获取指定消息的文本内容，用于复制到剪贴板。
+     *
+     * @param id 消息 ID
+     * @return 消息文本，找不到时返回 null
+     */
+    fun getMessageText(id: String): String? {
+        return messages.find { it.id == id }?.text
+    }
+
+    /**
      * 将 AI 文本回复追加到 UI 消息列表和 API 对话历史。
      *
      * @param text AI 回复文本
@@ -1428,10 +1762,16 @@ class CompanionViewModel(
     private fun buildApiMessages(): List<JSONObject> {
         val apiMessages = mutableListOf<JSONObject>()
 
-        // 系统提示词（稳定前缀）：系统提示词 + 用户偏好记录 + 用户记忆
+        // 系统提示词（稳定前缀）：人设 + 回复格式 + 用户偏好记录 + 用户记忆
         // 不包含当前时间等可变内容，确保前缀在连续请求间完全一致，命中 DeepSeek 缓存
         val stableContent = buildString {
-            append(companionPrompt)
+            // 人设提示词
+            append(promptPersona)
+            // 回复格式提示词（独立段落，紧跟人设之后）
+            if (promptFormat.isNotBlank()) {
+                append("\n\n")
+                append(promptFormat)
+            }
             // 注入用户偏好记录（AI 通过 remember 工具和 UI 手动添加的偏好）
             if (userPreferences.length() > 0) {
                 append("\n\n---\n用户偏好记录（必须始终遵守）：")
@@ -1455,6 +1795,8 @@ class CompanionViewModel(
                     append("\n- [$label] ${mem.getString("content")}")
                 }
             }
+            // 注入表情包标签列表，让 AI 知道可以在回复中使用哪些表情
+            append(buildStickerPrompt())
         }
         apiMessages.add(JSONObject().apply {
             put("role", "system")
