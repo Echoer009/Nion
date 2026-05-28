@@ -646,6 +646,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_group(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_create_sticker(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_task(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_delete_checklist(
@@ -653,6 +655,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_nion_core_checksum_method_nioncore_delete_conversation(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_delete_group(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_delete_sticker(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_delete_task(
     ): Short
@@ -677,6 +681,10 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_nion_core_checksum_method_nioncore_get_overdue_daily_tasks(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_setting(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_get_sticker_by_tag(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_get_stickers(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_subtasks(
     ): Short
@@ -756,6 +764,8 @@ external fun uniffi_nion_core_fn_method_nioncore_create_checklist(`ptr`: Long,`n
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_create_group(`ptr`: Long,`name`: RustBuffer.ByValue,`checklistId`: RustBuffer.ByValue,`color`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_create_sticker(`ptr`: Long,`tag`: RustBuffer.ByValue,`fileName`: RustBuffer.ByValue,`filePath`: RustBuffer.ByValue,`mimeType`: RustBuffer.ByValue,`fileSize`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_create_task(`ptr`: Long,`title`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,`recurrenceRule`: RustBuffer.ByValue,`recurrenceReminderTime`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_delete_checklist(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -763,6 +773,8 @@ external fun uniffi_nion_core_fn_method_nioncore_delete_checklist(`ptr`: Long,`i
 external fun uniffi_nion_core_fn_method_nioncore_delete_conversation(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_nion_core_fn_method_nioncore_delete_group(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Byte
+external fun uniffi_nion_core_fn_method_nioncore_delete_sticker(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_nion_core_fn_method_nioncore_delete_task(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
@@ -787,6 +799,10 @@ external fun uniffi_nion_core_fn_method_nioncore_get_groups_by_checklist(`ptr`: 
 external fun uniffi_nion_core_fn_method_nioncore_get_overdue_daily_tasks(`ptr`: Long,`beforeDate`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_get_setting(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_sticker_by_tag(`ptr`: Long,`tag`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_stickers(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_get_subtasks(`ptr`: Long,`parentId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -964,6 +980,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_create_group() != 45929.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_create_sticker() != 29120.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_create_task() != 43294.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -974,6 +993,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_delete_group() != 55541.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_delete_sticker() != 48449.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_delete_task() != 53518.toShort()) {
@@ -1010,6 +1032,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_setting() != 36220.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_sticker_by_tag() != 24940.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_stickers() != 41568.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_subtasks() != 40915.toShort()) {
@@ -1483,6 +1511,12 @@ public interface NionCoreInterface {
      */
     fun `createGroup`(`name`: kotlin.String, `checklistId`: kotlin.String, `color`: kotlin.String?): GroupData
     
+    /**
+     * 添加表情包。图片文件应已复制到内部存储，此方法仅写入数据库。
+     * tag 必须唯一，重复会返回 DatabaseError。
+     */
+    fun `createSticker`(`tag`: kotlin.String, `fileName`: kotlin.String, `filePath`: kotlin.String, `mimeType`: kotlin.String, `fileSize`: kotlin.Long): StickerData
+    
     fun `createTask`(`title`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `categoryId`: kotlin.String?, `parentId`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?): TaskData
     
     fun `deleteChecklist`(`id`: kotlin.String): kotlin.Boolean
@@ -1496,6 +1530,11 @@ public interface NionCoreInterface {
      * 删除分组：不删除组内任务，仅将组内任务的 group_id 置空
      */
     fun `deleteGroup`(`id`: kotlin.String): kotlin.Boolean
+    
+    /**
+     * 删除表情包，同时删除磁盘上的图片文件
+     */
+    fun `deleteSticker`(`id`: kotlin.String): kotlin.Boolean
     
     fun `deleteTask`(`id`: kotlin.String): kotlin.Boolean
     
@@ -1554,6 +1593,16 @@ public interface NionCoreInterface {
     fun `getOverdueDailyTasks`(`beforeDate`: kotlin.String): List<OverdueDailyTask>
     
     fun `getSetting`(`key`: kotlin.String): kotlin.String?
+    
+    /**
+     * 根据标签查找表情包
+     */
+    fun `getStickerByTag`(`tag`: kotlin.String): StickerData?
+    
+    /**
+     * 获取所有表情包，按创建时间升序排列
+     */
+    fun `getStickers`(): List<StickerData>
     
     fun `getSubtasks`(`parentId`: kotlin.String): List<TaskData>
     
@@ -1851,6 +1900,24 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
 
     
+    /**
+     * 添加表情包。图片文件应已复制到内部存储，此方法仅写入数据库。
+     * tag 必须唯一，重复会返回 DatabaseError。
+     */
+    @Throws(NionException::class)override fun `createSticker`(`tag`: kotlin.String, `fileName`: kotlin.String, `filePath`: kotlin.String, `mimeType`: kotlin.String, `fileSize`: kotlin.Long): StickerData {
+            return FfiConverterTypeStickerData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_create_sticker(
+        it,
+        FfiConverterString.lower(`tag`),FfiConverterString.lower(`fileName`),FfiConverterString.lower(`filePath`),FfiConverterString.lower(`mimeType`),FfiConverterLong.lower(`fileSize`),_status)
+}
+    }
+    )
+    }
+    
+
+    
     @Throws(NionException::class)override fun `createTask`(`title`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `categoryId`: kotlin.String?, `parentId`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?): TaskData {
             return FfiConverterTypeTaskData.lift(
     callWithHandle {
@@ -1904,6 +1971,23 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     callWithHandle {
     uniffiRustCallWithError(NionException) { _status ->
     UniffiLib.uniffi_nion_core_fn_method_nioncore_delete_group(
+        it,
+        FfiConverterString.lower(`id`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 删除表情包，同时删除磁盘上的图片文件
+     */
+    @Throws(NionException::class)override fun `deleteSticker`(`id`: kotlin.String): kotlin.Boolean {
+            return FfiConverterBoolean.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_delete_sticker(
         it,
         FfiConverterString.lower(`id`),_status)
 }
@@ -2108,6 +2192,40 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     UniffiLib.uniffi_nion_core_fn_method_nioncore_get_setting(
         it,
         FfiConverterString.lower(`key`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 根据标签查找表情包
+     */
+    @Throws(NionException::class)override fun `getStickerByTag`(`tag`: kotlin.String): StickerData? {
+            return FfiConverterOptionalTypeStickerData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_get_sticker_by_tag(
+        it,
+        FfiConverterString.lower(`tag`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 获取所有表情包，按创建时间升序排列
+     */
+    @Throws(NionException::class)override fun `getStickers`(): List<StickerData> {
+            return FfiConverterSequenceTypeStickerData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_get_stickers(
+        it,
+        _status)
 }
     }
     )
@@ -3076,6 +3194,90 @@ public object FfiConverterTypeOverdueDailyTask: FfiConverterRustBuffer<OverdueDa
 
 
 
+/**
+ * 表情包 —— 用户上传的表情图片，AI 可在回复中用 <标签名> 引用
+ */
+data class StickerData (
+    var `id`: kotlin.String
+    , 
+    /**
+     * 表情标签，如 "开心"。AI 使用时拼接为 <开心>
+     */
+    var `tag`: kotlin.String
+    , 
+    /**
+     * 原始文件名（用于显示）
+     */
+    var `fileName`: kotlin.String
+    , 
+    /**
+     * 应用内部存储中的文件路径（绝对路径）
+     */
+    var `filePath`: kotlin.String
+    , 
+    /**
+     * MIME 类型，如 "image/jpeg"、"image/png" 等
+     */
+    var `mimeType`: kotlin.String
+    , 
+    /**
+     * 文件大小（字节）
+     */
+    var `fileSize`: kotlin.Long
+    , 
+    /**
+     * 创建时间，RFC 3339 格式
+     */
+    var `createdAt`: kotlin.String
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeStickerData: FfiConverterRustBuffer<StickerData> {
+    override fun read(buf: ByteBuffer): StickerData {
+        return StickerData(
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterString.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: StickerData) = (
+            FfiConverterString.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`tag`) +
+            FfiConverterString.allocationSize(value.`fileName`) +
+            FfiConverterString.allocationSize(value.`filePath`) +
+            FfiConverterString.allocationSize(value.`mimeType`) +
+            FfiConverterLong.allocationSize(value.`fileSize`) +
+            FfiConverterString.allocationSize(value.`createdAt`)
+    )
+
+    override fun write(value: StickerData, buf: ByteBuffer) {
+            FfiConverterString.write(value.`id`, buf)
+            FfiConverterString.write(value.`tag`, buf)
+            FfiConverterString.write(value.`fileName`, buf)
+            FfiConverterString.write(value.`filePath`, buf)
+            FfiConverterString.write(value.`mimeType`, buf)
+            FfiConverterLong.write(value.`fileSize`, buf)
+            FfiConverterString.write(value.`createdAt`, buf)
+    }
+}
+
+
+
 data class TaskData (
     var `id`: kotlin.String
     , 
@@ -3371,6 +3573,38 @@ public object FfiConverterOptionalString: FfiConverterRustBuffer<kotlin.String?>
 /**
  * @suppress
  */
+public object FfiConverterOptionalTypeStickerData: FfiConverterRustBuffer<StickerData?> {
+    override fun read(buf: ByteBuffer): StickerData? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeStickerData.read(buf)
+    }
+
+    override fun allocationSize(value: StickerData?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeStickerData.allocationSize(value)
+        }
+    }
+
+    override fun write(value: StickerData?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeStickerData.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
 public object FfiConverterSequenceString: FfiConverterRustBuffer<List<kotlin.String>> {
     override fun read(buf: ByteBuffer): List<kotlin.String> {
         val len = buf.getInt()
@@ -3641,6 +3875,34 @@ public object FfiConverterSequenceTypeOverdueDailyTask: FfiConverterRustBuffer<L
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeOverdueDailyTask.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeStickerData: FfiConverterRustBuffer<List<StickerData>> {
+    override fun read(buf: ByteBuffer): List<StickerData> {
+        val len = buf.getInt()
+        return List<StickerData>(len) {
+            FfiConverterTypeStickerData.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<StickerData>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeStickerData.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<StickerData>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeStickerData.write(it, buf)
         }
     }
 }
