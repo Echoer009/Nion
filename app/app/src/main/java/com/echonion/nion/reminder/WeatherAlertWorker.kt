@@ -5,6 +5,7 @@ import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.echonion.nion.NionApp
+import com.echonion.nion.ui.companion.PromptDefaults
 import com.echonion.nion.ui.companion.weather.WeatherAlertChecker
 import com.echonion.nion.ui.companion.weather.WeatherService
 
@@ -103,14 +104,12 @@ class WeatherAlertWorker(
                 else -> "提示"
             }
 
-            val systemPrompt = """你是 Nion，用户的 AI 伙伴。你需要根据天气预警信息，给用户发一条简短温馨的提醒。
-规则：
-- 不要用 Markdown 格式
-- 不要加表情符号前缀
-- 语气温暖关心，像朋友一样
-- 根据严重程度调整语气：${severityDesc}级别
-- 2-3句话即可
-- 给出实用建议（如带伞、加衣服、避免户外活动等）"""
+            // 从 settings 读取用户自定义的天气预警提示词模板
+            val companionName = core.getSetting("companion_name") ?: "Nion"
+            val template = core.getSetting(PromptDefaults.KEY_WEATHER_ALERT) ?: PromptDefaults.WEATHER_ALERT
+            val systemPrompt = template
+                .replace("{name}", companionName)
+                .replace("{severity}", severityDesc)
 
             val reasonsText = alert.reasons.joinToString("\n") { "- $it" }
             val userMsg = """当前天气：${com.echonion.nion.ui.companion.weather.weatherDescription(current.weatherCode)}，${current.temperature}°C

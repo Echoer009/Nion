@@ -13,7 +13,7 @@ import com.echonion.nion.NionApp
  * 必须在开机后重新调度：
  * 1. 所有任务的提醒闹钟（ReminderScheduler.rescheduleAll）
  * 2. 情景问候闹钟（GreetingScheduler.rescheduleAll）
- * 3. 批量提醒闹钟（BatchReminderWorker.scheduleBatchReminders）
+ * 3. 天气预警检查
  */
 class BootReceiver : BroadcastReceiver() {
 
@@ -45,14 +45,6 @@ class BootReceiver : BroadcastReceiver() {
             Log.d(TAG, "问候闹钟重调度完成")
         } catch (e: Exception) {
             Log.e(TAG, "问候闹钟重调度失败", e)
-        }
-
-        try {
-            // 扫描并调度批量提醒
-            BatchReminderWorker.scheduleBatchReminders(context, app.core)
-            Log.d(TAG, "批量提醒重调度完成")
-        } catch (e: Exception) {
-            Log.e(TAG, "批量提醒重调度失败", e)
         }
 
         try {

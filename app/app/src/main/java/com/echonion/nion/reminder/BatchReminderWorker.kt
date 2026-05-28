@@ -199,7 +199,8 @@ class BatchReminderWorker(
         // 尝试 LLM（通过共享客户端统一管理配置读取和调用）
         val client = ReminderLlmClient.fromCore(core)
         if (client != null) {
-            val systemPrompt = "你是 Nion，用户的 AI 伙伴。用户在 $periodStart-$periodEnd 有多个任务密集到期。请发一条简短提醒（2-3句话），帮助用户规划。不要用 Markdown。"
+            val companionName = core.getSetting("companion_name") ?: "Nion"
+            val systemPrompt = "你是 $companionName，用户的 AI 伙伴。用户在 $periodStart-$periodEnd 有多个任务密集到期。请发一条简短提醒（2-3句话），帮助用户规划。不要用 Markdown。"
             val taskList = taskInfos.joinToString("\n") { (title, priority, time) ->
                 val p = when (priority) { "high" -> "高优"; "medium" -> "中优"; else -> "低优" }
                 if (time.isNotEmpty()) "- $title ($p, $time)" else "- $title ($p)"

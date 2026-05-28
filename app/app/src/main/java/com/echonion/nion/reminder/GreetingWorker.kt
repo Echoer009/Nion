@@ -8,6 +8,7 @@ import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import com.echonion.nion.NionApp
+import com.echonion.nion.ui.companion.PromptDefaults
 import uniffi.nion_core.NionCore
 import com.echonion.nion.ui.companion.weather.WeatherService
 import java.time.LocalDate
@@ -124,21 +125,22 @@ class GreetingWorker(
         // 尝试 LLM（通过共享客户端统一管理配置读取和调用）
         val client = ReminderLlmClient.fromCore(core)
         if (client != null) {
-            val timeContext = when (type) {
-                "morning" -> "现在是早上，新的一天开始了"
-                "noon" -> "现在是中午，午饭时间"
-                "evening" -> "现在是晚上，一天快结束了"
-                else -> ""
+            // 从 settings 读取对应类型的提示词模板
+            val promptKey = when (type) {
+                "morning" -> PromptDefaults.KEY_GREETING_MORNING
+                "noon" -> PromptDefaults.KEY_GREETING_NOON
+                "evening" -> PromptDefaults.KEY_GREETING_EVENING
+                else -> PromptDefaults.KEY_GREETING_MORNING
             }
-
-            val systemPrompt = """你是 Nion，用户的 AI 伙伴。$timeContext。
-请给用户发一条简短的问候（2-3句话）。
-规则：
-- 不要用 Markdown 格式
-- 不要加表情符号前缀
-- 语气轻松友好
-- 包含今日任务摘要和一个小建议
-- ${if (weatherSummary != null) "结合天气信息给出实用建议（如带伞、穿衣、防晒等）" else "无需提及天气"}"""
+            val defaultPrompt = when (type) {
+                "morning" -> PromptDefaults.GREETING_MORNING
+                "noon" -> PromptDefaults.GREETING_NOON
+                "evening" -> PromptDefaults.GREETING_EVENING
+                else -> PromptDefaults.GREETING_MORNING
+            }
+            val companionName = core.getSetting("companion_name") ?: "Nion"
+            val promptTemplate = core.getSetting(promptKey) ?: defaultPrompt
+            val systemPrompt = promptTemplate.replace("{name}", companionName)
 
             val taskList = if (taskTitles.isNotEmpty()) {
                 taskTitles.joinToString("\n") { "- $it" }

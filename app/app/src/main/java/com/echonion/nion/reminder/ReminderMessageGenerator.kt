@@ -1,6 +1,7 @@
 package com.echonion.nion.reminder
 
 import android.util.Log
+import com.echonion.nion.ui.companion.PromptDefaults
 import uniffi.nion_core.NionCore
 
 /**
@@ -78,7 +79,7 @@ object ReminderMessageGenerator {
         // 尝试通过共享 LLM 客户端生成
         val client = ReminderLlmClient.fromCore(core)
         if (client != null) {
-            val systemPrompt = buildSystemPrompt(triggerCount)
+            val systemPrompt = buildSystemPrompt(core, triggerCount)
             val userMessage = buildUserMessage(taskTitle, taskPriority, triggerCount)
             val result = client.chat(systemPrompt, userMessage)
             if (result != null) return result
@@ -102,22 +103,17 @@ object ReminderMessageGenerator {
 
     /**
      * 构建 LLM system prompt。
-     * 根据紧迫度级别指定 Nion 的语气和行为。
+     * 从 settings 表读取用户自定义的提示词模板，替换模板变量。
      */
-    private fun buildSystemPrompt(triggerCount: Int): String {
+    private fun buildSystemPrompt(core: NionCore, triggerCount: Int): String {
         val level = triggerCount.coerceIn(1, 5)
         val tone = TONE_DESCRIPTIONS[level]
-        val companionName = "Nion"
-
-        return """你是 $companionName，用户的 AI 伙伴。现在需要你给用户发一条任务提醒消息。
-当前紧迫度级别：$level/5（1=温和，5=最后通牒）
-语气要求：$tone
-规则：
-- 只说 1-2 句话，简短有力
-- 不要用任何 Markdown 格式（**粗体**、#标题、代码块等）
-- 不要加表情符号前缀
-- 直接说内容，不要说"提醒你"之类的废话
-- 如果是最后一级（5），温柔告别即可，不要催促"""
+        val companionName = core.getSetting("companion_name") ?: "Nion"
+        val template = core.getSetting(PromptDefaults.KEY_REMINDER) ?: PromptDefaults.REMINDER
+        return template
+            .replace("{name}", companionName)
+            .replace("{level}", level.toString())
+            .replace("{tone}", tone)
     }
 
     /**
