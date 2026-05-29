@@ -24,7 +24,7 @@ import org.json.JSONObject
  * 2. 查询今日任务数据（待办数、完成数、优先级分布）
  * 3. 构建上下文 → 通过 ReminderLlmClient 生成问候语（无 API key 用模板）
  * 4. 将问候消息写入当前伙伴对话（用户打开面板即可看到）
- * 5. 通过 NotificationHelper 发送系统通知
+ * 5. 通过 OverlayDispatcher 选择通知展示方式（前台悬浮卡 / 后台悬浮窗 / 系统通知兜底）
  * 6. 调度明天的同类型问候
  */
 class GreetingWorker(
@@ -110,8 +110,28 @@ class GreetingWorker(
             // 3. 写入伙伴对话
             writeGreetingToConversation(core, greetingText)
 
-            // 4. 通过 NotificationHelper 发送通知（复用共享方法）
+            // 4. 通过 OverlayDispatcher 三模分发：前台悬浮卡 / 后台悬浮窗 / 系统通知兜底
+            // 同时发送系统通知作为兜底（前台/悬浮窗接管后会主动取消）
             NotificationHelper.showGreetingNotification(applicationContext, type, greetingText)
+
+            OverlayDispatcher.dispatch(
+                context = applicationContext,
+                onForeground = {
+                    // 前台：发 SharedFlow 事件 → GreetingOverlay 弹 App 内悬浮卡片
+                    app.postGreetingEvent(GreetingEvent(type, greetingText))
+                    // 前台 Overlay 已接管，取消系统通知避免双重提醒
+                    NotificationHelper.dismissGreetingNotification(applicationContext, type)
+                },
+                onBackgroundOverlay = {
+                    // 后台 + 有悬浮窗权限 → 启动 GreetingFloatingService
+                    GreetingFloatingService.start(applicationContext, type, greetingText)
+                    // 悬浮窗已接管，取消系统通知避免双重提醒
+                    NotificationHelper.dismissGreetingNotification(applicationContext, type)
+                },
+                onFallback = {
+                    // 兜底：保留系统通知（上面已发送）
+                },
+            )
 
             // 5. 调度明天的同类型问候
             val timeStr = getGreetingTime(core, type)
@@ -169,7 +189,9 @@ class GreetingWorker(
             // 然后拼接场景规则（问候模板），确保所有后台 LLM 调用都带有人设
             val persona = (core.getSetting(PromptDefaults.KEY_PERSONA) ?: PromptDefaults.PERSONA)
                 .replace("{name}", companionName)
-            val systemPrompt = persona + "\n\n" + promptTemplate
+            // 注入完整表情包列表，让 LLM 使用正确的标签名
+            val stickerPrompt = ReminderUtils.buildStickerListPrompt(core)
+            val systemPrompt = persona + "\n\n" + promptTemplate + stickerPrompt
 
             val taskList = if (taskTitles.isNotEmpty()) {
                 taskTitles.joinToString("\n") { "- $it" }

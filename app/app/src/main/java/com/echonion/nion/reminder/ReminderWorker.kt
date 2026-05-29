@@ -1,8 +1,6 @@
 package com.echonion.nion.reminder
 
 import android.content.Context
-import android.os.Build
-import android.provider.Settings
 import android.util.Log
 import androidx.work.CoroutineWorker
 import androidx.work.Data
@@ -105,41 +103,31 @@ class ReminderWorker(
                 applicationContext, taskId, taskTitle, message, triggerCount,
             )
 
-            // 5. 根据 App 前后台状态选择通知方式
-            if (app.isInForeground) {
-                // 前台：发 SharedFlow 事件 → Compose ReminderOverlay 显示 App 内悬浮卡片
-                // 同时 dismiss 系统通知，避免双重提醒
-                try {
+            // 5. 通过 OverlayDispatcher 三模分发：前台 SharedFlow / 后台悬浮窗 / 兜底通知
+            // 通知栏通知已在第 4 步发送，前台/悬浮窗接管后会主动取消
+            OverlayDispatcher.dispatch(
+                context = applicationContext,
+                onForeground = {
+                    // 前台：发 SharedFlow 事件 → Compose ReminderOverlay 显示 App 内悬浮卡片
                     app.postReminderEvent(ReminderEvent(taskId, taskTitle, type, message, triggerCount))
+                    // 前台 Overlay 已接管，取消系统通知避免双重提醒
+                    NotificationHelper.dismissNotification(applicationContext, taskId)
                     Log.d(TAG, "已发送提醒事件到 UI（前台模式）")
-                } catch (e: Exception) {
-                    Log.w(TAG, "发送提醒事件失败", e)
-                }
-            } else {
-                // 后台：检查是否有悬浮窗权限
-                // 有权限 → 启动 ReminderFloatingService 显示系统级悬浮窗
-                // 无权限 → 保留系统通知栏通知（fallback）
-                val hasOverlayPermission = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    Settings.canDrawOverlays(applicationContext)
-                } else {
-                    true
-                }
-
-                if (hasOverlayPermission) {
-                    try {
-                        ReminderFloatingService.start(
-                            applicationContext, taskId, taskTitle, message, triggerCount,
-                        )
-                        // 悬浮窗已接管，取消系统通知避免双重提醒
-                        NotificationHelper.dismissNotification(applicationContext, taskId)
-                        Log.d(TAG, "已启动悬浮窗 Service（后台模式）")
-                    } catch (e: Exception) {
-                        Log.w(TAG, "启动悬浮窗失败，保留系统通知", e)
-                    }
-                } else {
+                },
+                onBackgroundOverlay = {
+                    // 后台 + 有悬浮窗权限 → 启动 ReminderFloatingService
+                    ReminderFloatingService.start(
+                        applicationContext, taskId, taskTitle, message, triggerCount,
+                    )
+                    // 悬浮窗已接管，取消系统通知避免双重提醒
+                    NotificationHelper.dismissNotification(applicationContext, taskId)
+                    Log.d(TAG, "已启动悬浮窗 Service（后台模式）")
+                },
+                onFallback = {
+                    // 兜底：保留系统通知（上面已发送）
                     Log.d(TAG, "App 在后台且无悬浮窗权限，保留系统通知")
-                }
-            }
+                },
+            )
 
             // 6. 如果未达最大次数，调度下一次循环
             if (triggerCount < ReminderStore.MAX_TRIGGER_COUNT) {

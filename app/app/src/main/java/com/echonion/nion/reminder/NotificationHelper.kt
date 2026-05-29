@@ -357,4 +357,16 @@ object NotificationHelper {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.cancel(notificationId)
     }
+
+    /**
+     * 取消指定类型的问候通知。
+     * 当悬浮窗或 App 内 Overlay 接管后调用，避免通知栏残留。
+     *
+     * @param type 问候类型："morning" / "noon" / "evening"
+     */
+    fun dismissGreetingNotification(context: Context, type: String) {
+        val notificationId = ("greeting_$type").hashCode() and 0x7FFFFFFF
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(notificationId)
+    }
 }

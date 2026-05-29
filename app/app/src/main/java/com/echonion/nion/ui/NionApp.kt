@@ -38,6 +38,7 @@ import com.echonion.nion.core
 import com.echonion.nion.ui.components.DualPanelLayout
 import com.echonion.nion.ui.components.DualPanelState
 import com.echonion.nion.ui.companion.CompanionSidebar
+import com.echonion.nion.ui.companion.GreetingOverlay
 import com.echonion.nion.ui.focus.FocusScreen
 import com.echonion.nion.ui.focus.FocusStatsPanel
 import com.echonion.nion.ui.schedule.ScheduleScreen
@@ -51,6 +52,7 @@ import kotlinx.coroutines.launch
 import com.echonion.nion.ui.theme.NionColorTheme
 import com.echonion.nion.ui.theme.NionTheme
 import androidx.compose.ui.graphics.Color
+import androidx.activity.compose.BackHandler
 
 data class BottomNavItem(
     val route: String,
@@ -131,6 +133,11 @@ fun NionApp() {
         Box {
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentDestination = navBackStackEntry?.destination
+
+            // 侧边栏返回拦截：任一侧边栏打开时，系统返回手势关闭侧边栏而非退出页面
+            BackHandler(enabled = dualState.isOpen) {
+                coroutineScope.launch { dualState.closePanel() }
+            }
 
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
@@ -341,6 +348,9 @@ fun NionApp() {
                     }
                 },
             )
+
+            // 全局问候悬浮卡片，放在 Scaffold 之后（Z 轴上层），确保浮在所有界面之上
+            GreetingOverlay(app = app)
         }
     }
 }

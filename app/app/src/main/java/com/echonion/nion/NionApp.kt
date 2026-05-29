@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.util.Log
 import com.echonion.nion.reminder.GreetingScheduler
 import com.echonion.nion.reminder.NotificationHelper
+import com.echonion.nion.reminder.GreetingEvent
 import com.echonion.nion.reminder.ReminderEvent
 import com.echonion.nion.reminder.ReminderScheduler
 import com.echonion.nion.reminder.WeatherAlertScheduler
@@ -36,9 +37,9 @@ class NionApp : Application() {
     /**
      * App 前后台状态标志。
      * 通过 ActivityLifecycleCallbacks 在 onActivityResumed/onActivityPaused 中维护。
-     * 用于 ReminderWorker 判断是否需要发送 SharedFlow 事件给 UI 层：
-     * - 前台时发事件 → ReminderOverlay 弹 app 内弹窗 + dismiss 系统通知
-     * - 后台时不发事件 → 只保留系统通知，不被 Overlay 撤掉
+     * 用于 ReminderWorker / GreetingWorker 判断是否需要发送 SharedFlow 事件给 UI 层：
+     * - 前台时发事件 → ReminderOverlay / GreetingOverlay 弹 app 内弹窗 + dismiss 系统通知
+     * - 后台时不发事件 → 走悬浮窗 Service 或系统通知
      */
     var isInForeground: Boolean = false
         private set
@@ -68,6 +69,22 @@ class NionApp : Application() {
      */
     fun postReminderEvent(event: ReminderEvent) {
         _reminderEvents.tryEmit(event)
+    }
+
+    /**
+     * 问候事件总线 —— GreetingWorker 触发时通过此总线通知 UI 层。
+     *
+     * GreetingOverlay 监听此事件流，收到事件后弹出问候悬浮卡片。
+     */
+    private val _greetingEvents = MutableSharedFlow<GreetingEvent>(extraBufferCapacity = 4)
+    val greetingEvents: SharedFlow<GreetingEvent> = _greetingEvents.asSharedFlow()
+
+    /**
+     * 发送问候事件到 UI 层。
+     * 由 GreetingWorker 在前台模式下调用。
+     */
+    fun postGreetingEvent(event: GreetingEvent) {
+        _greetingEvents.tryEmit(event)
     }
 
     /**
