@@ -111,7 +111,9 @@ class WeatherAlertWorker(
                 .replace("{name}", companionName)
             val template = core.getSetting(PromptDefaults.KEY_WEATHER_ALERT) ?: PromptDefaults.WEATHER_ALERT
             val rulePrompt = template.replace("{severity}", severityDesc)
-            val systemPrompt = persona + "\n\n" + rulePrompt
+            // 注入完整表情包列表，让 LLM 使用正确的标签名
+            val stickerPrompt = ReminderUtils.buildStickerListPrompt(core)
+            val systemPrompt = persona + "\n\n" + rulePrompt + stickerPrompt
 
             val reasonsText = alert.reasons.joinToString("\n") { "- $it" }
             val userMsg = """当前天气：${com.echonion.nion.ui.companion.weather.weatherDescription(current.weatherCode)}，${current.temperature}°C

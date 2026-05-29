@@ -1,6 +1,7 @@
 package com.echonion.nion.reminder
 
 import android.util.Log
+import uniffi.nion_core.NionCore
 import java.time.LocalDateTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -68,5 +69,29 @@ object ReminderUtils {
             .replace(Regex("```[\\s\\S]*?```"), "")
             .replace("`", "")
             .trim()
+    }
+
+    /**
+     * 构建表情包可用列表的 prompt 片段 —— 从 DB 读取所有表情包，格式化为 LLM 可理解的列表。
+     *
+     * 将所有表情包标签以尖括号形式列出（如 <微笑>、<开心>、<专注>），
+     * 让 LLM 知道哪些标签是可用的，避免生成不存在的标签导致渲染失败。
+     *
+     * 用于所有后台 LLM 调用的 system prompt 注入（提醒、问候、天气预警）。
+     *
+     * @param core NionCore 单例，用于查询 stickers 表
+     * @return 格式化后的表情列表 prompt 片段，无表情时返回空串
+     */
+    fun buildStickerListPrompt(core: NionCore): String {
+        return try {
+            val stickers = core.getStickers()
+            if (stickers.isEmpty()) ""
+            else {
+                val tagList = stickers.joinToString("、") { "<${it.tag}>" }
+                "\n可用表情包（用尖括号包裹标签名即可插入图片）：$tagList"
+            }
+        } catch (_: Exception) {
+            ""
+        }
     }
 }

@@ -205,7 +205,9 @@ class BatchReminderWorker(
             val persona = (core.getSetting(PromptDefaults.KEY_PERSONA) ?: PromptDefaults.PERSONA)
                 .replace("{name}", companionName)
             val rulePrompt = "用户在 $periodStart-$periodEnd 有多个任务密集到期。请发一条简短提醒（2-3句话），帮助用户规划。不要用 Markdown。"
-            val systemPrompt = persona + "\n\n" + rulePrompt
+            // 注入完整表情包列表，让 LLM 使用正确的标签名
+            val stickerPrompt = ReminderUtils.buildStickerListPrompt(core)
+            val systemPrompt = persona + "\n\n" + rulePrompt + stickerPrompt
             val taskList = taskInfos.joinToString("\n") { (title, priority, time) ->
                 val p = when (priority) { "high" -> "高优"; "medium" -> "中优"; else -> "低优" }
                 if (time.isNotEmpty()) "- $title ($p, $time)" else "- $title ($p)"

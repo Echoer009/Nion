@@ -62,6 +62,7 @@ import com.echonion.nion.reminder.ReminderEvent
 import com.echonion.nion.reminder.ReminderMessageGenerator
 import com.echonion.nion.reminder.ReminderScheduler
 import com.echonion.nion.reminder.ReminderStore
+import com.echonion.nion.ui.companion.MarkdownText
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -308,13 +309,15 @@ fun ReminderOverlay(
                             }
                         }
 
-                        // ── Nion 的个性化提醒文案 ──
-                        Text(
-                            displayMessage,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = onCardColor.copy(alpha = 0.85f),
-                            maxLines = 3,
-                            overflow = TextOverflow.Ellipsis,
+                        // ── Nion 的个性化提醒文案（支持表情包渲染）──
+                        // 通过 NionCore 直接查询 stickers 数据，绕过 ViewModel（悬浮层无 ViewModel）
+                        val stickers = remember { app.core.getStickers() }
+                        MarkdownText(
+                            content = displayMessage,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = onCardColor.copy(alpha = 0.85f),
+                            ),
+                            stickers = stickers,
                         )
 
                         // ── 稍后提醒选项：药丸 Chip 样式，始终可见 ──

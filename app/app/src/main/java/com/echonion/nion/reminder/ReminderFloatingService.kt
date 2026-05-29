@@ -69,8 +69,10 @@ import com.echonion.nion.MainActivity
 import com.echonion.nion.NionApp
 import com.echonion.nion.R
 import com.echonion.nion.core
+import com.echonion.nion.ui.companion.MarkdownText
 import com.echonion.nion.ui.theme.NionColorTheme
 import com.echonion.nion.ui.theme.NionTheme
+import uniffi.nion_core.StickerData
 
 /**
  * 系统级悬浮窗 Service —— 在 App 退到后台时，通过 WindowManager 显示悬浮提醒卡片。
@@ -268,12 +270,15 @@ class ReminderFloatingService : Service() {
                 } catch (_: Exception) {
                     NionColorTheme.CORAL
                 }
+                // 直接通过 NionCore 查询表情包数据，Service 中无 ViewModel
+                val stickers = remember { app.core.getStickers() }
 
                 NionTheme(colorTheme = colorTheme) {
                     FloatingReminderCard(
                         taskTitle = taskTitle,
                         message = message,
                         triggerCount = triggerCount,
+                        stickers = stickers,
                         onFocus = { handleFocus() },
                         onSnooze = { minutes -> handleSnooze(minutes) },
                         onAcknowledge = { handleAcknowledge() },
@@ -443,6 +448,7 @@ class ReminderFloatingService : Service() {
  * @param taskTitle 任务标题
  * @param message 提醒文案
  * @param triggerCount 触发次数（1-5）
+ * @param stickers 可用的表情包列表，用于将 <标签名> 渲染为行内图片
  * @param onFocus 点击右上角专注图标回调，跳转专注页但不自动开始
  * @param onSnooze 点击稍后提醒回调，参数为延迟分钟数
  * @param onAcknowledge 点击「知道了」主按钮回调，终止循环并关闭
@@ -453,6 +459,7 @@ private fun FloatingReminderCard(
     taskTitle: String,
     message: String,
     triggerCount: Int,
+    stickers: List<StickerData>,
     onFocus: () -> Unit,
     onSnooze: (Int) -> Unit,
     onAcknowledge: () -> Unit,
@@ -584,13 +591,14 @@ private fun FloatingReminderCard(
                 }
             }
 
-            // ── 提醒文案 ──
-            Text(
-                message,
-                style = MaterialTheme.typography.bodyMedium,
-                color = onCardColor.copy(alpha = 0.85f),
-                maxLines = 3,
-                overflow = TextOverflow.Ellipsis,
+            // ── 提醒文案（支持表情包渲染）──
+            // 使用 MarkdownText 替代纯 Text，让 LLM 返回的 <微笑> 等标签渲染为表情图片
+            MarkdownText(
+                content = message,
+                style = MaterialTheme.typography.bodyMedium.copy(
+                    color = onCardColor.copy(alpha = 0.85f),
+                ),
+                stickers = stickers,
             )
 
             // ── 稍后提醒选项 ──
