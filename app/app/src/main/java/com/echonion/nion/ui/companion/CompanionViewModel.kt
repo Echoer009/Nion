@@ -656,13 +656,18 @@ class CompanionViewModel(
      * 构建表情包系统提示词片段 —— 告知 AI 可用的表情标签列表。
      * 仅在 stickers 非空时返回非空字符串，否则返回空串，调用方可直接 append。
      *
+     * 按 id 排序后输出，确保每次调用的提示词文本完全一致，
+     * 避免因列表顺序变化导致系统前缀不同，命中不了 API 缓存。
+     *
      * @return 表情包提示词文本，无表情时返回 ""
      */
     private fun buildStickerPrompt(): String {
         if (stickers.isEmpty()) return ""
+        // 按 id 排序，保证前缀稳定性（API Prefix Caching 要求系统提示词跨请求完全一致）
+        val sorted = stickers.sortedBy { it.id }
         return buildString {
             append("\n\n---\n你可以使用以下表情包来表达情感，在回复中用尖括号包裹标签名即可插入：")
-            for (sticker in stickers) {
+            for (sticker in sorted) {
                 append("\n- <${sticker.tag}>")
             }
             append("\n使用示例：\"今天天气真好呢 <开心>\" 或 \"考试加油！<加油>\"")
@@ -1530,12 +1535,17 @@ class CompanionViewModel(
                 appendAssistantToolCallsMessage(response.toolCalls, response.reasoningContent)
 
                 // 逐个执行工具，结果回传对话历史
+                // 每次工具执行之间插入 delay，让 Compose 有机会重组渲染，
+                // 避免所有工具状态消息在同一帧内批量更新、一次性全部弹出
                 for (call in response.toolCalls) {
                     Log.d(TAG, "Executing tool: ${call.name} args=${call.arguments.take(200)}")
                     // 在对话中插入一条持久的工具状态消息，让用户看到伙伴在做什么
                     val statusText = toolDisplayName(call.name, call.arguments)
                     toolExecutionStatus = statusText
                     appendToolStatusMessage(call.id, statusText)
+
+                    // 等待一个渲染帧，让用户看到"正在执行..."的状态
+                    delay(80)
 
                     val toolResult = toolExecutor.execute(call.name, call.arguments)
                     Log.d(TAG, "Tool result: success=${toolResult.success} data=${toolResult.data.take(200)}")
@@ -1544,6 +1554,9 @@ class CompanionViewModel(
                     val resultText = toolResultText(call.name, call.arguments, toolResult)
                     updateToolStatusMessage(call.id, resultText)
                     appendToolResultMessage(call.id, toolResult.data)
+
+                    // 等待一个渲染帧，让用户看到"已完成"的状态再继续下一个工具
+                    delay(50)
                 }
                 // 工具执行完毕，清除状态描述
                 toolExecutionStatus = null
@@ -1809,24 +1822,31 @@ class CompanionViewModel(
                 append(promptFormat)
             }
             // 注入用户偏好记录（AI 通过 remember 工具和 UI 手动添加的偏好）
+            // 按 id 排序后再遍历，保证每次请求生成的提示词文本完全一致，命中 API Prefix Caching
             if (userPreferences.length() > 0) {
                 append("\n\n---\n用户偏好记录（必须始终遵守）：")
                 val prefCategoryLabels = mapOf(
                     "style" to "风格", "behavior" to "行为",
                     "format" to "格式", "other" to "其他",
                 )
-                for (i in 0 until userPreferences.length()) {
-                    val pref = userPreferences.getJSONObject(i)
+                // 按 id 排序确保前缀稳定（JSONArray 的插入顺序不一定稳定）
+                val sortedPrefs = (0 until userPreferences.length())
+                    .map { userPreferences.getJSONObject(it) }
+                    .sortedBy { it.optString("id", "") }
+                for (pref in sortedPrefs) {
                     val label = prefCategoryLabels[pref.optString("category", "other")] ?: "其他"
                     append("\n- [$label] ${pref.getString("content")}")
                 }
             }
             // 注入用户记忆（AI 通过 memory 工具主动记录的关于用户的事实性信息）
+            // 同样按 id 排序，保证前缀稳定
             if (userMemories.length() > 0) {
                 val memoryCategoryLabels = MemoryTool.categoryLabels
                 append("\n\n---\n关于用户的记忆（${companionName}的笔记本）：")
-                for (i in 0 until userMemories.length()) {
-                    val mem = userMemories.getJSONObject(i)
+                val sortedMemories = (0 until userMemories.length())
+                    .map { userMemories.getJSONObject(it) }
+                    .sortedBy { it.optString("id", "") }
+                for (mem in sortedMemories) {
                     val label = memoryCategoryLabels[mem.optString("category", "other")] ?: "其他"
                     append("\n- [$label] ${mem.getString("content")}")
                 }

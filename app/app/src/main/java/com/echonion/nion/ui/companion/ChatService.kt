@@ -65,6 +65,23 @@ val builtInProviders = listOf(
 object ChatService {
 
     /**
+     * 缓存的 OpenAI tools JSON 字符串片段。
+     * 从 ToolRegistry 获取后缓存，保证每次请求的 tools 部分完全一致。
+     * 这是 API Prefix Caching 的关键 —— 请求前缀中的 tools 如果每次不同，缓存就无法命中。
+     */
+    private val cachedOpenAIToolsJson: String by lazy {
+        ToolRegistry.toOpenAITools().toString()
+    }
+
+    /**
+     * 缓存的 Anthropic tools JSON 字符串片段。
+     * 同理，缓存后保证每次请求的 tools 序列化完全一致。
+     */
+    private val cachedAnthropicToolsJson: String by lazy {
+        ToolRegistry.toAnthropicTools().toString()
+    }
+
+    /**
      * 从 Provider API 获取可用模型列表。
      *
      * @param provider Provider 配置
@@ -219,9 +236,10 @@ object ChatService {
             readTimeout = 60_000
         }
 
-        val systemPrompt = messages
-            .firstOrNull { it.optString("role") == "system" }
-            ?.optString("content", "") ?: ""
+        // 收集所有 system 消息并拼接（不丢弃末尾的时间等 system 信息）
+        val systemParts = messages.filter { it.optString("role") == "system" }
+            .map { it.optString("content", "") }
+        val systemPrompt = systemParts.joinToString("\n\n")
         val conversationMessages = JSONArray().apply {
             for (msg in messages) {
                 if (msg.optString("role") != "system") put(msg)
@@ -351,17 +369,13 @@ object ChatService {
     ): Result<ChatResponse> {
         val url = "$baseUrl/chat/completions"
 
-        // 构建请求体：stream=true + tools schema
-        val requestBody = JSONObject().apply {
-            put("model", model)
-            put("messages", JSONArray().apply {
-                for (msg in messages) put(msg)
-            })
-            put("tools", ToolRegistry.toOpenAITools())
-            put("stream", true) // 启用 SSE 流式输出
+        // 构建请求体：使用稳定序列化保证 key 顺序一致
+        // 请求前缀的 tools 部分使用缓存的 JSON 字符串，确保每次请求完全一致，命中 API 缓存
+        val messagesArray = JSONArray().apply {
+            for (msg in messages) put(msg)
         }
+        val bodyStr = buildStableOpenAIBody(model, messagesArray, cachedOpenAIToolsJson, stream = true)
 
-        val bodyStr = requestBody.toString()
         Log.d("ChatService", "OpenAI stream request: ${bodyStr.take(500)}")
 
         // 使用 OkHttp 发送请求（支持流式响应读取）
@@ -512,9 +526,10 @@ object ChatService {
         val url = "$baseUrl/messages"
 
         // 分离 system 提示词和对话消息（Anthropic 特有格式）
-        val systemPrompt = messages
-            .firstOrNull { it.optString("role") == "system" }
-            ?.optString("content", "") ?: ""
+        // 收集所有 system 消息，拼接为完整 system 字符串（包含末尾的时间信息）
+        val systemParts = messages.filter { it.optString("role") == "system" }
+            .map { it.optString("content", "") }
+        val systemPrompt = systemParts.joinToString("\n\n")
         val conversationMessages = JSONArray().apply {
             for (msg in messages) {
                 val role = msg.optString("role", "")
@@ -522,17 +537,17 @@ object ChatService {
             }
         }
 
-        // 构建请求体：stream=true + max_tokens=4096 + tools schema
-        val requestBody = JSONObject().apply {
-            put("model", model)
-            put("max_tokens", 4096)
-            if (systemPrompt.isNotEmpty()) put("system", systemPrompt)
-            put("messages", conversationMessages)
-            put("tools", ToolRegistry.toAnthropicTools())
-            put("stream", true) // 启用 SSE 流式输出
-        }
+        // 使用稳定序列化构建请求体
+        // 为 system 和 tools 添加 cache_control 标记，启用 Anthropic Prompt Caching
+        val bodyStr = buildStableAnthropicBody(
+            model = model,
+            systemPrompt = systemPrompt,
+            messages = conversationMessages,
+            toolsJson = cachedAnthropicToolsJson,
+            stream = true,
+            enableCacheControl = true,
+        )
 
-        val bodyStr = requestBody.toString()
         Log.d("ChatService", "Anthropic stream request: ${bodyStr.take(500)}")
 
         val httpRequest = Request.Builder()
@@ -540,6 +555,8 @@ object ChatService {
             .addHeader("Content-Type", "application/json")
             .addHeader("x-api-key", apiKey)
             .addHeader("anthropic-version", "2023-06-01")
+            // 启用 Anthropic Prompt Caching，减少重复前缀的 token 计费
+            .addHeader("anthropic-beta", "prompt-caching-2024-07-31")
             .post(bodyStr.toRequestBody("application/json".toMediaType()))
             .build()
 
@@ -694,17 +711,12 @@ object ChatService {
             readTimeout = 60_000
         }
 
-        // 构建请求体：model + messages + tools
-        val requestBody = JSONObject().apply {
-            put("model", model)
-            put("messages", JSONArray().apply {
-                for (msg in messages) put(msg)
-            })
-            // 附加工具 Schema
-            put("tools", ToolRegistry.toOpenAITools())
+        // 使用稳定序列化构建请求体，保证 tools 部分跨请求完全一致
+        val messagesArray = JSONArray().apply {
+            for (msg in messages) put(msg)
         }
+        val bodyStr = buildStableOpenAIBody(model, messagesArray, cachedOpenAIToolsJson, stream = false)
 
-        val bodyStr = requestBody.toString()
         Log.d("ChatService", "OpenAI request body: ${bodyStr.take(2000)}")
 
         connection.outputStream.use { os ->
@@ -776,35 +788,37 @@ object ChatService {
             setRequestProperty("Content-Type", "application/json")
             setRequestProperty("x-api-key", apiKey)
             setRequestProperty("anthropic-version", "2023-06-01")
+            // 启用 Anthropic Prompt Caching，减少重复前缀的 token 计费
+            setRequestProperty("anthropic-beta", "prompt-caching-2024-07-31")
             doOutput = true
             connectTimeout = 30_000
             readTimeout = 60_000
         }
 
         // 分离 system 提示词和对话消息
-        val systemPrompt = messages
-            .firstOrNull { it.optString("role") == "system" }
-            ?.optString("content", "") ?: ""
+        // 收集所有 system 消息并拼接，避免丢失末尾的时间信息
+        val systemParts = messages.filter { it.optString("role") == "system" }
+            .map { it.optString("content", "") }
+        val systemPrompt = systemParts.joinToString("\n\n")
         val conversationMessages = JSONArray().apply {
             for (msg in messages) {
                 val role = msg.optString("role", "")
-                // system 不进入 messages 数组，tool 角色需要转换为 Anthropic 格式
                 if (role != "system") {
                     put(msg)
                 }
             }
         }
 
-        val requestBody = JSONObject().apply {
-            put("model", model)
-            put("max_tokens", 4096)
-            if (systemPrompt.isNotEmpty()) put("system", systemPrompt)
-            put("messages", conversationMessages)
-            // Anthropic 格式的工具 Schema
-            put("tools", ToolRegistry.toAnthropicTools())
-        }
+        // 使用稳定序列化构建请求体，添加 cache_control 启用 Prompt Caching
+        val bodyStr = buildStableAnthropicBody(
+            model = model,
+            systemPrompt = systemPrompt,
+            messages = conversationMessages,
+            toolsJson = cachedAnthropicToolsJson,
+            stream = false,
+            enableCacheControl = true,
+        )
 
-        val bodyStr = requestBody.toString()
         Log.d("ChatService", "Anthropic request body: ${bodyStr.take(2000)}")
 
         connection.outputStream.use { os ->
@@ -872,5 +886,128 @@ object ChatService {
             text = text,
             toolCalls = toolCalls.takeIf { it.isNotEmpty() },
         )
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 稳定 JSON 序列化 —— 保证请求体 key 顺序一致，命中 API 缓存
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * 构建稳定的 OpenAI 格式请求体 JSON 字符串。
+     *
+     * 解决 org.json.JSONObject.toString() key 顺序不可预测导致 API Prefix Caching 失效的问题。
+     * 通过手动拼接 JSON 字符串保证固定 key 顺序：model → messages → tools → stream。
+     *
+     * @param model 模型名称
+     * @param messages 消息 JSONArray
+     * @param toolsJson 预序列化的 tools JSON 字符串（已缓存，保证稳定）
+     * @param stream 是否启用流式输出
+     * @return 稳定的 JSON 请求体字符串
+     */
+    private fun buildStableOpenAIBody(
+        model: String,
+        messages: JSONArray,
+        toolsJson: String,
+        stream: Boolean,
+    ): String {
+        val sb = StringBuilder()
+        sb.append("{\"model\":")
+        sb.append(JSONObject.quote(model))
+        sb.append(",\"messages\":")
+        sb.append(messages.toString())
+        sb.append(",\"tools\":")
+        sb.append(toolsJson)
+        if (stream) {
+            sb.append(",\"stream\":true")
+        }
+        sb.append("}")
+        return sb.toString()
+    }
+
+    /**
+     * 构建稳定的 Anthropic 格式请求体 JSON 字符串。
+     *
+     * 同样通过手动拼接保证 key 顺序一致：model → max_tokens → system → messages → tools → stream。
+     *
+     * @param model 模型名称
+     * @param systemPrompt 系统提示词
+     * @param messages 对话消息 JSONArray
+     * @param toolsJson 预序列化的 tools JSON 字符串（已缓存）
+     * @param stream 是否启用流式输出
+     * @param enableCacheControl 是否为 system 和 tools 添加 cache_control 标记（启用 Anthropic Prompt Caching）
+     * @return 稳定的 JSON 请求体字符串
+     */
+    private fun buildStableAnthropicBody(
+        model: String,
+        systemPrompt: String,
+        messages: JSONArray,
+        toolsJson: String,
+        stream: Boolean,
+        enableCacheControl: Boolean = false,
+    ): String {
+        val sb = StringBuilder()
+        sb.append("{\"model\":")
+        sb.append(JSONObject.quote(model))
+        sb.append(",\"max_tokens\":4096")
+
+        // Anthropic Prompt Caching：system 以数组形式传入，附带 cache_control 标记
+        // 非缓存模式：system 直接作为字符串传入
+        if (systemPrompt.isNotEmpty()) {
+            if (enableCacheControl) {
+                // 缓存模式：system 为数组 [{type:"text",text:"...",cache_control:{type:"ephemeral"}}]
+                sb.append(",\"system\":[{\"type\":\"text\",\"text\":")
+                sb.append(JSONObject.quote(systemPrompt))
+                sb.append(",\"cache_control\":{\"type\":\"ephemeral\"}}]")
+            } else {
+                sb.append(",\"system\":")
+                sb.append(JSONObject.quote(systemPrompt))
+            }
+        }
+
+        sb.append(",\"messages\":")
+        sb.append(messages.toString())
+
+        // tools 部分：缓存模式时为每个工具追加 cache_control 标记
+        if (enableCacheControl) {
+            sb.append(",\"tools\":")
+            sb.append(addCacheControlToToolsJson(toolsJson))
+        } else {
+            sb.append(",\"tools\":")
+            sb.append(toolsJson)
+        }
+
+        if (stream) {
+            sb.append(",\"stream\":true")
+        }
+        sb.append("}")
+        return sb.toString()
+    }
+
+    /**
+     * 为 Anthropic tools JSON 数组中的每个工具对象追加 cache_control 标记。
+     *
+     * Anthropic Prompt Caching 要求在需要缓存的工具定义中添加：
+     * ```json
+     * {"name":"...", "description":"...", "input_schema":{...}, "cache_control":{"type":"ephemeral"}}
+     * ```
+     *
+     * 注意：只在最后一个工具上加 cache_control 即可让整个 tools 前缀被缓存，
+     * 但在所有工具上都加也没有副作用，且更稳定。
+     *
+     * @param toolsJson 原始 tools JSON 数组字符串
+     * @return 追加了 cache_control 的 tools JSON 数组字符串
+     */
+    private fun addCacheControlToToolsJson(toolsJson: String): String {
+        // 解析原始 tools 数组，为每个元素追加 cache_control
+        val toolsArray = JSONArray(toolsJson)
+        val result = JSONArray()
+        for (i in 0 until toolsArray.length()) {
+            val tool = toolsArray.getJSONObject(i)
+            tool.put("cache_control", JSONObject().apply {
+                put("type", "ephemeral")
+            })
+            result.put(tool)
+        }
+        return result.toString()
     }
 }

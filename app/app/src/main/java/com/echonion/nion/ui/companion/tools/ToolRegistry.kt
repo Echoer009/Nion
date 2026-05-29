@@ -49,6 +49,22 @@ object ToolRegistry {
     private val index: Map<String, Tool> = all.associateBy { it.name }
 
     /**
+     * 缓存的 OpenAI 格式 tools JSON 字符串。
+     * 工具列表在运行时不变，序列化结果可安全缓存，避免 JSONObject.toString() 的 key 顺序不稳定导致缓存失效。
+     */
+    private val cachedOpenAIToolsJson: String by lazy {
+        buildStableOpenAITools()
+    }
+
+    /**
+     * 缓存的 Anthropic 格式 tools JSON 字符串。
+     * 同理，运行时不变，缓存后保证每次请求的 tools 序列化完全一致。
+     */
+    private val cachedAnthropicToolsJson: String by lazy {
+        buildStableAnthropicTools()
+    }
+
+    /**
      * 根据工具名称查找已注册的工具。
      *
      * @param name 工具名称（如 "query"、"create"）
@@ -58,6 +74,10 @@ object ToolRegistry {
 
     /**
      * 生成 OpenAI 格式的 tools 参数数组。
+     *
+     * 使用缓存的稳定 JSON 字符串重新解析为 JSONArray，保证每次调用的序列化结果完全一致。
+     * 这对于 DeepSeek Prefix Caching 等 API 级缓存至关重要 —— tools 是请求前缀的一部分，
+     * 如果 tools 的 JSON 字符串在请求间不一致，整个前缀缓存就会失效。
      *
      * 格式为 OpenAI Chat Completions API 要求的 tools 字段：
      * ```json
@@ -75,21 +95,12 @@ object ToolRegistry {
      *
      * @return OpenAI 格式的工具定义数组
      */
-    fun toOpenAITools(): JSONArray = JSONArray().apply {
-        for (tool in all) {
-            put(JSONObject().apply {
-                put("type", "function")
-                put("function", JSONObject().apply {
-                    put("name", tool.name)
-                    put("description", tool.description)
-                    put("parameters", tool.parametersSchema())
-                })
-            })
-        }
-    }
+    fun toOpenAITools(): JSONArray = JSONArray(cachedOpenAIToolsJson)
 
     /**
      * 生成 Anthropic 格式的 tools 参数数组。
+     *
+     * 使用缓存的稳定 JSON 字符串重新解析，保证序列化一致性。
      *
      * 格式为 Anthropic Messages API 要求的 tools 字段：
      * ```json
@@ -104,13 +115,41 @@ object ToolRegistry {
      *
      * @return Anthropic 格式的工具定义数组
      */
-    fun toAnthropicTools(): JSONArray = JSONArray().apply {
+    fun toAnthropicTools(): JSONArray = JSONArray(cachedAnthropicToolsJson)
+
+    /**
+     * 构建稳定的 OpenAI 格式 tools JSON 字符串。
+     * 所有工具的 schema 原始字符串（从 trimIndent 解析）在运行时是固定的。
+     * 通过缓存第一次的序列化结果，后续请求复用同一字符串，确保 API 缓存前缀匹配。
+     */
+    private fun buildStableOpenAITools(): String {
+        val arr = JSONArray()
         for (tool in all) {
-            put(JSONObject().apply {
+            arr.put(JSONObject().apply {
+                put("type", "function")
+                put("function", JSONObject().apply {
+                    put("name", tool.name)
+                    put("description", tool.description)
+                    put("parameters", tool.parametersSchema())
+                })
+            })
+        }
+        return arr.toString()
+    }
+
+    /**
+     * 构建稳定的 Anthropic 格式 tools JSON 字符串。
+     * 同理，缓存第一次构建的结果。
+     */
+    private fun buildStableAnthropicTools(): String {
+        val arr = JSONArray()
+        for (tool in all) {
+            arr.put(JSONObject().apply {
                 put("name", tool.name)
                 put("description", tool.description)
                 put("input_schema", tool.parametersSchema())
             })
         }
+        return arr.toString()
     }
 }
