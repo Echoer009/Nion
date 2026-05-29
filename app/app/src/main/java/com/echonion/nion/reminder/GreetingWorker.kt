@@ -61,15 +61,40 @@ class GreetingWorker(
         val core = app.core
 
         try {
-            // 1. 查询今日任务数据
+            // ── 1. 收集今日任务数据 ──
             val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val allTasks = core.getTasks()
-            val todayTasks = allTasks.filter { it.reminder?.substringBefore("T") == today }
-            val completedToday = todayTasks.count { it.status == "done" }
-            val pendingToday = todayTasks.count { it.status != "done" }
-            val highPriorityPending = todayTasks.count { it.status != "done" && it.priority == "high" }
 
-            // 2. 生成问候文案（注入天气上下文）
+            // 1a. 通过 Rust API 获取"今日日程"：
+            //   - reminder 日期 = 今天的普通任务
+            //   - 每日循环任务（recurrence_rule='daily'，reminder=null）
+            // 完成状态由 Rust 端正确判断（每日任务查 daily_completions 表，普通任务看 status）
+            val todayScheduled = core.getTasksDueToday(today)
+
+            // 1b. 补充：没有 reminder、也没有 recurrence 的未完成顶层任务
+            // 这些任务不属于任何特定日期，但用户同样关心它们的存在
+            val unscheduledPending = core.getTasks().filter { task ->
+                task.reminder == null
+                    && (task.recurrenceRule == null || task.recurrenceRule == "none")
+                    && task.status != "done"
+                    && task.parentId == null
+            }
+
+            // 1c. 汇总统计
+            // 今日日程中已完成的数量（含每日循环任务通过 daily_completions 判断的完成数）
+            val completedToday = todayScheduled.count { it.completedForDate }
+            // 今日日程中未完成的数量
+            val pendingScheduled = todayScheduled.count { !it.completedForDate }
+            // 总未完成 = 日程未完成 + 无排期的未完成
+            val pendingToday = pendingScheduled + unscheduledPending.size
+            // 高优先级未完成（日程 + 无排期）
+            val highPriorityPending =
+                todayScheduled.count { !it.completedForDate && it.task.priority == "high" }
+                    + unscheduledPending.count { it.priority == "high" }
+
+            // 1d. 合并任务标题列表（给 LLM 和模板兜底用）
+            val todayTaskTitles = todayScheduled.map { it.task.title } + unscheduledPending.map { it.title }
+
+            // ── 2. 生成问候文案（注入天气上下文） ──
             val weatherSummary = try {
                 WeatherService.fetchWeatherSummary(applicationContext, core)
             } catch (e: Exception) {
@@ -77,7 +102,7 @@ class GreetingWorker(
                 null
             }
             val greetingText = generateGreeting(
-                core, type, todayTasks.map { it.title },
+                core, type, todayTaskTitles,
                 completedToday, pendingToday, highPriorityPending,
                 weatherSummary,
             )
