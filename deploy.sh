@@ -151,17 +151,20 @@ fi
 
 "$ADB" "${ADB_TARGET[@]}" shell am force-stop "$PACKAGE" 2>/dev/null || true
 
-if ! timeout 60 "$ADB" "${ADB_TARGET[@]}" install -r "$APK_PATH" 2>&1 | grep -q "Success"; then
+# adb install 在 Git Bash 下输出可能被管道吞掉，直接运行检查退出码
+INSTALL_OK=false
+"$ADB" "${ADB_TARGET[@]}" install -r "$APK_PATH" && INSTALL_OK=true
+if ! $INSTALL_OK; then
     warn "首次安装失败，重试中..."
     "$ADB" kill-server 2>/dev/null || true
     sleep 1
     "$ADB" start-server 2>/dev/null || true
     sleep 2
     "$ADB" "${ADB_TARGET[@]}" shell am force-stop "$PACKAGE" 2>/dev/null || true
-    if ! timeout 60 "$ADB" "${ADB_TARGET[@]}" install -r "$APK_PATH" 2>&1 | grep -q "Success"; then
+    "$ADB" "${ADB_TARGET[@]}" install -r "$APK_PATH" || {
         fail "安装失败，请手动检查"
         exit 1
-    fi
+    }
 fi
 ok "安装完成"
 

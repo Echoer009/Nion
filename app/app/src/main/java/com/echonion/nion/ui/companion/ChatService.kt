@@ -70,7 +70,8 @@ object ChatService {
      * 这是 API Prefix Caching 的关键 —— 请求前缀中的 tools 如果每次不同，缓存就无法命中。
      */
     private val cachedOpenAIToolsJson: String by lazy {
-        ToolRegistry.toOpenAITools().toString()
+        // 使用规范化序列化，保证 tools JSON 的 key 顺序跨进程一致
+        JsonCanonicalizer.canonicalize(ToolRegistry.toOpenAITools())
     }
 
     /**
@@ -78,7 +79,7 @@ object ChatService {
      * 同理，缓存后保证每次请求的 tools 序列化完全一致。
      */
     private val cachedAnthropicToolsJson: String by lazy {
-        ToolRegistry.toAnthropicTools().toString()
+        JsonCanonicalizer.canonicalize(ToolRegistry.toAnthropicTools())
     }
 
     /**
@@ -199,12 +200,14 @@ object ChatService {
         }
 
         connection.outputStream.use { os ->
-            os.write(requestBody.toString().toByteArray(Charsets.UTF_8))
+            // 规范化序列化，保证请求体 key 顺序一致
+            os.write(JsonCanonicalizer.canonicalize(requestBody).toByteArray(Charsets.UTF_8))
         }
 
         val responseCode = connection.responseCode
         if (responseCode !in 200..299) {
             val errorBody = connection.errorStream?.bufferedReader()?.readText() ?: "未知错误"
+            Log.e("ChatService", "OpenAI simple 失败 (HTTP $responseCode): $errorBody")
             throw Exception("API 请求失败 (HTTP $responseCode): $errorBody")
         }
 
@@ -254,12 +257,14 @@ object ChatService {
         }
 
         connection.outputStream.use { os ->
-            os.write(requestBody.toString().toByteArray(Charsets.UTF_8))
+            // 规范化序列化，保证请求体 key 顺序一致
+            os.write(JsonCanonicalizer.canonicalize(requestBody).toByteArray(Charsets.UTF_8))
         }
 
         val responseCode = connection.responseCode
         if (responseCode !in 200..299) {
             val errorBody = connection.errorStream?.bufferedReader()?.readText() ?: "未知错误"
+            Log.e("ChatService", "Anthropic simple 失败 (HTTP $responseCode): $errorBody")
             throw Exception("API 请求失败 (HTTP $responseCode): $errorBody")
         }
 
@@ -398,6 +403,9 @@ object ChatService {
         val textContent = StringBuilder() // 累积的完整文本
         val reasoningContent = StringBuilder() // 累积的 reasoning_content（DeepSeek R1 等推理模型）
         val toolCallAccumulators = mutableMapOf<Int, ToolCallAccumulator>() // 按 index 累积工具调用
+        // 缓存命中统计 —— DeepSeek 在最后一个 chunk 的 usage 字段返回缓存数据
+        var cacheHitTokens = 0
+        var cacheMissTokens = 0
 
         response.body?.source()?.let { source ->
             try {
@@ -412,8 +420,17 @@ object ChatService {
 
                     try {
                         val chunk = JSONObject(data)
-                        val choices = chunk.optJSONArray("choices") ?: continue
-                        if (choices.length() == 0) continue
+
+                        // 提取 usage 字段（DeepSeek 在流式最后一个 chunk 中返回，含缓存命中数据）
+                        // usage 格式：{"prompt_tokens":N,"completion_tokens":N,"prompt_cache_hit_tokens":N,"prompt_cache_miss_tokens":N}
+                        val usage = chunk.optJSONObject("usage")
+                        if (usage != null) {
+                            cacheHitTokens = usage.optInt("prompt_cache_hit_tokens", 0)
+                            cacheMissTokens = usage.optInt("prompt_cache_miss_tokens", 0)
+                        }
+
+                        val choices = chunk.optJSONArray("choices")
+                        if (choices == null || choices.length() == 0) continue
                         val delta = choices.getJSONObject(0).optJSONObject("delta") ?: continue
 
                         // 处理文本增量（delta.content 可能为 JSON null，optString 会转为字符串 "null"）
@@ -477,7 +494,13 @@ object ChatService {
             .map { ToolCall(id = it.id, name = it.name, arguments = it.arguments.toString()) }
             .takeIf { it.isNotEmpty() }
 
-        return Result.success(ChatResponse(text = text, toolCalls = toolCalls, reasoningContent = reasoning))
+        return Result.success(ChatResponse(
+            text = text,
+            toolCalls = toolCalls,
+            reasoningContent = reasoning,
+            cacheHitTokens = cacheHitTokens,
+            cacheMissTokens = cacheMissTokens,
+        ))
     }
 
     /**
@@ -572,6 +595,10 @@ object ChatService {
         val textBlocks = mutableMapOf<Int, StringBuilder>() // 按 index 累积文本块
         val toolUseBlocks = mutableMapOf<Int, ToolCallAccumulator>() // 按 index 累积工具调用
         var currentEventType = ""
+        // 缓存命中统计
+        // Anthropic 返回 cache_read_input_tokens（缓存命中）和 cache_creation_input_tokens（缓存新建）
+        var cacheHitTokens = 0
+        var cacheMissTokens = 0
 
         response.body?.source()?.let { source ->
             try {
@@ -635,6 +662,15 @@ object ChatService {
                                             }
                                         }
                                     }
+                                    "message_delta" -> {
+                                        // message_delta 事件包含 usage 信息（Anthropic 缓存命中统计）
+                                        // {"type":"message_delta","usage":{"cache_read_input_tokens":N,"cache_creation_input_tokens":N}}
+                                        val usage = event.optJSONObject("usage")
+                                        if (usage != null) {
+                                            cacheHitTokens = usage.optInt("cache_read_input_tokens", 0)
+                                            cacheMissTokens = usage.optInt("cache_creation_input_tokens", 0)
+                                        }
+                                    }
                                     "message_stop" -> {
                                         // 流结束标志，跳出循环
                                     }
@@ -669,7 +705,12 @@ object ChatService {
             .map { ToolCall(id = it.id, name = it.name, arguments = it.arguments.toString()) }
             .takeIf { it.isNotEmpty() }
 
-        return Result.success(ChatResponse(text = text, toolCalls = toolCalls))
+        return Result.success(ChatResponse(
+            text = text,
+            toolCalls = toolCalls,
+            cacheHitTokens = cacheHitTokens,
+            cacheMissTokens = cacheMissTokens,
+        ))
     }
 
     /**
@@ -736,7 +777,15 @@ object ChatService {
             .getJSONObject(0)
             .getJSONObject("message")
 
-        return Result.success(parseOpenAIResponse(message))
+        // 提取 usage 中的缓存命中数据（DeepSeek 非流式响应）
+        val usage = json.optJSONObject("usage")
+        val cacheHit = usage?.optInt("prompt_cache_hit_tokens", 0) ?: 0
+        val cacheMiss = usage?.optInt("prompt_cache_miss_tokens", 0) ?: 0
+
+        return Result.success(parseOpenAIResponse(message).copy(
+            cacheHitTokens = cacheHit,
+            cacheMissTokens = cacheMiss,
+        ))
     }
 
     /**
@@ -835,7 +884,15 @@ object ChatService {
         val responseText = connection.inputStream.bufferedReader().readText()
         val json = JSONObject(responseText)
 
-        return Result.success(parseAnthropicResponse(json))
+        // Anthropic 缓存命中统计在顶层 usage 字段
+        val usage = json.optJSONObject("usage")
+        val cacheHit = usage?.optInt("cache_read_input_tokens", 0) ?: 0
+        val cacheMiss = usage?.optInt("cache_creation_input_tokens", 0) ?: 0
+
+        return Result.success(parseAnthropicResponse(json).copy(
+            cacheHitTokens = cacheHit,
+            cacheMissTokens = cacheMiss,
+        ))
     }
 
     /**
@@ -896,7 +953,13 @@ object ChatService {
      * 构建稳定的 OpenAI 格式请求体 JSON 字符串。
      *
      * 解决 org.json.JSONObject.toString() key 顺序不可预测导致 API Prefix Caching 失效的问题。
-     * 通过手动拼接 JSON 字符串保证固定 key 顺序：model → messages → tools → stream。
+     * 通过手动拼接 JSON 字符串保证固定 key 顺序：model → tools → messages → stream。
+     *
+     * **tools 必须在 messages 前面**：tools 是稳定不变的（~2500 tokens），
+     * messages 随对话增长而变化。DeepSeek Prefix Caching 从 byte 0 匹配前缀，
+     * 把稳定的 tools 放前面，即使 messages 变化，tools 部分也始终命中缓存。
+     * 如果 tools 在 messages 后面，messages 一变化就会在 tools 之前断开前缀，
+     * 导致 tools 永远无法被缓存。
      *
      * @param model 模型名称
      * @param messages 消息 JSONArray
@@ -913,10 +976,13 @@ object ChatService {
         val sb = StringBuilder()
         sb.append("{\"model\":")
         sb.append(JSONObject.quote(model))
-        sb.append(",\"messages\":")
-        sb.append(messages.toString())
+        // tools 放在 messages 前面：tools 稳定不变（~2500 tokens），放在前缀中始终命中缓存
         sb.append(",\"tools\":")
         sb.append(toolsJson)
+        sb.append(",\"messages\":")
+        // 使用规范化序列化替代 messages.toString()，
+        // 保证每条消息的 key（role/content/tool_calls 等）按固定顺序输出
+        sb.append(JsonCanonicalizer.canonicalize(messages))
         if (stream) {
             sb.append(",\"stream\":true")
         }
@@ -927,7 +993,8 @@ object ChatService {
     /**
      * 构建稳定的 Anthropic 格式请求体 JSON 字符串。
      *
-     * 同样通过手动拼接保证 key 顺序一致：model → max_tokens → system → messages → tools → stream。
+     * key 顺序：model → max_tokens → system → tools → messages → stream。
+     * tools 在 messages 前面，保证稳定的工具定义在前缀中始终被缓存（同 OpenAI 版本的优化逻辑）。
      *
      * @param model 模型名称
      * @param systemPrompt 系统提示词
@@ -964,10 +1031,7 @@ object ChatService {
             }
         }
 
-        sb.append(",\"messages\":")
-        sb.append(messages.toString())
-
-        // tools 部分：缓存模式时为每个工具追加 cache_control 标记
+        // tools 放在 messages 前面：tools 稳定不变，放在前缀中始终命中缓存
         if (enableCacheControl) {
             sb.append(",\"tools\":")
             sb.append(addCacheControlToToolsJson(toolsJson))
@@ -975,6 +1039,10 @@ object ChatService {
             sb.append(",\"tools\":")
             sb.append(toolsJson)
         }
+
+        sb.append(",\"messages\":")
+        // 使用规范化序列化保证消息 key 顺序一致，命中 API 缓存
+        sb.append(JsonCanonicalizer.canonicalize(messages))
 
         if (stream) {
             sb.append(",\"stream\":true")
@@ -1008,6 +1076,7 @@ object ChatService {
             })
             result.put(tool)
         }
-        return result.toString()
+        // 规范化序列化，保证 cache_control 字段的 key 顺序稳定
+        return JsonCanonicalizer.canonicalize(result)
     }
 }

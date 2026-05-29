@@ -18,12 +18,16 @@ import org.json.JSONObject
  *                            包含 DeepSeek 推理模型的 reasoning_content 等额外字段。
  * @property reasoningContent DeepSeek 推理模型的思考内容。
  *                            后续请求必须将此字段原样回传 assistant 消息中，否则 API 返回 400。
+ * @property cacheHitTokens   本次请求命中缓存的 token 数（DeepSeek Prefix Caching）
+ * @property cacheMissTokens  本次请求未命中缓存的 token 数
  */
 data class ChatResponse(
     val text: String? = null,
     val toolCalls: List<ToolCall>? = null,
     val rawMessage: JSONObject? = null,
     val reasoningContent: String? = null,
+    val cacheHitTokens: Int = 0,
+    val cacheMissTokens: Int = 0,
 )
 
 /**

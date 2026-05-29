@@ -16,6 +16,7 @@ import com.echonion.nion.ui.companion.sticker.StickerService
 import com.echonion.nion.ui.companion.tools.ToolExecutor
 import com.echonion.nion.ui.companion.tools.ToolResult
 import com.echonion.nion.ui.companion.tools.MemoryTool
+import com.echonion.nion.ui.companion.tools.DataType
 import com.echonion.nion.ui.companion.tools.ToolPhrasePool
 import com.echonion.nion.preset.CharacterPreset
 import com.echonion.nion.preset.CharacterPresetInitializer
@@ -273,8 +274,13 @@ class CompanionViewModel(
     /** 工具执行器，注入 NionCore 单例 + 数据变更通知回调 + 提醒调度回调 */
     private val toolExecutor = ToolExecutor(
         core,
-        onDataChanged = { type ->
-            (app as NionApp).notifyDataChanged(type)
+        onDataChanged = { affectedTypes ->
+            // 通知所有订阅者（TaskViewModel / ScheduleViewModel / FocusSetupViewModel 等）
+            // 订阅者通过 debounce 合并连续事件，AI 连续调用 N 个工具时只刷新一次
+            (app as NionApp).notifyDataChanged(affectedTypes)
+            // CompanionViewModel 自身关心的数据类型
+            if (DataType.PREFERENCES in affectedTypes) refreshPreferences()
+            if (DataType.MEMORIES in affectedTypes) refreshMemories()
         },
         onScheduleReminder = { taskId ->
             // 当工具修改了 reminder/recurrence 字段时，重新调度闹钟
@@ -722,8 +728,9 @@ class CompanionViewModel(
                 })
             }
             val jsonStr = jsonArr.toString()
-            // 将 conversationHistory 序列化为 JSON 数组字符串
-            val apiHistoryStr = JSONArray(conversationHistory.map { it.toString() }).toString()
+            // 将 conversationHistory 序列化为稳定的 JSON 数组字符串
+            // 使用规范化序列化保证 key 顺序一致，冷启动后从 DB 加载的数据经 canonicalize 能产出相同字符串
+            val apiHistoryStr = JsonCanonicalizer.stableArrayToString(conversationHistory)
             val convId = currentConversationId
             if (convId != null) {
                 val title = generateConversationTitle()
@@ -1322,9 +1329,13 @@ class CompanionViewModel(
         requestSave()
 
         // 将用户消息追加到 API 对话历史
+        // 当前时间直接注入 user 消息文本末尾，而非单独的 system 消息
+        // 原因：单独的 system_time 消息会夹在对话历史中，导致 Turn N+1 无法完整匹配 Turn N 的缓存前缀
+        // 注入到 user 消息后，对话历史保持连续增长：[user1, assistant1, user2, assistant2, ...]
+        // Turn N+1 的前缀 = Turn N 的完整消息 → DeepSeek Prefix Caching 命中率最大化
         conversationHistory.add(JSONObject().apply {
             put("role", "user")
-            put("content", text)
+            put("content", "$text\n\n[当前时间：${java.time.LocalDateTime.now()}]")
         })
 
         Log.d(TAG, "[sendMessage] 启动 AgentLoop → msgCount=${messages.size}")
@@ -1475,6 +1486,9 @@ class CompanionViewModel(
 
     private suspend fun runAgentLoop(provider: ProviderConfig, apiKey: String, model: String) {
         var iteration = 0
+        // 累积所有迭代的缓存命中统计，最终追加到 AI 消息末尾供调试
+        var totalCacheHit = 0
+        var totalCacheMiss = 0
         Log.d(TAG, "[AgentLoop] 开始 iteration=0 msgCount=${messages.size}")
         while (iteration < maxAgentIterations) {
             iteration++
@@ -1521,6 +1535,11 @@ class CompanionViewModel(
             val response = result.getOrThrow()
             Log.d(TAG, "Response: streamedText=${streamingAssistantText?.take(100)}, toolCalls=${response.toolCalls?.size}")
 
+            // 累积本次迭代的缓存命中统计
+            totalCacheHit += response.cacheHitTokens
+            totalCacheMiss += response.cacheMissTokens
+            Log.d(TAG, "[CacheStats] iter=$iteration hit=${response.cacheHitTokens} miss=${response.cacheMissTokens} totalHit=$totalCacheHit totalMiss=$totalCacheMiss")
+
             // 情况 1：LLM 请求执行工具
             if (response.toolCalls != null && response.toolCalls.isNotEmpty()) {
                 // 将已流式显示的文本固化为一条完整消息（如果有文本的话）
@@ -1561,18 +1580,6 @@ class CompanionViewModel(
                 // 工具执行完毕，清除状态描述
                 toolExecutionStatus = null
 
-                // 如果有 remember 工具被调用，刷新偏好列表确保 UI 和后续提示词同步
-                val hasRememberTool = response.toolCalls.any { it.name == "remember" }
-                if (hasRememberTool) {
-                    refreshPreferences()
-                }
-
-                // 如果有 memory 工具被调用，刷新记忆列表确保 UI 和后续提示词同步
-                val hasMemoryTool = response.toolCalls.any { it.name == "memory" }
-                if (hasMemoryTool) {
-                    refreshMemories()
-                }
-
                 // 继续循环，让 LLM 根据工具结果生成下一步响应
                 continue
             }
@@ -1600,6 +1607,34 @@ class CompanionViewModel(
         if (iteration >= maxAgentIterations) {
             appendAssistantMessage("抱歉，工具调用次数过多，请简化你的请求后重试。")
         }
+
+        // 调试信息：追加缓存命中统计到 UI（不计入 conversationHistory，不影响后续 API 请求）
+        val totalTokens = totalCacheHit + totalCacheMiss
+        if (totalTokens > 0) {
+            val hitRate = if (totalTokens > 0) totalCacheHit * 100 / totalTokens else 0
+            appendCacheDebugMessage("缓存命中: $totalCacheHit | 未命中: $totalCacheMiss | 命中率: ${hitRate}%")
+        }
+    }
+
+    /**
+     * 追加缓存调试信息到 UI 消息列表。
+     *
+     * 与 [appendAssistantMessage] 不同，此方法只写入 UI 层的 [messages]，
+     * 不写入 [conversationHistory]，因此不会影响后续 API 请求的上下文。
+     * 用于展示缓存命中率等调试信息，方便验证 DeepSeek Prefix Caching 是否生效。
+     *
+     * @param text 调试信息文本
+     */
+    private fun appendCacheDebugMessage(text: String) {
+        val now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+        messages = messages + ChatMessage(
+            id = "cache_debug_${System.currentTimeMillis()}",
+            text = text,
+            isFromUser = false,
+            timestamp = now,
+            isToolMessage = true,
+            toolDone = true,
+        )
     }
 
     /**
@@ -1860,14 +1895,10 @@ class CompanionViewModel(
         })
 
         // 追加完整的对话历史（包含工具调用和结果）
+        // 对话历史保持连续增长：[user1, assistant1, user2, assistant2, ...]
+        // 当前时间已注入到每条 user 消息的 content 中，无需额外的 system 消息
+        // 这样 Turn N+1 的消息前缀完整匹配 Turn N 的全部消息，最大化 DeepSeek Prefix Caching 命中率
         apiMessages.addAll(conversationHistory)
-
-        // 当前时间注入到消息列表末尾（可变部分）
-        // 放在最后一条 system 消息中，避免破坏稳定前缀导致 DeepSeek 缓存失效
-        apiMessages.add(JSONObject().apply {
-            put("role", "system")
-            put("content", "当前时间：${java.time.LocalDateTime.now()}")
-        })
 
         return apiMessages
     }

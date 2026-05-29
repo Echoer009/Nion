@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.companion.tools
 
+import com.echonion.nion.ui.companion.JsonCanonicalizer
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -120,7 +121,8 @@ object ToolRegistry {
     /**
      * 构建稳定的 OpenAI 格式 tools JSON 字符串。
      * 所有工具的 schema 原始字符串（从 trimIndent 解析）在运行时是固定的。
-     * 通过缓存第一次的序列化结果，后续请求复用同一字符串，确保 API 缓存前缀匹配。
+     * 使用 [JsonCanonicalizer] 对每个工具对象做 key 排序序列化，
+     * 保证 tools JSON 跨进程、跨调用完全一致，命中 DeepSeek Prefix Caching。
      */
     private fun buildStableOpenAITools(): String {
         val arr = JSONArray()
@@ -134,12 +136,13 @@ object ToolRegistry {
                 })
             })
         }
-        return arr.toString()
+        // 使用规范化序列化替代 arr.toString()，避免 JSONObject 内部 HashMap 顺序不确定
+        return JsonCanonicalizer.canonicalize(arr)
     }
 
     /**
      * 构建稳定的 Anthropic 格式 tools JSON 字符串。
-     * 同理，缓存第一次构建的结果。
+     * 同理使用 [JsonCanonicalizer] 保证 key 排序一致性。
      */
     private fun buildStableAnthropicTools(): String {
         val arr = JSONArray()
@@ -150,6 +153,6 @@ object ToolRegistry {
                 put("input_schema", tool.parametersSchema())
             })
         }
-        return arr.toString()
+        return JsonCanonicalizer.canonicalize(arr)
     }
 }
