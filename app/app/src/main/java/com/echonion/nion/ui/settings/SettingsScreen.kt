@@ -39,12 +39,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -207,21 +210,23 @@ fun SettingsScreen(
                 shape = MaterialTheme.shapes.medium,
                 color = MaterialTheme.colorScheme.surfaceContainerLowest,
             ) {
-                val hasOverlayPermission = remember {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        Settings.canDrawOverlays(context)
-                    } else {
-                        true
+                // 权限状态：初始值由 DisposableEffect 在 ON_RESUME 时统一设置
+                var overlayGranted by remember { mutableStateOf(false) }
+                // 监听 Activity 生命周期：每次 ON_RESUME（包括从系统设置页返回）时重新检查权限
+                val lifecycleOwner = LocalLifecycleOwner.current
+                DisposableEffect(lifecycleOwner) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_RESUME) {
+                            overlayGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                Settings.canDrawOverlays(context)
+                            } else {
+                                true
+                            }
+                        }
                     }
-                }
-                // 权限状态可能在用户跳转设置后变化，用 LaunchedEffect 检测
-                var overlayGranted by remember { mutableStateOf(hasOverlayPermission) }
-                LaunchedEffect(Unit) {
-                    // 每次页面重新显示时检查权限状态
-                    overlayGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        Settings.canDrawOverlays(context)
-                    } else {
-                        true
+                    lifecycleOwner.lifecycle.addObserver(observer)
+                    onDispose {
+                        lifecycleOwner.lifecycle.removeObserver(observer)
                     }
                 }
 
