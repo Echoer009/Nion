@@ -19,7 +19,7 @@
 
 ### 2. Rust 核心库 (`nion-core`)
 
-- **位置**: `/home/echonion/nion/core/`
+- **位置**: `core/`
 - **功能**: 任务 CRUD + SQLite（内存模式）
 - **UniFFI**: proc-macro 模式，`#[uniffi::export]` + `uniffi::setup_scaffolding!()`
 - **测试**: 5 个单元测试全部通过（create, get, update, complete, delete）
@@ -27,14 +27,14 @@
 
 ### 3. Axum 后端 (`nion-backend`)
 
-- **位置**: `/home/echonion/nion/backend/`
+- **位置**: `backend/`
 - **功能**: 两个 Hello World 接口（`GET /`, `GET /health`）
 - **启动**: `cargo run -p nion-backend` → `http://localhost:3000`
 - **未完成**: 任务 API、AI Agent 接口、SSE、OpenAPI 文档
 
 ### 4. Android App (`app/`)
 
-- **位置**: `/home/echonion/nion/app/`
+- **位置**: `app/`
 - **构建**: `gradle assembleDebug` 成功，APK 17MB
 - **APK**: `app/app/build/outputs/apk/debug/app-debug.apk`
 - **UI**: 底部导航栏（Tasks / Schedule / Focus / Companion）+ 任务列表（假数据）
@@ -42,7 +42,7 @@
 
 ### 5. 踩坑文档
 
-- **位置**: `/home/echonion/nion/docs/pitfalls.md`
+- **位置**: `docs/pitfalls.md`
 - 已记录: UniFFI setup_scaffolding 宏、UDL weedle2 解析器问题
 
 ---

@@ -19,10 +19,10 @@
 不要分步执行：
 
 ```bash
-# Windows (Git Bash)
-/c/Users/ECHO/AppData/Local/Android/Sdk/platform-tools/adb logcat -c && \
-/c/.../adb shell am start -n com.echonion.nion/.MainActivity && \
-/c/.../adb logcat -d -v threadtime
+# Windows (Git Bash) — 使用 $ANDROID_HOME 或替换为你的 SDK 路径
+adb logcat -c && \
+adb shell am start -n com.echonion.nion/.MainActivity && \
+adb logcat -d -v threadtime
 ```
 
 必须用 `&&` 紧连：清空 → 启动 → 立即 dump。中间不能有任何停顿，否则系统进程刷屏把 app 日志挤出环形缓冲区。
