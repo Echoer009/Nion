@@ -17,6 +17,16 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    // Release 签名配置
+    signingConfigs {
+        create("release") {
+            storeFile = file("nion-release.jks")
+            storePassword = "nion2024"
+            keyAlias = "nion"
+            keyPassword = "nion2024"
+        }
+    }
+
     flavorDimensions += "character"
 
     productFlavors {
@@ -34,12 +44,21 @@ android {
 
     buildTypes {
         release {
-            isMinifyEnabled = false
+            // 开启 R8 代码压缩 + 资源压缩
+            isMinifyEnabled = true
+            isShrinkResources = true
+            signingConfig = signingConfigs.getByName("release")
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
         }
+    }
+
+    // 禁用 lint 误报：activity-compose 1.13.0 已包含 Fragment 1.3.0+，
+    // 但 lint 无法正确识别传递依赖版本
+    lint {
+        disable += "InvalidFragmentVersionForActivityResult"
     }
 
     compileOptions {
