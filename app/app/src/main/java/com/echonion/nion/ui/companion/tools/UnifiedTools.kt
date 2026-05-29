@@ -123,6 +123,7 @@ fun groupListToJson(groups: List<GroupData>): JSONArray = JSONArray().apply {
  */
 object QueryTool : Tool {
     override val name = "query"
+    override val affectsData = emptySet<DataType>()
     override val description = "查询数据。通过 entity_type 指定查询类型：task（任务）、checklist（清单）、group（分组）。" +
         "task 支持 id（查单个）、category_id（按清单筛选）、parent_id（查子任务）；" +
         "checklist 返回所有清单；group 需要传 checklist_id 查询指定清单下的分组。"
@@ -241,6 +242,7 @@ object QueryTool : Tool {
  */
 object CreateTool : Tool {
     override val name = "create"
+    override val affectsData = setOf(DataType.TASK_DATA)
     override val description = "创建新实体，支持批量。通过 entity_type 指定类型：task（任务）、checklist（清单）、group（分组）。" +
         "单个创建传 title/name 等字段；批量创建传 items 数组，每项包含对应实体所需的字段。" +
         "task 需 title，支持 reminder（一次性提醒，ISO 8601 如 2026-06-01T15:00）、" +
@@ -503,6 +505,7 @@ object CreateTool : Tool {
  */
 object UpdateTool : Tool {
     override val name = "update"
+    override val affectsData = setOf(DataType.TASK_DATA)
     override val description = "更新实体信息，支持批量。通过 entity_type 指定类型，只传入需要修改的字段即可。" +
         "单个更新传 id；批量更新传 ids 数组，所有实体应用相同的变更字段。" +
         "task 支持修改 title/description/priority/status/category_id/reminder/group_id/" +
@@ -738,6 +741,7 @@ object UpdateTool : Tool {
  */
 object DeleteTool : Tool {
     override val name = "delete"
+    override val affectsData = setOf(DataType.TASK_DATA)
     override val description = "永久删除实体，支持批量。此操作不可撤销。" +
         "单个删除传 id；批量删除传 ids 数组。" +
         "删除清单时其中的任务不会被删除（变为未分类）；" +
@@ -854,6 +858,7 @@ object DeleteTool : Tool {
  */
 object MoveTool : Tool {
     override val name = "move"
+    override val affectsData = setOf(DataType.TASK_DATA)
     override val description = "移动实体到新的容器，保留所有数据（如专注时长），支持批量。" +
         "单个移动传 id；批量移动传 ids 数组，所有实体移到同一目标。" +
         "支持：task→checklist（任务移到其他清单）、task→group（任务移到其他分组）、" +
@@ -1123,6 +1128,7 @@ object MoveTool : Tool {
  */
 object ManageTool : Tool {
     override val name = "manage"
+    override val affectsData = setOf(DataType.TASK_DATA)
     override val description = "通用操作工具，用于不归属 CRUD 的其它操作。" +
         "通过 action 字段指定操作类型。" +
         "set_recurrence：设置任务每日循环（需 task_id、recurrence_rule、reminder_time）；" +

@@ -17,10 +17,13 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.echonion.nion.core
 import com.echonion.nion.dataEvents
 import com.echonion.nion.notifyDataChanged
+import com.echonion.nion.ui.companion.tools.DataType
 import com.echonion.nion.ui.components.TaskCardModel
 import com.echonion.nion.ui.task.FlatTaskItem
 import com.echonion.nion.ui.task.TaskItem
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import uniffi.nion_core.NionCore
@@ -54,6 +57,7 @@ data class ScheduleTaskItem(
  * @param core Rust 核心 API 实例
  * @param onError 错误提示回调
  */
+@OptIn(FlowPreview::class)
 class ScheduleViewModel(
     private val app: Application,
     private val core: NionCore,
@@ -113,7 +117,7 @@ class ScheduleViewModel(
                         core.updateTask(taskId, null, null, null, newStatus, null, null, null, null, null)
                     }
                 }
-                app.notifyDataChanged("tasks")
+                app.notifyDataChanged(setOf(DataType.TASK_DATA))
             } catch (e: Exception) {
                 onError("更新任务失败: ${e.message}")
                 // 失败时回退：重新从 DB 加载
@@ -143,7 +147,7 @@ class ScheduleViewModel(
             try {
                 withContext(Dispatchers.IO) { core.deleteTask(taskId) }
                 loadTasksForDate(selectedDate)
-                app.notifyDataChanged("tasks")
+                app.notifyDataChanged(setOf(DataType.TASK_DATA))
             } catch (e: Exception) {
                 onError("删除任务失败: ${e.message}")
             }
@@ -157,7 +161,7 @@ class ScheduleViewModel(
                 withContext(Dispatchers.IO) {
                     core.updateTask(taskId, null, description, null, null, null, null, null, null, null)
                 }
-                app.notifyDataChanged("tasks")
+                app.notifyDataChanged(setOf(DataType.TASK_DATA))
             } catch (e: Exception) {
                 onError("更新备注失败: ${e.message}")
             }
@@ -172,7 +176,7 @@ class ScheduleViewModel(
                     core.updateTask(taskId, null, null, null, null, null, null, null, rule, time)
                 }
                 loadTasksForDate(selectedDate)
-                app.notifyDataChanged("tasks")
+                app.notifyDataChanged(setOf(DataType.TASK_DATA))
             } catch (e: Exception) {
                 onError("更新循环设置失败: ${e.message}")
             }
@@ -187,7 +191,7 @@ class ScheduleViewModel(
                     core.updateTask(taskId, null, null, null, null, null, null, null, "none", null)
                 }
                 loadTasksForDate(selectedDate)
-                app.notifyDataChanged("tasks")
+                app.notifyDataChanged(setOf(DataType.TASK_DATA))
             } catch (e: Exception) {
                 onError("移除循环失败: ${e.message}")
             }
@@ -202,7 +206,7 @@ class ScheduleViewModel(
                     core.updateTask(taskId, null, null, null, null, null, reminder, null, null, null)
                 }
                 loadTasksForDate(selectedDate)
-                app.notifyDataChanged("tasks")
+                app.notifyDataChanged(setOf(DataType.TASK_DATA))
             } catch (e: Exception) {
                 onError("更新提醒失败: ${e.message}")
             }
@@ -277,12 +281,17 @@ class ScheduleViewModel(
         loadCalendarMarkers(LocalDate.now().year, LocalDate.now().monthValue)
 
         // 监听数据变更事件（AI 工具、TaskViewModel 等外部操作），自动刷新当前日期任务和日历标记
+        // debounce(300)：合并 AI 连续调用多个工具时的连续事件，只触发一次刷新
         viewModelScope.launch {
-            app.dataEvents().collect { event ->
-                Log.d("ScheduleViewModel", "收到数据变更事件: ${event.type}")
-                loadTasksForDate(selectedDate)
-                loadCalendarMarkers(selectedDate.year, selectedDate.monthValue)
-            }
+            app.dataEvents()
+                .debounce(300)
+                .collect { event ->
+                    if (DataType.TASK_DATA in event.types) {
+                        Log.d("ScheduleViewModel", "收到数据变更事件: ${event.types}")
+                        loadTasksForDate(selectedDate)
+                        loadCalendarMarkers(selectedDate.year, selectedDate.monthValue)
+                    }
+                }
         }
     }
 

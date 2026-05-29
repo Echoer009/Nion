@@ -19,9 +19,12 @@ import com.echonion.nion.dataEvents
 import com.echonion.nion.reminder.NotificationHelper
 import com.echonion.nion.reminder.ReminderScheduler
 import com.echonion.nion.reminder.ReminderStore
+import com.echonion.nion.ui.companion.tools.DataType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import uniffi.nion_core.NionCore
@@ -82,6 +85,7 @@ data class FlatTaskItem(
     val isGroupLast: Boolean,
 )
 
+@OptIn(FlowPreview::class)
 class TaskViewModel(
     private val core: NionCore,
     private val onError: (String) -> Unit,
@@ -208,59 +212,83 @@ class TaskViewModel(
         }
     }
 
+    /** 当前正在执行的刷新协程，用于 cancelPrevious 防止并发刷新导致旧数据覆盖新数据 */
+    private var refreshJob: Job? = null
+
     init {
-        refresh()
+        // 初始加载：在协程中执行
+        refreshJob = viewModelScope.launch { doRefreshInternal() }
+
         // 监听 Agent 工具执行后的数据变更事件，自动刷新任务列表
+        // debounce(300)：AI 连续调用 N 个工具时，合并为一次刷新（300ms 内的事件只触发最后一次）
+        // cancelPrevious：确保同一时刻只有一个刷新协程在运行，避免旧数据覆盖新数据
         viewModelScope.launch {
-            app.dataEvents().collect { event ->
-                Log.d("TaskViewModel", "收到数据变更事件: ${event.type}")
-                refresh()
-            }
+            app.dataEvents()
+                .debounce(300)
+                .collect { event ->
+                    // 只处理任务数据变更事件，忽略偏好/记忆等不相关事件
+                    if (DataType.TASK_DATA in event.types) {
+                        Log.d("TaskViewModel", "收到数据变更事件: ${event.types}")
+                        refreshJob?.cancel()
+                        refreshJob = viewModelScope.launch { doRefreshInternal() }
+                    }
+                }
         }
     }
 
+    /**
+     * 手动触发刷新（供 UI 操作调用，如切换清单、创建任务后）。
+     * 不走防抖，立即执行，同时取消正在进行的旧刷新。
+     */
     fun refresh() {
-        viewModelScope.launch {
-            try {
-                val loaded = withContext(Dispatchers.IO) {
-                    core.getChecklists().map { it.toUi() }
-                }
-                checklists = loaded
-            } catch (e: Exception) {
-                onError("加载清单失败: ${e.message}")
+        refreshJob?.cancel()
+        refreshJob = viewModelScope.launch { doRefreshInternal() }
+    }
+
+    /**
+     * 内部刷新实现 —— 从 Rust 层重新加载清单、分组、任务数据。
+     * 所有刷新入口（init debounce、手动 refresh）最终都汇聚到这里，保证串行执行。
+     */
+    private suspend fun doRefreshInternal() {
+        try {
+            val loaded = withContext(Dispatchers.IO) {
+                core.getChecklists().map { it.toUi() }
             }
-            try {
-                // 刷新当前清单下的分组（"今天"、"收集箱"视图无分组，只有真实清单才有分组）
-                groups = if (activeChecklistId != null && activeChecklistId != TODAY_ID && activeChecklistId != INBOX_ID) {
-                    withContext(Dispatchers.IO) {
-                        core.getGroupsByChecklist(activeChecklistId!!).map { it.toUi() }
-                    }
-                } else {
-                    emptyList()
-                }
-            } catch (_: Exception) { }
-            try {
-                val loadedTasks = withContext(Dispatchers.IO) {
-                    // "今天"视图使用跨清单聚合查询
-                    if (activeChecklistId == TODAY_ID) {
-                        loadTodayTasks()
-                    } else if (activeChecklistId == INBOX_ID) {
-                        // "收集箱"视图加载所有 category_id = null 的孤儿任务
-                        loadTasksWithSubtasks(null, activeGroupId)
-                    } else {
-                        loadTasksWithSubtasks(activeChecklistId, activeGroupId)
-                    }
-                }
-                tasks = loadedTasks
-                // "今天"视图同时加载过期每日任务
-                if (activeChecklistId == TODAY_ID) {
-                    withContext(Dispatchers.IO) { loadOverdueDailyTasks() }
-                }
-            } catch (e: Exception) {
-                onError("加载任务失败: ${e.message}")
-            }
-            refreshCounts()
+            checklists = loaded
+        } catch (e: Exception) {
+            onError("加载清单失败: ${e.message}")
         }
+        try {
+            // 刷新当前清单下的分组（"今天"、"收集箱"视图无分组，只有真实清单才有分组）
+            groups = if (activeChecklistId != null && activeChecklistId != TODAY_ID && activeChecklistId != INBOX_ID) {
+                withContext(Dispatchers.IO) {
+                    core.getGroupsByChecklist(activeChecklistId!!).map { it.toUi() }
+                }
+            } else {
+                emptyList()
+            }
+        } catch (_: Exception) { }
+        try {
+            val loadedTasks = withContext(Dispatchers.IO) {
+                // "今天"视图使用跨清单聚合查询
+                if (activeChecklistId == TODAY_ID) {
+                    loadTodayTasks()
+                } else if (activeChecklistId == INBOX_ID) {
+                    // "收集箱"视图加载所有 category_id = null 的孤儿任务
+                    loadTasksWithSubtasks(null, activeGroupId)
+                } else {
+                    loadTasksWithSubtasks(activeChecklistId, activeGroupId)
+                }
+            }
+            tasks = loadedTasks
+            // "今天"视图同时加载过期每日任务
+            if (activeChecklistId == TODAY_ID) {
+                withContext(Dispatchers.IO) { loadOverdueDailyTasks() }
+            }
+        } catch (e: Exception) {
+            onError("加载任务失败: ${e.message}")
+        }
+        refreshCounts()
     }
 
     /**

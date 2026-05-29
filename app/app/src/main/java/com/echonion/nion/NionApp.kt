@@ -10,6 +10,7 @@ import com.echonion.nion.reminder.GreetingEvent
 import com.echonion.nion.reminder.ReminderEvent
 import com.echonion.nion.reminder.ReminderScheduler
 import com.echonion.nion.reminder.WeatherAlertScheduler
+import com.echonion.nion.ui.companion.tools.DataType
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -19,10 +20,11 @@ import uniffi.nion_core.NionCore
  * 数据变更事件 —— 当 Agent 工具或 UI 操作修改了底层数据时发出。
  *
  * TaskViewModel 等观察者监听此事件，自动刷新 UI，实现跨组件实时同步。
+ * 订阅者通常配合 debounce 使用，将短时间内多次事件合并为一次刷新。
  *
- * @property type 变更类型："tasks" 或 "checklists"
+ * @property types 受影响的数据类别集合，来自工具的 [DataType] 声明
  */
-data class DataChangeEvent(val type: String)
+data class DataChangeEvent(val types: Set<DataType>)
 
 class NionApp : Application() {
     companion object {
@@ -90,10 +92,10 @@ class NionApp : Application() {
     /**
      * 发出数据变更通知。
      *
-     * @param type "tasks" 或 "checklists"
+     * @param types 受影响的数据类别集合
      */
-    fun notifyDataChanged(type: String) {
-        _dataEvents.tryEmit(DataChangeEvent(type))
+    fun notifyDataChanged(types: Set<DataType>) {
+        _dataEvents.tryEmit(DataChangeEvent(types))
     }
 
     override fun onCreate() {
@@ -163,4 +165,4 @@ fun Application.dataEvents(): SharedFlow<DataChangeEvent> = (this as NionApp).da
 /**
  * 发出数据变更通知，供工具执行器等调用。
  */
-fun Application.notifyDataChanged(type: String) = (this as NionApp).notifyDataChanged(type)
+fun Application.notifyDataChanged(types: Set<DataType>) = (this as NionApp).notifyDataChanged(types)

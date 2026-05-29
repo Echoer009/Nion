@@ -85,8 +85,11 @@ import android.util.Log
 import androidx.activity.compose.BackHandler
 import com.echonion.nion.core
 import com.echonion.nion.dataEvents
+import com.echonion.nion.ui.companion.tools.DataType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.FlowPreview
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import com.echonion.nion.ui.task.ChecklistItem
@@ -113,6 +116,7 @@ import kotlin.math.sin
  * 4. 复用 flattenWithGroupInfo() 展平为 FlatTaskItem 列表
  * 5. 展平过程自动跳过已完成任务，但保留其未完成子任务
  */
+@OptIn(FlowPreview::class)
 class FocusSetupViewModel(
     private val app: Application,
     private val core: NionCore,
@@ -133,11 +137,16 @@ class FocusSetupViewModel(
     init {
         loadTasks()
         // 监听数据变更事件（AI 工具、TaskViewModel、ScheduleViewModel 等外部操作），自动刷新任务列表
+        // debounce(300)：合并 AI 连续调用多个工具时的连续事件，只触发一次刷新
         viewModelScope.launch {
-            app.dataEvents().collect { event ->
-                Log.d("FocusSetupViewModel", "收到数据变更事件: ${event.type}")
-                loadTasks()
-            }
+            app.dataEvents()
+                .debounce(300)
+                .collect { event ->
+                    if (DataType.TASK_DATA in event.types) {
+                        Log.d("FocusSetupViewModel", "收到数据变更事件: ${event.types}")
+                        loadTasks()
+                    }
+                }
         }
     }
 

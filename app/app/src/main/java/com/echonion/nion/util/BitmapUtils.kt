@@ -93,11 +93,18 @@ object BitmapUtils {
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             contentResolver.openInputStream(uri)?.use { stream ->
                 BitmapFactory.decodeStream(stream, null, bounds)
-            } ?: return null
-            if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+            }
 
-            // 第二步：计算采样率并解码
-            val sampleSize = calculateSampleSize(bounds, targetWidthPx, targetHeightPx)
+            // 某些 content URI（如照片选择器返回的 URI）decodeStream 配合
+            // inJustDecodeBounds 时可能无法读取尺寸（outWidth/outHeight 为 -1），
+            // 此时跳过采样率计算，直接按原图解码（inSampleSize=1）
+            val sampleSize = if (bounds.outWidth > 0 && bounds.outHeight > 0) {
+                calculateSampleSize(bounds, targetWidthPx, targetHeightPx)
+            } else {
+                1
+            }
+
+            // 第二步：解码实际 Bitmap
             val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
             contentResolver.openInputStream(uri)?.use { stream ->
                 BitmapFactory.decodeStream(stream, null, decodeOpts)

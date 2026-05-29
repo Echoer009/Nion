@@ -6,17 +6,33 @@ import org.json.JSONObject
 import uniffi.nion_core.NionCore
 
 /**
+ * 工具可能影响的数据类别，用于自动触发 UI 刷新。
+ *
+ * 每个 Tool 通过 [Tool.affectsData] 声明自己可能修改的数据类别，
+ * ToolExecutor 执行成功后根据声明自动触发对应订阅者的刷新。
+ */
+enum class DataType {
+    /** 任务相关数据变更（任务、清单、分组的增删改、移动、排序） → TaskViewModel / ScheduleViewModel / FocusSetupViewModel 刷新 */
+    TASK_DATA,
+    /** 用户偏好变更（remember 工具的 add/remove） → CompanionViewModel.refreshPreferences() */
+    PREFERENCES,
+    /** 用户记忆变更（memory 工具的 add/update/remove） → CompanionViewModel.refreshMemories() */
+    MEMORIES,
+}
+
+/**
  * Agent 工具接口 —— 所有可被 LLM 调用的工具必须实现此接口。
  *
  * 每个工具是一个独立模块，定义自己的：
  * - 名称和描述（供 LLM 理解工具用途）
  * - 参数 JSON Schema（用于 Pydantic 风格校验 + LLM function calling）
  * - 执行逻辑（调用 NionCore 方法并返回 JSON 结果）
+ * - 影响的数据类别（用于自动触发 UI 刷新）
  *
  * 新增工具只需：
  * 1. 创建一个 object 实现 [Tool]
  * 2. 在 [ToolRegistry.all] 列表中添加一行
- * 整个框架会自动处理 Schema 生成、参数校验、执行路由。
+ * 整个框架会自动处理 Schema 生成、参数校验、执行路由、数据变更通知。
  */
 interface Tool {
 
@@ -25,6 +41,19 @@ interface Tool {
 
     /** 工具描述，供 LLM 理解何时及如何使用此工具 */
     val description: String
+
+    /**
+     * 此工具执行成功后可能影响的数据类别。
+     *
+     * ToolExecutor 在工具执行成功后会读取此属性，自动触发对应订阅者的刷新。
+     * 只读工具（如 query、weather）返回空集合，不会触发任何刷新。
+     *
+     * 示例：
+     * - CreateTool → `setOf(DataType.TASK_DATA)`
+     * - RememberTool → `setOf(DataType.PREFERENCES)`
+     * - QueryTool → `emptySet()`
+     */
+    val affectsData: Set<DataType>
 
     /**
      * 参数的 JSON Schema 定义。
@@ -73,34 +102,25 @@ data class ToolResult(
 )
 
 /**
- * 工具执行器 —— 负责参数校验、工具路由、执行调度。
+ * 工具执行器 —— 负责参数校验、工具路由、执行调度、数据变更通知。
  *
  * 核心职责：
  * 1. 根据 tool name 从 [ToolRegistry] 查找对应工具
  * 2. 用 [ToolValidator] 校验参数是否符合 JSON Schema
  * 3. 在 IO 线程上调用工具的 [Tool.execute] 方法
- * 4. 捕获异常并格式化为错误结果
+ * 4. 根据 [Tool.affectsData] 自动触发数据变更通知
+ * 5. 捕获异常并格式化为错误结果
  *
  * @param core NionCore 单例，注入到每个工具的 execute 方法
- * @param onDataChanged 数据变更回调，工具执行成功后通知 UI 刷新。参数为 "tasks" 或 "checklists"
+ * @param onDataChanged 数据变更回调，工具执行成功后根据 [Tool.affectsData] 自动触发。
+ *                       订阅者通过 debounce 合并连续事件，避免 AI 连续调用 10 个工具导致 10 次刷新。
+ * @param onScheduleReminder 提醒调度回调，当工具修改了 reminder/recurrence 字段时触发，传入 task_id
  */
 class ToolExecutor(
     private val core: NionCore,
-    private val onDataChanged: ((type: String) -> Unit)? = null,
-    /** 提醒调度回调，当工具修改了 reminder/recurrence 字段时触发，传入 task_id */
+    private val onDataChanged: ((affectedTypes: Set<DataType>) -> Unit)? = null,
     private val onScheduleReminder: ((taskId: String) -> Unit)? = null,
 ) {
-
-    /**
-     * 判断工具名称对应的数据变更类型。
-     * 统一工具通过 entity_type 参数判断，但工具粒度层面：
-     * - query：只读操作，无需通知
-     * - create/update/delete/move：统一通知 checklists（涵盖清单、分组、任务变更）
-     */
-    private fun dataTypeForTool(name: String): String = when (name) {
-        "query", "remember" -> "" // 只读操作，无需通知
-        else -> "checklists" // 写操作统一通知 UI 刷新
-    }
 
     /**
      * 执行指定工具。
@@ -148,10 +168,10 @@ class ToolExecutor(
                 tool.execute(params, core)
             }
             ToolResult(success = true, data = result).also {
-                // 工具执行成功后，通知 UI 层数据已变更
-                val changeType = dataTypeForTool(name)
-                if (changeType.isNotEmpty()) {
-                    onDataChanged?.invoke(changeType)
+                // 根据工具声明的 affectsData 自动触发数据变更通知
+                // 订阅者通过 debounce 合并连续事件，AI 连续调用 N 个工具时只刷新一次
+                if (tool.affectsData.isNotEmpty()) {
+                    onDataChanged?.invoke(tool.affectsData)
                 }
                 // 检查是否需要重新调度提醒闹钟
                 if (onScheduleReminder != null && needsReschedule(name, params)) {

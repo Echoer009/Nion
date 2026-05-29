@@ -211,8 +211,16 @@ fun SettingsScreen(
                 shape = MaterialTheme.shapes.medium,
                 color = MaterialTheme.colorScheme.surfaceContainerLowest,
             ) {
-                // 权限状态：初始值由 DisposableEffect 在 ON_RESUME 时统一设置
-                var overlayGranted by remember { mutableStateOf(false) }
+                // 权限状态：初始值直接查询当前权限，后续由 DisposableEffect 在 ON_RESUME 时刷新
+                var overlayGranted by remember {
+                    mutableStateOf(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            Settings.canDrawOverlays(context)
+                        } else {
+                            true
+                        }
+                    )
+                }
                 // 监听 Activity 生命周期：每次 ON_RESUME（包括从系统设置页返回）时重新检查权限
                 val lifecycleOwner = LocalLifecycleOwner.current
                 DisposableEffect(lifecycleOwner) {

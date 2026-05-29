@@ -45,6 +45,7 @@ import uniffi.nion_core.NionCore
  */
 object MemoryTool : Tool {
     override val name = "memory"
+    override val affectsData = setOf(DataType.MEMORIES)
     override val description = "记忆工具 —— 主动记录关于用户的事实性信息（身份、状态、兴趣等）。" +
         "与 remember（偏好规则）不同，此工具记录的是描述性知识。" +
         "当用户在对话中透露个人信息、当前状态、兴趣爱好等时，主动调用此工具记录。" +

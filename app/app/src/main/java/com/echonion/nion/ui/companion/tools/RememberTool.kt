@@ -24,6 +24,7 @@ import uniffi.nion_core.NionCore
  */
 object RememberTool : Tool {
     override val name = "remember"
+    override val affectsData = setOf(DataType.PREFERENCES)
     override val description = "记住用户偏好工具。当用户表达不满、提出习惯性要求、或想让 Nion 记住某条规则时使用。" +
         "通过 action 字段指定操作类型。" +
         "add：添加一条偏好（需 content + category）；" +

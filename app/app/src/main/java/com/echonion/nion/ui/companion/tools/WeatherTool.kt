@@ -26,6 +26,7 @@ object WeatherTool : Tool {
     private const val TAG = "WeatherTool"
 
     override val name = "weather"
+    override val affectsData = emptySet<DataType>()
 
     override val description = "天气工具 —— 查看用户所在位置的当前天气和未来预报。" +
         "当用户问到天气、户外活动安排、穿衣建议时，或你想结合天气信息给出更好的建议时使用。" +
