@@ -14,7 +14,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material.icons.outlined.InsertDriveFile
+import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -105,7 +105,7 @@ fun AttachmentButton(
                         },
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.InsertDriveFile,
+                            imageVector = Icons.AutoMirrored.Outlined.InsertDriveFile,
                             contentDescription = "选择文件",
                             modifier = Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.primary,

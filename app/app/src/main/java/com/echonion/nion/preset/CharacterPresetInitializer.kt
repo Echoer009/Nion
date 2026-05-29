@@ -167,7 +167,7 @@ object CharacterPresetInitializer {
 
                 inputStream.use { input ->
                     FileOutputStream(destFile).use { output ->
-                        fileSize = input.copyTo(output).toLong()
+                        fileSize = input.copyTo(output)
                     }
                 }
 
