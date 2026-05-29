@@ -1,5 +1,6 @@
 # Rust
 target/
+.cargo/config.toml
 
 # Android
 app/.gradle/
@@ -34,6 +35,8 @@ Thumbs.db
 # OpenCode
 opencode.json
 plans/
+plan/
+AGENTS.md
 
 # 角色素材（不提交到仓库）
 BrainGirl/

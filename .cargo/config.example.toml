@@ -1,0 +1,24 @@
+# ── Android NDK cross-compilation config ──
+# 复制为 config.toml 并填入你的 NDK 路径。
+# 也可以用 build-android.sh / build-android.ps1，它们通过环境变量自动设置。
+#
+# Windows 示例:
+#   NDK_PATH = "C:/Users/<YOU>/AppData/Local/Android/Sdk/ndk/27.0.12077973"
+# WSL/Linux 示例:
+#   NDK_PATH = "/home/<YOU>/android-sdk/ndk/27.0.12077973"
+
+# [target.aarch64-linux-android]
+# linker = "<NDK_PATH>/toolchains/llvm/prebuilt/<HOST>/bin/aarch64-linux-android26-clang.cmd"
+# rustflags = [
+#     "-C", "link-arg=-L<NDK_PATH>/toolchains/llvm/prebuilt/<HOST>/sysroot/usr/lib/aarch64-linux-android/26",
+#     "-C", "link-arg=-Wl,-z,max-page-size=16384",
+#     "-C", "link-arg=-Wl,-z,common-page-size=16384",
+# ]
+#
+# [target.x86_64-linux-android]
+# linker = "<NDK_PATH>/toolchains/llvm/prebuilt/<HOST>/bin/x86_64-linux-android26-clang.cmd"
+# rustflags = [
+#     "-C", "link-arg=-L<NDK_PATH>/toolchains/llvm/prebuilt/<HOST>/sysroot/usr/lib/x86_64-linux-android/26",
+#     "-C", "link-arg=-Wl,-z,max-page-size=16384",
+#     "-C", "link-arg=-Wl,-z,common-page-size=16384",
+# ]

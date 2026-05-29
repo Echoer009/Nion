@@ -22,7 +22,7 @@ FLAVOR_CAPITALIZED="${FLAVOR^}"
 if [[ "$(uname)" == MINGW* || "$(uname)" == MSYS* ]]; then
     # ---------- Windows Git Bash 环境 ----------
     ADB="$HOME/AppData/Local/Android/Sdk/platform-tools/adb.exe"
-    APK_PATH="/d/nion/app/app/build/outputs/apk/$FLAVOR/debug/app-$FLAVOR-debug.apk"
+    APK_PATH="$PROJECT_DIR/app/app/build/outputs/apk/$FLAVOR/debug/app-$FLAVOR-debug.apk"
 else
     # ---------- WSL2 环境 ----------
     ADB=~/android-sdk/platform-tools/adb
