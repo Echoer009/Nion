@@ -484,29 +484,6 @@ private fun FloatingGreetingCard(
 }
 
 /**
- * 自定义 LifecycleOwner —— 为 ComposeView 提供 Lifecycle 支持。
- *
- * ComposeView 必须在一个拥有 Lifecycle 和 SavedState 的 View 树中才能正常工作。
- * 在 Service 中没有现成的 LifecycleOwner，所以需要手动创建并管理生命周期。
- *
- * 与 ReminderFloatingService 中的 FloatingLifecycleOwner 功能相同，
- * 由于访问权限限制（internal），在此文件中独立定义一份。
+ * 同包下 ReminderFloatingService.kt 中已定义 FloatingLifecycleOwner，
+ * 此处不再重复声明，直接复用同一 internal class。
  */
-internal class FloatingLifecycleOwner : LifecycleOwner, SavedStateRegistryOwner {
-    private val lifecycleRegistry = LifecycleRegistry(this)
-    private val savedStateController = SavedStateRegistryController.create(this)
-
-    init {
-        savedStateController.performRestore(null)
-    }
-
-    override val lifecycle: Lifecycle
-        get() = lifecycleRegistry
-
-    override val savedStateRegistry: SavedStateRegistry
-        get() = savedStateController.savedStateRegistry
-
-    fun handleLifecycleEvent(event: Lifecycle.Event) {
-        lifecycleRegistry.handleLifecycleEvent(event)
-    }
-}

@@ -52,7 +52,9 @@ import com.echonion.nion.NionApp
 import com.echonion.nion.core
 import com.echonion.nion.reminder.GreetingEvent
 import com.echonion.nion.reminder.NotificationHelper
+import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * 问候悬浮卡片 —— 监听 NionApp 的问候事件，在任意页面显示底部悬浮通知卡片。
@@ -101,7 +103,7 @@ fun GreetingOverlay(
      */
     fun dismissWithAnimation() {
         cardVisible = false
-        kotlinx.coroutines.MainScope().launch {
+        MainScope().launch {
             delay(exitAnimationDurationMs)
             currentEvent = null
         }
