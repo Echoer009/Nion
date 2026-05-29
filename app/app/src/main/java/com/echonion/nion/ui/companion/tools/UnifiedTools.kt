@@ -327,7 +327,7 @@ object CreateTool : Tool {
 
         // 批量创建模式：items 不为空时走批量逻辑
         if (itemsArray != null && itemsArray.length() > 0) {
-            return executeBatchCreate(entityType, itemsArray, core)
+            return executeBatchCreate(entityType, itemsArray, params, core)
         }
 
         // 单个创建模式（向后兼容）
@@ -344,10 +344,17 @@ object CreateTool : Tool {
      * 遍历 items 数组，对每项调用对应的单条创建逻辑，收集结果。
      * 部分失败时返回成功和失败各自的计数及错误详情，不会中断整个批次。
      */
-    private fun executeBatchCreate(entityType: String, items: org.json.JSONArray, core: NionCore): String {
+    private fun executeBatchCreate(entityType: String, items: org.json.JSONArray, params: JSONObject, core: NionCore): String {
         val results = org.json.JSONArray()
         var successCount = 0
         var failCount = 0
+
+        // 外层参数作为批量默认值：item 未指定时自动继承
+        // 用法示例：{ "entity_type":"task", "parent_id":"abc", "items":[{"title":"子1"},{"title":"子2"}] }
+        // 子1、子2 会自动继承 parent_id="abc"，无需每项重复指定
+        val outerCategoryId = params.optString("category_id", "").takeIf { it.isNotEmpty() }
+        val outerParentId = params.optString("parent_id", "").takeIf { it.isNotEmpty() }
+        val outerGroupId = params.optString("group_id", "").takeIf { it.isNotEmpty() }
 
         for (i in 0 until items.length()) {
             val itemParams = items.getJSONObject(i)
@@ -356,13 +363,17 @@ object CreateTool : Tool {
                     "task" -> {
                         val title = itemParams.optString("title", "").takeIf { it.isNotEmpty() }
                             ?: throw IllegalArgumentException("批量创建任务时每项必须包含 title，第 ${i + 1} 项缺失")
+                        // item 有值用 item 的，没有则 fallback 到外层参数
+                        val categoryId = itemParams.optString("category_id", "").takeIf { it.isNotEmpty() } ?: outerCategoryId
+                        val parentId = itemParams.optString("parent_id", "").takeIf { it.isNotEmpty() } ?: outerParentId
+                        val groupId = itemParams.optString("group_id", "").takeIf { it.isNotEmpty() } ?: outerGroupId
                         val task = core.createTask(
                             title = title,
                             description = itemParams.optString("description", "").takeIf { it.isNotEmpty() },
                             priority = itemParams.optString("priority", "medium"),
-                            categoryId = itemParams.optString("category_id", "").takeIf { it.isNotEmpty() },
-                            parentId = itemParams.optString("parent_id", "").takeIf { it.isNotEmpty() },
-                            groupId = itemParams.optString("group_id", "").takeIf { it.isNotEmpty() },
+                            categoryId = categoryId,
+                            parentId = parentId,
+                            groupId = groupId,
                             recurrenceRule = itemParams.optString("recurrence_rule", "").takeIf { it.isNotEmpty() },
                             recurrenceReminderTime = itemParams.optString("recurrence_reminder_time", "").takeIf { it.isNotEmpty() },
                         )
@@ -1101,19 +1112,23 @@ object MoveTool : Tool {
  * 通过 action 参数路由到不同操作，当前支持：
  * - set_recurrence：设置任务的每日循环规则和提醒时间
  * - remove_recurrence：移除任务的每日循环
- *
- * 未来可扩展更多操作类型（如设置提醒、批量操作等），不增加工具数量。
+ * - reorder：自由排序任务/清单/分组，AI 按期望顺序传入 ordered_ids 即可
  *
  * Agent 场景示例：
  * - "每天 9 点提醒我" → action="set_recurrence", task_id="xxx", recurrence_rule="daily", reminder_time="09:00"
  * - "取消每天循环" → action="remove_recurrence", task_id="xxx"
+ * - "按优先级排一下任务" → action="reorder", entity_type="task", ordered_ids=["高优id","中优id","低优id"]
+ * - "调整清单顺序" → action="reorder", entity_type="checklist", ordered_ids=["id3","id1","id2"]
+ * - "分组排序" → action="reorder", entity_type="group", ordered_ids=["id2","id1"]
  */
 object ManageTool : Tool {
     override val name = "manage"
     override val description = "通用操作工具，用于不归属 CRUD 的其它操作。" +
         "通过 action 字段指定操作类型。" +
         "set_recurrence：设置任务每日循环（需 task_id、recurrence_rule、reminder_time）；" +
-        "remove_recurrence：移除任务的每日循环（需 task_id）。"
+        "remove_recurrence：移除任务的每日循环（需 task_id）；" +
+        "reorder：自由排序，AI 决定顺序后传入 ordered_ids（需 entity_type、ordered_ids）。" +
+        "支持 task / checklist / group 三种实体的排序。"
 
     private val schema = """
     {
@@ -1121,12 +1136,12 @@ object ManageTool : Tool {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["set_recurrence", "remove_recurrence"],
-                "description": "操作类型：set_recurrence=设置每日循环+提醒时间, remove_recurrence=移除每日循环"
+                "enum": ["set_recurrence", "remove_recurrence", "reorder"],
+                "description": "操作类型：set_recurrence=设置每日循环+提醒时间, remove_recurrence=移除每日循环, reorder=自由排序"
             },
             "task_id": {
                 "type": "string",
-                "description": "目标任务 ID（所有 action 都需要）"
+                "description": "目标任务 ID（仅 set_recurrence / remove_recurrence 需要）"
             },
             "recurrence_rule": {
                 "type": "string",
@@ -1136,9 +1151,19 @@ object ManageTool : Tool {
             "reminder_time": {
                 "type": "string",
                 "description": "每日提醒时间，格式 HH:MM 如 09:00，精确到分钟（仅 set_recurrence 需要）"
+            },
+            "entity_type": {
+                "type": "string",
+                "enum": ["task", "checklist", "group"],
+                "description": "排序的实体类型（仅 reorder 需要）：task=任务, checklist=清单, group=分组"
+            },
+            "ordered_ids": {
+                "type": "array",
+                "description": "按期望顺序排列的 ID 列表（仅 reorder 需要）。数组第一个元素排在最前面，最后一个排在最后面",
+                "items": { "type": "string" }
             }
         },
-        "required": ["action", "task_id"]
+        "required": ["action"]
     }
     """.trimIndent()
 
@@ -1146,12 +1171,19 @@ object ManageTool : Tool {
 
     override suspend fun execute(params: JSONObject, core: NionCore): String {
         val action = params.getString("action")
-        val taskId = params.optString("task_id", "").takeIf { it.isNotEmpty() }
-            ?: return """{"error":"manage 操作必须指定 task_id"}"""
 
         return when (action) {
-            "set_recurrence" -> executeSetRecurrence(taskId, params, core)
-            "remove_recurrence" -> executeRemoveRecurrence(taskId, core)
+            "set_recurrence", "remove_recurrence" -> {
+                // recurrence 系列操作需要 task_id
+                val taskId = params.optString("task_id", "").takeIf { it.isNotEmpty() }
+                    ?: return """{"error":"manage 操作必须指定 task_id"}"""
+                when (action) {
+                    "set_recurrence" -> executeSetRecurrence(taskId, params, core)
+                    "remove_recurrence" -> executeRemoveRecurrence(taskId, core)
+                    else -> """{"error":"不支持的 action: $action"}"""
+                }
+            }
+            "reorder" -> executeReorder(params, core)
             else -> """{"error":"不支持的 action: $action"}"""
         }
     }
@@ -1182,6 +1214,57 @@ object ManageTool : Tool {
             put("success", true)
             put("task", taskToJson(task))
             put("message", "已移除每日循环")
+        }.toString()
+    }
+
+    /**
+     * 自由排序实体。
+     * AI 按期望顺序传入 ordered_ids，Rust 层按数组索引设置 sort_order。
+     * 支持任务、清单、分组三种实体类型。
+     * 不做范围限定 —— AI 通过 query 工具拿到列表后自行决定排序，完全自由。
+     */
+    private fun executeReorder(params: JSONObject, core: NionCore): String {
+        // 校验 entity_type
+        val entityType = params.optString("entity_type", "").takeIf { it.isNotEmpty() }
+            ?: return """{"error":"reorder 操作必须指定 entity_type（task/checklist/group）"}"""
+        if (entityType !in listOf("task", "checklist", "group")) {
+            return """{"error":"不支持的 entity_type: $entityType，可选值：task, checklist, group"}"""
+        }
+
+        // 校验 ordered_ids
+        val orderedIdsArray = params.optJSONArray("ordered_ids")
+            ?: return """{"error":"reorder 操作必须指定 ordered_ids 数组"}"""
+        if (orderedIdsArray.length() == 0) {
+            return """{"error":"ordered_ids 不能为空，至少需要一个 ID"}"""
+        }
+
+        // 将 JSONArray 转为 List<String>
+        val orderedIds = (0 until orderedIdsArray.length()).map { orderedIdsArray.getString(it) }
+
+        // 根据实体类型调用对应的 Rust 排序方法
+        try {
+            when (entityType) {
+                "task" -> core.reorderTasks(orderedIds)
+                "checklist" -> core.reorderChecklists(orderedIds)
+                "group" -> core.reorderGroups(orderedIds)
+            }
+        } catch (e: Exception) {
+            return """{"error":"排序失败：${e.message ?: "未知错误"}"}"""
+        }
+
+        // 构建实体类型的中文名用于提示
+        val typeLabel = when (entityType) {
+            "task" -> "任务"
+            "checklist" -> "清单"
+            "group" -> "分组"
+            else -> entityType
+        }
+
+        return JSONObject().apply {
+            put("success", true)
+            put("entity_type", entityType)
+            put("ordered_count", orderedIds.size)
+            put("message", "已按指定顺序排列 $orderedIds.size 个${typeLabel}")
         }.toString()
     }
 }
