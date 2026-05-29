@@ -107,6 +107,8 @@ import com.echonion.nion.ui.companion.tools.MemoryTool
 import com.echonion.nion.ui.companion.tools.ToolPhrasePool
 import com.echonion.nion.ui.task.WheelSpinner
 import com.echonion.nion.ui.theme.NionColors
+import com.echonion.nion.util.BitmapUtils
+import androidx.compose.ui.platform.LocalDensity
 
 /**
  * 聊天消息数据类 —— 单条消息的展示模型。
@@ -390,16 +392,18 @@ private fun CompanionAvatar(
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     // 从 URI 加载 Bitmap，avatarUri 变化时重新加载
-    // 使用 inSampleSize=4 降采样，避免大图全尺寸解码导致内存暴涨和主线程阻塞
-    val bitmap = remember(avatarUri) {
+    // 使用自适应采样率：根据显示尺寸和屏幕密度计算目标像素，避免过度降采样导致模糊
+    val bitmap = remember(avatarUri, size) {
         if (avatarUri != null) {
             try {
                 val uri = Uri.parse(avatarUri)
-                context.contentResolver.openInputStream(uri)?.use { stream ->
-                    val options = BitmapFactory.Options().apply { inSampleSize = 4 }
-                    BitmapFactory.decodeStream(stream, null, options)
-                }
+                // 将 dp 转换为实际像素，乘以密度得到目标尺寸
+                val targetPx = with(density) { size.roundToPx() }
+                BitmapUtils.decodeUriAdaptive(
+                    context.contentResolver, uri, targetPx, targetPx
+                )
             } catch (_: Exception) { null }
         } else null
     }
@@ -1901,15 +1905,15 @@ private fun ConversationItem(
                 overflow = TextOverflow.Ellipsis,
             )
             Spacer(modifier = Modifier.height(4.dp))
-            // 显示对话消息数量和更新时间的简短摘要（排除工具状态消息，只计用户消息和 AI 回复）
-            val msgCount = try {
+            // 统计用户发送的消息数作为对话轮数（一轮 = 一次用户提问 + AI 回复）
+            val roundCount = try {
                 val arr = JSONArray(conversation.messages)
                 (0 until arr.length()).count { i ->
-                    !arr.getJSONObject(i).optBoolean("isToolMessage", false)
+                    arr.getJSONObject(i).optBoolean("isFromUser", false)
                 }
             } catch (_: Exception) { 0 }
             Text(
-                "$msgCount 条消息 · ${conversation.updatedAt.take(10)}",
+                "$roundCount 轮对话 · ${conversation.updatedAt.take(10)}",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
             )

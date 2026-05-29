@@ -1,6 +1,6 @@
 package com.echonion.nion.ui.task
 
-import android.graphics.BitmapFactory
+import com.echonion.nion.util.BitmapUtils
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -142,15 +142,11 @@ private fun AttachmentCard(
                     try {
                         val file = File(attachment.filePath)
                         if (file.exists()) {
-                            // 先解码尺寸，再按比例缩小，避免 OOM
-                            val options = BitmapFactory.Options().apply {
-                                inJustDecodeBounds = true
-                            }
-                            BitmapFactory.decodeFile(file.absolutePath, options)
-                            val targetSize = 112 // 56dp * 2 (假设 2x 密度)
-                            options.inSampleSize = calculateSampleSize(options, targetSize, targetSize)
-                            options.inJustDecodeBounds = false
-                            BitmapFactory.decodeFile(file.absolutePath, options)?.asImageBitmap()
+                            // 目标尺寸 56dp * 2（假设 2x 密度），自适应采样避免模糊
+                            val targetSize = 112
+                            BitmapUtils.decodeFileAdaptive(
+                                file.absolutePath, targetSize, targetSize
+                            )?.asImageBitmap()
                         } else null
                     } catch (_: Exception) { null }
                 }
@@ -223,22 +219,6 @@ private fun AttachmentCard(
             }
         }
     }
-}
-
-/**
- * 根据目标尺寸计算 BitmapFactory 的采样率
- */
-private fun calculateSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
-    val (height, width) = options.outHeight to options.outWidth
-    var inSampleSize = 1
-    if (height > reqHeight || width > reqWidth) {
-        val halfHeight = height / 2
-        val halfWidth = width / 2
-        while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
-            inSampleSize *= 2
-        }
-    }
-    return inSampleSize
 }
 
 /**

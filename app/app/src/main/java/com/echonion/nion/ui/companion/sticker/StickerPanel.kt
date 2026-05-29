@@ -191,7 +191,7 @@ private fun StickerItem(
     sticker: StickerData,
     onDelete: () -> Unit,
 ) {
-    // 通过 StickerService 加载缩略图（4× 降采样 + LRU 缓存，避免重复解码）
+    // 通过 StickerService 加载缩略图（自适应采样率 + LRU 缓存，避免重复解码）
     val bitmap = remember(sticker.filePath) {
         StickerService.loadThumbnail(sticker.filePath)
     }
@@ -306,9 +306,9 @@ private fun AddStickerDialog(
         }
     }
 
-    // 预览缩略图 —— 从临时文件加载（通过 StickerService 的 LRU 缓存）
+    // 预览图 —— 使用 loadForRender 加载更高分辨率（400px），避免 100dp 预览区域模糊
     val previewBitmap = remember(pickedTempPath) {
-        pickedTempPath?.let { StickerService.loadThumbnail(it) }
+        pickedTempPath?.let { StickerService.loadForRender(it, 400) }
     }
 
     AlertDialog(

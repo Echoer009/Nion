@@ -1,6 +1,6 @@
 package com.echonion.nion.ui.task
 
-import android.graphics.BitmapFactory
+import com.echonion.nion.util.BitmapUtils
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -54,14 +54,9 @@ fun ImagePreviewOverlay(
         try {
             val file = File(filePath)
             if (file.exists()) {
-                // 先获取图片尺寸
-                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeFile(file.absolutePath, options)
-                // 限制最大边长为 2048 像素
+                // 限制最大边长为 2048 像素，自适应采样
                 val maxSize = 2048
-                options.inSampleSize = calculateSampleSize(options, maxSize, maxSize)
-                options.inJustDecodeBounds = false
-                BitmapFactory.decodeFile(file.absolutePath, options)?.asImageBitmap()
+                BitmapUtils.decodeFileAdaptive(file.absolutePath, maxSize, maxSize)?.asImageBitmap()
             } else null
         } catch (_: Exception) { null }
     }
@@ -118,20 +113,4 @@ fun ImagePreviewOverlay(
             )
         }
     }
-}
-
-/**
- * 根据目标尺寸计算 BitmapFactory 的采样率
- */
-private fun calculateSampleSize(options: BitmapFactory.Options, reqWidth: Int, reqHeight: Int): Int {
-    val (height, width) = options.outHeight to options.outWidth
-    var inSampleSize = 1
-    if (height > reqHeight || width > reqWidth) {
-        val halfHeight = height / 2
-        val halfWidth = width / 2
-        while (halfHeight / inSampleSize >= reqHeight && halfWidth / inSampleSize >= reqWidth) {
-            inSampleSize *= 2
-        }
-    }
-    return inSampleSize
 }

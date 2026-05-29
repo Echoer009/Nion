@@ -2,8 +2,8 @@ package com.echonion.nion.ui.companion.sticker
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.util.LruCache
+import com.echonion.nion.util.BitmapUtils
 import java.io.File
 import java.util.UUID
 
@@ -14,8 +14,8 @@ import java.util.UUID
  * 设计要点：
  * - 统一的存储目录（nion_data/stickers/），创建时自动确保目录存在
  * - LRU 内存缓存（max 5MB）避免重复解码，聊天列表滚动时不再重复 IO
- * - 按需采样解码：缩略图固定 4× 降采样，聊天渲染根据目标像素自适应采样率
- *   自适应采样是解决锯齿问题的关键 —— 避免把 2000×2000 原图硬缩到 50×50
+ * - 按需采样解码：缩略图和聊天渲染均根据目标像素自适应采样率
+ *   自适应采样是解决锯齿/模糊问题的关键 —— 确保解码后尺寸 ≥ 目标显示像素
  */
 object StickerService {
 
@@ -57,19 +57,21 @@ object StickerService {
     }
 
     /**
-     * 加载缩略图 Bitmap —— 固定 4 倍降采样，专用于列表卡片展示。
-     * 图幅约 40dp（~160px @4x），4× 降采样后约为原始尺寸的 1/16 内存。
+     * 加载缩略图 Bitmap —— 自适应采样率，专用于列表卡片展示。
+     *
+     * 默认目标尺寸 160px（约 40dp @4x 屏幕），通过 BitmapUtils 自适应计算采样率，
+     * 确保解码后图片尺寸 ≥ 目标像素，避免小图被过度降采样导致模糊。
      *
      * @param filePath 图片文件路径
+     * @param targetSizePx 目标显示像素（宽高相同），默认 160px
      * @return 解码后的 Bitmap，失败时返回 null
      */
-    fun loadThumbnail(filePath: String): Bitmap? {
+    fun loadThumbnail(filePath: String, targetSizePx: Int = 160): Bitmap? {
         val cached = bitmapCache.get(filePath)
         if (cached != null) return cached
 
         return try {
-            val options = BitmapFactory.Options().apply { inSampleSize = 4 }
-            val bitmap = BitmapFactory.decodeFile(filePath, options)
+            val bitmap = BitmapUtils.decodeFileAdaptive(filePath, targetSizePx, targetSizePx)
             if (bitmap != null) bitmapCache.put(filePath, bitmap)
             bitmap
         } catch (_: Exception) {
@@ -80,11 +82,9 @@ object StickerService {
     /**
      * 加载聊天内联渲染用 Bitmap —— 根据目标像素自适应采样率。
      *
-     * 解决锯齿的核心逻辑：
-     * 1. 先用 inJustDecodeBounds 获取原始尺寸
-     * 2. 计算合适的 inSampleSize，使解码后尺寸刚好 ≥ 目标像素
-     * 3. 再用 computed sampleSize 真正解码
-     * 这样 Compose 只需做小幅缩放（而非从全分辨率暴力压缩），边缘自然清晰。
+     * 通过 BitmapUtils 两步解码：先 inJustDecodeBounds 获取原图尺寸，
+     * 再计算合适的 inSampleSize，使解码后尺寸 ≥ 目标像素。
+     * 这样 Compose 只需做小幅缩放，图片清晰不模糊。
      *
      * @param filePath 图片文件路径
      * @param targetSizePx 目标显示的最小像素尺寸
@@ -96,16 +96,7 @@ object StickerService {
         if (cached != null) return cached
 
         return try {
-            val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            BitmapFactory.decodeFile(filePath, bounds)
-            val rawMin = minOf(bounds.outWidth, bounds.outHeight)
-            if (rawMin <= 0) return null
-
-            // 采样率 = 原图最小边 / 目标像素，确保解码后最小边 ≥ targetSizePx
-            val sampleSize = maxOf(1, rawMin / targetSizePx)
-
-            val decodeOpts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
-            val bitmap = BitmapFactory.decodeFile(filePath, decodeOpts)
+            val bitmap = BitmapUtils.decodeFileAdaptive(filePath, targetSizePx, targetSizePx)
             if (bitmap != null) bitmapCache.put(cacheKey, bitmap)
             bitmap
         } catch (_: Exception) {
