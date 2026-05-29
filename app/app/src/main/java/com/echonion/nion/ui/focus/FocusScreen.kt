@@ -81,7 +81,10 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import android.util.Log
+import androidx.activity.compose.BackHandler
 import com.echonion.nion.core
+import com.echonion.nion.dataEvents
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -110,7 +113,10 @@ import kotlin.math.sin
  * 4. 复用 flattenWithGroupInfo() 展平为 FlatTaskItem 列表
  * 5. 展平过程自动跳过已完成任务，但保留其未完成子任务
  */
-class FocusSetupViewModel(private val core: NionCore) : ViewModel() {
+class FocusSetupViewModel(
+    private val app: Application,
+    private val core: NionCore,
+) : ViewModel() {
     /** 展平后的待办任务列表（含层级深度信息），用于专注任务选择面板 */
     var flatTasks by mutableStateOf<List<FlatTaskItem>>(emptyList())
         private set
@@ -122,6 +128,18 @@ class FocusSetupViewModel(private val core: NionCore) : ViewModel() {
     /** 当前选中的清单 ID，null 表示显示全部清单的任务 */
     var selectedChecklistId by mutableStateOf<String?>(null)
         private set
+
+    /** ViewModel 创建时加载任务数据，并订阅数据变更事件 */
+    init {
+        loadTasks()
+        // 监听数据变更事件（AI 工具、TaskViewModel、ScheduleViewModel 等外部操作），自动刷新任务列表
+        viewModelScope.launch {
+            app.dataEvents().collect { event ->
+                Log.d("FocusSetupViewModel", "收到数据变更事件: ${event.type}")
+                loadTasks()
+            }
+        }
+    }
 
     /** 从数据库加载清单列表和任务列表 */
     fun loadTasks() {
@@ -214,7 +232,7 @@ private fun focusSetupViewModel(): FocusSetupViewModel {
         factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                return FocusSetupViewModel(app.core()) as T
+                return FocusSetupViewModel(app, app.core()) as T
             }
         }
     )
@@ -258,6 +276,11 @@ fun FocusScreen(
 
     // showTaskPanel: 是否显示任务选择面板（纯 UI 状态，留在 Composable 中）
     var showTaskPanel by remember { mutableStateOf(false) }
+
+    // 任务选择面板返回拦截：面板打开时，系统返回手势关闭面板而非退出页面
+    BackHandler(enabled = showTaskPanel) {
+        showTaskPanel = false
+    }
 
     val totalSeconds = vm.totalSeconds
     // progress: 剩余时间占总时间的比例，从 ViewModel 读取

@@ -15,6 +15,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.echonion.nion.core
+import com.echonion.nion.dataEvents
 import com.echonion.nion.notifyDataChanged
 import com.echonion.nion.ui.components.TaskCardModel
 import com.echonion.nion.ui.task.FlatTaskItem
@@ -270,10 +271,19 @@ class ScheduleViewModel(
         }
     }
 
-    /** ViewModel 创建时加载今天的任务和当月日历标记 */
+    /** ViewModel 创建时加载今天的任务和当月日历标记，并订阅数据变更事件 */
     init {
         loadTasksForDate(LocalDate.now())
         loadCalendarMarkers(LocalDate.now().year, LocalDate.now().monthValue)
+
+        // 监听数据变更事件（AI 工具、TaskViewModel 等外部操作），自动刷新当前日期任务和日历标记
+        viewModelScope.launch {
+            app.dataEvents().collect { event ->
+                Log.d("ScheduleViewModel", "收到数据变更事件: ${event.type}")
+                loadTasksForDate(selectedDate)
+                loadCalendarMarkers(selectedDate.year, selectedDate.monthValue)
+            }
+        }
     }
 
     /** 将 Rust 端 DailyTaskStatus 转换为 ScheduleTaskItem */

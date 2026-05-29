@@ -65,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.activity.compose.BackHandler
 import com.echonion.nion.ui.components.SharedTaskList
 import com.echonion.nion.ui.components.TaskDetailOverlay
 import com.echonion.nion.ui.task.FlatTaskItem
@@ -115,6 +116,15 @@ fun ScheduleScreen(
 
     // 提升到 AnimatedContent 外部，跨过渡保留拖拽状态
     val reorderableItems = remember { mutableStateListOf<FlatTaskItem>() }
+
+    // 日历弹窗返回拦截：弹窗打开时，系统返回手势关闭日历而非退出页面
+    BackHandler(enabled = showCalendarPicker) {
+        showCalendarPicker = false
+    }
+    // 任务详情 overlay 返回拦截：详情展开时，系统返回手势关闭详情而非退出页面
+    BackHandler(enabled = expandedTaskId != null) {
+        expandedTaskId = null
+    }
 
     SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
         AnimatedContent(

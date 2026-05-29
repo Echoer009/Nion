@@ -115,6 +115,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.zIndex
+import androidx.activity.compose.BackHandler
 import kotlinx.coroutines.launch
 import com.echonion.nion.ui.components.DualPanelState
 import com.echonion.nion.ui.components.TaskDetailOverlay
@@ -225,6 +226,15 @@ fun TaskScreen(
             if (found != null) return found
         }
         return null
+    }
+
+    // 任务详情 overlay 返回拦截：expandedTaskId 非空时，系统返回手势关闭详情而非退出页面
+    BackHandler(enabled = expandedTaskId != null) {
+        expandedTaskId = null
+    }
+    // 添加任务 overlay 返回拦截：showAddSheet 为 true 时，系统返回手势关闭表单而非退出页面
+    BackHandler(enabled = showAddSheet) {
+        showAddSheet = false
     }
 
     // SharedTransitionLayout：为 sharedBounds（FAB）+ sharedElement（任务卡片）两套动画提供容器
