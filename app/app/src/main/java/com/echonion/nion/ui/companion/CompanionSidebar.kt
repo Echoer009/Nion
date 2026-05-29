@@ -104,6 +104,7 @@ import uniffi.nion_core.StickerData
 import org.json.JSONArray
 import com.echonion.nion.ui.companion.sticker.StickersPanel
 import com.echonion.nion.ui.companion.tools.MemoryTool
+import com.echonion.nion.ui.companion.tools.ToolPhrasePool
 import com.echonion.nion.ui.task.WheelSpinner
 import com.echonion.nion.ui.theme.NionColors
 
@@ -587,8 +588,37 @@ private fun ProfileContent(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        // ══════════════════════════════════════════════════════════════
-        // 伙伴设定
+        // ── 风格选择器：横向可滚动 Chip 组 ──
+        Text(
+            "风格",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.height(6.dp))
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+        ) {
+            ToolPhrasePool.STYLES.forEach { (key, label) ->
+                val isSelected = viewModel.companionStyle == key
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.primary
+                    else MaterialTheme.colorScheme.surfaceVariant,
+                    modifier = Modifier.clickable { viewModel.updateCompanionStyle(key) },
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                    )
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(24.dp))
         // ══════════════════════════════════════════════════════════════
         SectionHeader("伙伴设定")
 
@@ -822,19 +852,22 @@ private fun ExpandablePromptCard(
             label = "card_$cardKey",
         ) { expanded ->
             // 卡片容器：sharedElement 实现从折叠尺寸到展开尺寸的变形动画，
-            // 保持圆角裁剪贯穿整个动画过程，避免收起时出现直角→圆角的跳变
-            Surface(
+            // 使用 Box + background 代替 Surface，避免 Surface 内部 clip(shape)
+            // 在弹簧回弹过程中裁剪预览文本
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .sharedElement(
                         sharedContentState = rememberSharedContentState("container_$cardKey"),
                         animatedVisibilityScope = this@AnimatedContent,
                         boundsTransform = { _, _ ->
-                            spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
                         },
+                    )
+                    .background(
+                        MaterialTheme.colorScheme.surfaceContainerLowest,
+                        RoundedCornerShape(16.dp),
                     ),
-                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                shape = RoundedCornerShape(16.dp),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     // ── 标题行：点击展开/折叠 ──
@@ -986,19 +1019,21 @@ private fun ExpandableReminderCard(
             },
             label = "card_$cardKey",
         ) { expanded ->
-            Surface(
+            // 使用 Box + background 代替 Surface，避免 clip(shape) 在弹簧回弹时裁剪内容
+            Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    // sharedElement 保持圆角裁剪贯穿动画全过程，与日程日历弹窗效果一致
                     .sharedElement(
                         sharedContentState = rememberSharedContentState("container_$cardKey"),
                         animatedVisibilityScope = this@AnimatedContent,
                         boundsTransform = { _, _ ->
-                            spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
                         },
+                    )
+                    .background(
+                        MaterialTheme.colorScheme.surfaceContainerLowest,
+                        RoundedCornerShape(16.dp),
                     ),
-                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                shape = RoundedCornerShape(16.dp),
             ) {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     // ── 标题行 ──

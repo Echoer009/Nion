@@ -31,6 +31,10 @@ object PromptDefaults {
     const val KEY_WEATHER_ALERT = "prompt_weather_alert"
     /** 密集提醒提示词 key */
     const val KEY_BATCH_REMINDER = "prompt_batch_reminder"
+    /** 伙伴风格 key —— 决定工具执行完成后的拟人话术风格 */
+    const val KEY_COMPANION_STYLE = "companion_style"
+    /** 默认伙伴风格 */
+    const val DEFAULT_COMPANION_STYLE = "female_energetic"
 
     // ── 当前 flavor 的角色预设 ──────────────────────────────────────
 

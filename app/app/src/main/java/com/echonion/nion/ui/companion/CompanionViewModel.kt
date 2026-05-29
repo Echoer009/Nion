@@ -16,6 +16,7 @@ import com.echonion.nion.ui.companion.sticker.StickerService
 import com.echonion.nion.ui.companion.tools.ToolExecutor
 import com.echonion.nion.ui.companion.tools.ToolResult
 import com.echonion.nion.ui.companion.tools.MemoryTool
+import com.echonion.nion.ui.companion.tools.ToolPhrasePool
 import com.echonion.nion.preset.CharacterPreset
 import com.echonion.nion.preset.CharacterPresetInitializer
 import kotlinx.coroutines.Dispatchers
@@ -234,6 +235,10 @@ class CompanionViewModel(
     var companionAvatarUri by mutableStateOf<String?>(null)
         private set
 
+    /** 伙伴风格，决定工具执行完成后的拟人话术风格，默认元气少女 */
+    var companionStyle by mutableStateOf(PromptDefaults.DEFAULT_COMPANION_STYLE)
+        private set
+
     /**
      * 表情包列表 —— 用户上传的表情图片，AI 在回复中用 <标签名> 引用。
      * 每次对话注入系统提示词，渲染时 <tag> 替换为对应图片。
@@ -408,6 +413,7 @@ class CompanionViewModel(
             val eveningEnabled: String?,
             val eveningTime: String?,
             val weatherAlertEnabled: String?,
+            val companionStyle: String?,
         )
 
         /**
@@ -441,12 +447,13 @@ class CompanionViewModel(
                     eveningEnabled = core.getSetting("greeting_evening_enabled"),
                     eveningTime = core.getSetting("greeting_evening_time"),
                     weatherAlertEnabled = core.getSetting("weather_alert_enabled"),
+                    companionStyle = core.getSetting(PromptDefaults.KEY_COMPANION_STYLE),
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "loadSettings DB 读取异常", e)
                 RawData(null, null, null, null, null, null, null, null, null, null,
                     null, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null)
+                    null, null, null, null, null, null, null, null)
             }
         }
 
@@ -531,6 +538,9 @@ class CompanionViewModel(
 
             // ── 加载头像 ──
             if (!loaded.avatarUri.isNullOrEmpty()) companionAvatarUri = loaded.avatarUri
+
+            // ── 加载伙伴风格 ──
+            if (!loaded.companionStyle.isNullOrEmpty()) companionStyle = loaded.companionStyle
 
             // ── 首次启动迁移：缺失的提示词 key 写入默认值 ──
             migratePromptDefaults(mapOf(
@@ -1217,7 +1227,17 @@ class CompanionViewModel(
     }
 
     /**
-     * 清除 API 配置 —— 清空本地状态和聊天记录。
+     * 更新伙伴风格并持久化到 settings 表。
+     * 风格影响工具执行完成后的拟人话术。
+     *
+     * @param style 风格代号（如 "female_energetic"），见 [ToolPhrasePool.STYLES]
+     */
+    fun updateCompanionStyle(style: String) {
+        companionStyle = style
+        try { core.setSetting(PromptDefaults.KEY_COMPANION_STYLE, style) } catch (_: Exception) {}
+    }
+
+    /**
      * 用于"切换 provider"或"重置设置"场景。
      *
      * mutableStateOf 写入必须在主线程，DB 操作通过 withContext(IO) 隔离。
@@ -1382,60 +1402,69 @@ class CompanionViewModel(
     }
 
     /**
-     * 根据工具执行结果生成简短的中文完成描述。
-     * 从 JSON 结果中提取关键数量信息（如"已创建"、"已删除"、"查询到 N 条"）。
+     * 根据工具执行结果从话术池中随机选取一条拟人化文案。
+     *
+     * 流程：
+     * 1. 操作失败 → 从 "fail" 话术池选取
+     * 2. 解析 result JSON 提取 name/count 等上下文变量
+     * 3. 根据工具名和是否有名字，确定子键（如 create_named / create_generic）
+     * 4. 从对应风格 × 子键的话术池中随机选取一条，替换模板变量
+     *
+     * JSON 解析失败时回退到兜底文案（仍然从话术池选取）。
      */
     private fun toolResultText(toolName: String, argumentsJson: String, result: ToolResult): String {
-        if (!result.success) return "操作失败"
+        // 操作失败：从失败话术池选取
+        if (!result.success) {
+            return ToolPhrasePool.pick(companionStyle, "fail")
+        }
+
         return try {
             val resultJson = JSONObject(result.data)
-            val entityType = try {
-                JSONObject(argumentsJson).optString("entity_type", "")
-            } catch (_: Exception) { "" }
+            val args = try { JSONObject(argumentsJson) } catch (_: Exception) { JSONObject() }
+
+            // 提取实体类型中文标签
+            val entityType = args.optString("entity_type", "")
             val entityLabel = when (entityType) {
                 "task" -> "任务"
                 "checklist" -> "清单"
                 "group" -> "分组"
                 else -> ""
             }
+
+            // 从结果 JSON 中提取实体名称（create/update 返回完整实体对象）
+            val entityObj = resultJson.optJSONObject(entityType)
+            val entityName = entityObj?.optString("name", "")?.takeIf { it.isNotEmpty() }
+                ?: entityObj?.optString("title", "")?.takeIf { it.isNotEmpty() }
+                ?: ""
+
             when (toolName) {
                 "query" -> {
-                    // 从结果 JSON 中统计返回的数据条数
+                    // 统计查询结果数量
                     val count = if (resultJson.has("checklists")) resultJson.getJSONArray("checklists").length()
                         else if (resultJson.has("groups")) resultJson.getJSONArray("groups").length()
                         else if (resultJson.has("tasks")) resultJson.getJSONArray("tasks").length()
                         else 0
-                    "已查询到 $count 条$entityLabel"
+                    val subKey = if (count > 0) "query_results" else "query_empty"
+                    ToolPhrasePool.pick(companionStyle, subKey, mapOf("count" to count.toString(), "label" to entityLabel))
                 }
                 "create" -> {
-                    val name = resultJson.optJSONObject(entityType)?.optString("name", "")
-                        ?: resultJson.optString("name", "")
-                    if (name.isNotEmpty()) "已创建${entityLabel}「$name」"
-                    else "已创建$entityLabel"
+                    val subKey = if (entityName.isNotEmpty()) "create_named" else "create_generic"
+                    ToolPhrasePool.pick(companionStyle, subKey, mapOf("name" to entityName))
                 }
-                "update" -> "已更新$entityLabel"
-                "delete" -> {
-                    val name = resultJson.optJSONObject(entityType)?.optString("name", "")
-                        ?: resultJson.optString("name", "")
-                    if (name.isNotEmpty()) "已删除${entityLabel}「$name」"
-                    else "已删除$entityLabel"
+                "update" -> {
+                    val subKey = if (entityName.isNotEmpty()) "update_named" else "update_generic"
+                    ToolPhrasePool.pick(companionStyle, subKey, mapOf("name" to entityName))
                 }
-                "move" -> "已移动$entityLabel"
-                "remember" -> resultJson.optString("message", "偏好已更新")
-                "memory" -> resultJson.optString("message", "记忆已更新")
-                else -> "操作完成"
+                "delete" -> ToolPhrasePool.pick(companionStyle, "delete")
+                "move" -> ToolPhrasePool.pick(companionStyle, "move")
+                "manage" -> ToolPhrasePool.pick(companionStyle, "manage")
+                "remember" -> ToolPhrasePool.pick(companionStyle, "remember")
+                "memory" -> ToolPhrasePool.pick(companionStyle, "memory")
+                else -> ToolPhrasePool.pick(companionStyle, "create_generic")
             }
         } catch (_: Exception) {
-            when (toolName) {
-                "query" -> "查询完成"
-                "create" -> "创建完成"
-                "update" -> "更新完成"
-                "delete" -> "删除完成"
-                "move" -> "移动完成"
-                "remember" -> "记忆偏好中"
-                "memory" -> "$companionName 记住了一些事情"
-                else -> "操作完成"
-            }
+            // JSON 解析失败，用兜底文案（仍从话术池选取通用短语）
+            ToolPhrasePool.pick(companionStyle, "create_generic")
         }
     }
 
