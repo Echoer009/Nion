@@ -203,14 +203,16 @@ fun TaskDetailOverlay(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    // 面板图标背景使用 tertiaryContainer（装饰性）
+                                    color = MaterialTheme.colorScheme.tertiaryContainer,
                                     modifier = Modifier.size(40.dp),
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             Icons.Default.AddCircleOutline,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
+                                            // 面板图标色调使用 secondary（次要素）
+                                            tint = MaterialTheme.colorScheme.secondary,
                                             modifier = Modifier.size(22.dp),
                                         )
                                     }
@@ -304,14 +306,16 @@ fun TaskDetailOverlay(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    // 面板图标背景使用 tertiaryContainer
+                                    color = MaterialTheme.colorScheme.tertiaryContainer,
                                     modifier = Modifier.size(40.dp),
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             Icons.Outlined.Repeat,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
+                                            // 面板图标色调使用 secondary
+                                            tint = MaterialTheme.colorScheme.secondary,
                                             modifier = Modifier.size(22.dp),
                                         )
                                     }
@@ -394,14 +398,16 @@ fun TaskDetailOverlay(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    // 面板图标背景使用 tertiaryContainer
+                                    color = MaterialTheme.colorScheme.tertiaryContainer,
                                     modifier = Modifier.size(40.dp),
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             Icons.Outlined.Alarm,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
+                                            // 面板图标色调使用 secondary
+                                            tint = MaterialTheme.colorScheme.secondary,
                                             modifier = Modifier.size(22.dp),
                                         )
                                     }
@@ -481,7 +487,8 @@ fun TaskDetailOverlay(
                                     Icons.Outlined.Repeat,
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp),
-                                    tint = if (task.recurrenceRule == "daily") MaterialTheme.colorScheme.primary
+                                    // 重复激活状态使用 secondary（信息性指示）
+                                    tint = if (task.recurrenceRule == "daily") MaterialTheme.colorScheme.secondary
                                         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -492,7 +499,7 @@ fun TaskDetailOverlay(
                                     } else "设置重复",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = if (task.recurrenceRule == "daily") FontWeight.Medium else FontWeight.Normal,
-                                    color = if (task.recurrenceRule == "daily") MaterialTheme.colorScheme.primary
+                                    color = if (task.recurrenceRule == "daily") MaterialTheme.colorScheme.secondary
                                         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                                 )
                             }
@@ -513,7 +520,8 @@ fun TaskDetailOverlay(
                                     Icons.Outlined.Alarm,
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp),
-                                    tint = if (task.reminder != null) MaterialTheme.colorScheme.primary
+                                    // 提醒激活状态使用 secondary（信息性指示）
+                                    tint = if (task.reminder != null) MaterialTheme.colorScheme.secondary
                                         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -528,7 +536,7 @@ fun TaskDetailOverlay(
                                     } ?: "设置提醒",
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = if (task.reminder != null) FontWeight.Medium else FontWeight.Normal,
-                                    color = if (task.reminder != null) MaterialTheme.colorScheme.primary
+                                    color = if (task.reminder != null) MaterialTheme.colorScheme.secondary
                                         else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                                 )
                             }
@@ -554,7 +562,8 @@ fun TaskDetailOverlay(
                                     modifier = Modifier.fillMaxSize(),
                                     shape = RoundedCornerShape(14.dp),
                                     colors = OutlinedTextFieldDefaults.colors(
-                                        focusedBorderColor = MaterialTheme.colorScheme.primary,
+                                        // 备注输入框聚焦边框使用 tertiary（装饰性区分）
+                                        focusedBorderColor = MaterialTheme.colorScheme.tertiary,
                                         focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
                                         unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
                                     ),
@@ -612,7 +621,8 @@ fun TaskDetailOverlay(
                                                             Icons.Default.Timer,
                                                             contentDescription = null,
                                                             modifier = Modifier.size(20.dp),
-                                                            tint = MaterialTheme.colorScheme.primary,
+                                                            // 专注计时器图标使用 secondary（信息性）
+                                                            tint = MaterialTheme.colorScheme.secondary,
                                                         )
                                                         Spacer(modifier = Modifier.width(10.dp))
                                                         Column {
@@ -638,7 +648,8 @@ fun TaskDetailOverlay(
                                                 if (expanded) {
                                                     Surface(
                                                         shape = RoundedCornerShape(12.dp),
-                                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                                        // 专注播放按钮背景使用 tertiaryContainer
+                                                        color = MaterialTheme.colorScheme.tertiaryContainer,
                                                         modifier = Modifier.sharedBounds(
                                                             sharedContentState = rememberSharedContentState(
                                                                 "focusPlayBtn_${task.id}"
@@ -661,7 +672,8 @@ fun TaskDetailOverlay(
                                                             modifier = Modifier
                                                                 .padding(8.dp)
                                                                 .size(20.dp),
-                                                            tint = MaterialTheme.colorScheme.primary,
+                                                            // 播放按钮图标使用 tertiary
+                                                            tint = MaterialTheme.colorScheme.tertiary,
                                                         )
                                                     }
                                                 }
@@ -676,7 +688,8 @@ fun TaskDetailOverlay(
                                                 if (!expanded) {
                                                     Surface(
                                                         shape = RoundedCornerShape(12.dp),
-                                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                                        // 专注播放按钮背景使用 tertiaryContainer
+                                                        color = MaterialTheme.colorScheme.tertiaryContainer,
                                                         modifier = Modifier.sharedBounds(
                                                             sharedContentState = rememberSharedContentState(
                                                                 "focusPlayBtn_${task.id}"
@@ -697,7 +710,8 @@ fun TaskDetailOverlay(
                                                             modifier = Modifier
                                                                 .padding(8.dp)
                                                                 .size(20.dp),
-                                                            tint = MaterialTheme.colorScheme.primary,
+                                                            // 播放按钮图标使用 tertiary
+                                                            tint = MaterialTheme.colorScheme.tertiary,
                                                         )
                                                     }
                                                 }

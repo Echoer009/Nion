@@ -520,7 +520,8 @@ private fun WeekDaySelector(
                 val bgColor by animateColorAsState(
                     targetValue = when {
                         isSelected -> MaterialTheme.colorScheme.primary
-                        isToday -> MaterialTheme.colorScheme.primaryContainer
+                        // "今天"标记使用 tertiaryContainer（装饰性区分）
+                        isToday -> MaterialTheme.colorScheme.tertiaryContainer
                         else -> Color.Transparent
                     },
                     animationSpec = tween(200),
@@ -530,7 +531,8 @@ private fun WeekDaySelector(
                 val textColor by animateColorAsState(
                     targetValue = when {
                         isSelected -> MaterialTheme.colorScheme.onPrimary
-                        isToday -> MaterialTheme.colorScheme.onPrimaryContainer
+                        // "今天"文字配合 tertiaryContainer
+                        isToday -> MaterialTheme.colorScheme.onTertiaryContainer
                         else -> MaterialTheme.colorScheme.onSurfaceVariant
                     },
                     animationSpec = tween(200),
@@ -717,7 +719,8 @@ private fun CalendarPickerDialog(
                     Text(
                         "回到今天",
                         style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
+                        // 次要导航按钮使用 secondary
+                        color = MaterialTheme.colorScheme.secondary,
                         fontWeight = FontWeight.SemiBold,
                     )
                 }
@@ -765,7 +768,8 @@ private fun CalendarMonthGrid(
                             .clip(CircleShape)
                             .background(
                                 when {
-                                    isToday -> MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.BG_HIGHLIGHT)
+                                    // "今天"标记使用 tertiary（装饰性）
+                                    isToday -> MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.BG_HIGHLIGHT)
                                     else -> Color.Transparent
                                 }
                             )

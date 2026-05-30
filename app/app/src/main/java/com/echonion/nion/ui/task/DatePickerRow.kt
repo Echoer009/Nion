@@ -198,7 +198,8 @@ fun NionCalendar(
                                             .clip(CircleShape)
                                             .background(
                                                 when {
-                                                    isCurrent -> MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.BG_HIGHLIGHT)
+                                                    // 当前月份高亮使用 tertiary（装饰性标记）
+                                                    isCurrent -> MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.BG_HIGHLIGHT)
                                                     else -> Color.Transparent
                                                 }
                                             )
@@ -549,7 +550,8 @@ private fun CalendarMonthGrid(
                             .background(
                                 when {
                                     isSelected -> MaterialTheme.colorScheme.primary
-                                    isToday -> MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.BG_HIGHLIGHT)
+                                    // "今天"标记使用 tertiary（装饰性区分）
+                                    isToday -> MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.BG_HIGHLIGHT)
                                     else -> Color.Transparent
                                 }
                             )

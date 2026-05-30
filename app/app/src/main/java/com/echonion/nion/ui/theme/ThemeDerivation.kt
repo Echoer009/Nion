@@ -9,7 +9,7 @@ import org.json.JSONObject
  * 设计原则：
  * - AI 只需传递 7 个种子色（primary / secondary / tertiary / background /
  *   priorityHigh / priorityMedium / priorityLow），系统自动派生全部 21 个槽位
- * - 派生算法基于 HSL 色彩空间，参照现有 CORAL/AMBER 主题的量化规律
+ * - 派生算法基于 HSL 色彩空间，参照现有 CORAL 主题的量化规律
  * - 种子色可选，传了哪个就派生哪个色系，未传的保持当前值
  * - 精确覆盖（color_overrides）在种子派生之后应用，可微调任意单个槽位
  *

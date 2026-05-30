@@ -194,14 +194,14 @@ fun SharedTaskCard(
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f, fill = false),
                 )
-                // 每日任务：卡片末尾只显示循环图标，不附带文字
+                // 每日任务：卡片末尾只显示循环图标，使用 tertiary 装饰色
                 if (model.isDaily) {
                     Spacer(modifier = Modifier.width(6.dp))
                     Icon(
                         Icons.Outlined.Repeat,
                         contentDescription = "每天",
                         modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.TEXT_MEDIUM),
+                        tint = MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),
                     )
                 }
             }
@@ -231,15 +231,17 @@ fun SharedTaskCard(
                             Icons.Outlined.Notifications,
                             contentDescription = null,
                             modifier = Modifier.size(12.dp),
+                            // 提醒图标使用 tertiary（非逾期状态下的装饰性指示）
                             tint = if (isOverdue) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.TEXT_MEDIUM),
+                            else MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = model.reminder.formatReminder() ?: "",
                             style = MaterialTheme.typography.bodySmall,
+                            // 提醒时间文字使用 tertiary（装饰性指示）
                             color = if (isOverdue) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.TEXT_MEDIUM),
+                            else MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )

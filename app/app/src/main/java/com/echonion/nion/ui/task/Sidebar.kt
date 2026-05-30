@@ -294,8 +294,9 @@ fun SidebarContent(
                                 Icon(
                                     Icons.Default.Check,
                                     contentDescription = "确认",
+                                    // 确认勾选使用 secondary（次要操作确认）
                                     tint = if (newName.isNotBlank())
-                                        MaterialTheme.colorScheme.primary
+                                        MaterialTheme.colorScheme.secondary
                                     else
                                         MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(16.dp),
@@ -315,7 +316,8 @@ fun SidebarContent(
                 Surface(
                     onClick = { isAdding = true },
                     shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+                    // "新建清单"按钮使用 secondaryContainer 背景（次要操作）
+                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                     modifier = Modifier.fillMaxWidth(),
                     tonalElevation = 1.dp,
                 ) {
@@ -326,10 +328,11 @@ fun SidebarContent(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center,
                     ) {
+                        // 次要操作图标和文字使用 secondary
                         Icon(
                             Icons.Default.Add,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(18.dp),
                         )
                         Spacer(modifier = Modifier.width(8.dp))
@@ -337,7 +340,7 @@ fun SidebarContent(
                             "新建清单",
                             style = MaterialTheme.typography.bodyMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.secondary,
                         )
                     }
                 }
@@ -380,8 +383,9 @@ private fun SidebarChecklistItem(
     onDelete: () -> Unit,
 ) {
     val inactiveColor = MaterialTheme.colorScheme.surfaceContainer
+    // 活跃清单项使用 secondaryContainer 背景，与主操作 primary 区分
     val bgColor by animateColorAsState(
-        targetValue = if (isActive) MaterialTheme.colorScheme.primaryContainer else inactiveColor,
+        targetValue = if (isActive) MaterialTheme.colorScheme.secondaryContainer else inactiveColor,
         animationSpec = tween(200),
         label = "sidebarItemBg",
     )

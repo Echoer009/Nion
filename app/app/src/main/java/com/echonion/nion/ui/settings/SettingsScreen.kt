@@ -207,12 +207,12 @@ fun SettingsScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // ── 主题颜色区域 ──
+            // ── 主题颜色区域（区域标题使用 secondary） ──
             Text(
                 "主题颜色",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.secondary,
             )
 
             // 可展开的主题选择器卡片
@@ -228,12 +228,12 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // ── 我的位置区域 ──
+            // ── 我的位置区域（区域标题使用 secondary） ──
             Text(
                 "我的位置",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.secondary,
             )
 
             // 使用 SharedTransitionLayout 包裹 LocationCard，实现搜索展开/收起的共享元素变形动画
@@ -298,12 +298,12 @@ fun SettingsScreen(
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // ── 权限设置区域 ──
+            // ── 权限设置区域（区域标题使用 secondary） ──
             Text(
                 "权限设置",
                 style = MaterialTheme.typography.titleMedium,
                 fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.secondary,
             )
 
             // 定位权限
@@ -321,7 +321,7 @@ fun SettingsScreen(
                     Icon(
                         Icons.Default.LocationOn,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(24.dp),
                     )
                     Spacer(modifier = Modifier.width(12.dp))
@@ -354,7 +354,7 @@ fun SettingsScreen(
                         Icon(
                             Icons.Default.Check,
                             contentDescription = "已授权",
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -402,7 +402,7 @@ fun SettingsScreen(
                     Icon(
                         Icons.AutoMirrored.Filled.OpenInNew,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(24.dp),
                     )
                     Spacer(modifier = Modifier.width(12.dp))
@@ -436,7 +436,7 @@ fun SettingsScreen(
                         Icon(
                             Icons.Default.Check,
                             contentDescription = "已授权",
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -486,7 +486,7 @@ fun SettingsScreen(
                     Icon(
                         Icons.Default.BatteryAlert,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(24.dp),
                     )
                     Spacer(modifier = Modifier.width(12.dp))
@@ -514,7 +514,7 @@ fun SettingsScreen(
                         Icon(
                             Icons.Default.Check,
                             contentDescription = "已设置",
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(20.dp),
                         )
                     }
@@ -759,8 +759,9 @@ private fun PresetThemeItem(
         onClick = onClick,
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
+        // 选中主题使用 secondaryContainer 背景
         color = if (isSelected) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = NionAlpha.BG_TAB_ACTIVE)
+            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = NionAlpha.BG_TAB_ACTIVE)
         } else {
             MaterialTheme.colorScheme.surfaceContainerHigh
         },
@@ -862,8 +863,9 @@ private fun CustomThemeItem(
         },
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(10.dp),
+        // 活跃自定义主题使用 secondaryContainer 背景
         color = if (isActive) {
-            MaterialTheme.colorScheme.primaryContainer.copy(alpha = NionAlpha.BG_TAB_ACTIVE)
+            MaterialTheme.colorScheme.secondaryContainer.copy(alpha = NionAlpha.BG_TAB_ACTIVE)
         } else {
             MaterialTheme.colorScheme.surfaceContainerHigh
         },
@@ -1079,7 +1081,7 @@ private fun LocationCard(
                         Icon(
                             Icons.Default.LocationOn,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(24.dp),
                         )
                         Spacer(modifier = Modifier.width(12.dp))
@@ -1102,7 +1104,7 @@ private fun LocationCard(
                             CircularProgressIndicator(
                                 modifier = Modifier.size(24.dp),
                                 strokeWidth = 2.dp,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = MaterialTheme.colorScheme.secondary,
                             )
                         } else {
                             IconButton(
@@ -1136,7 +1138,7 @@ private fun LocationCard(
                                         sharedContentState = rememberSharedContentState("location_search_icon"),
                                         animatedVisibilityScope = this@AnimatedContent,
                                     ),
-                                tint = if (expanded) MaterialTheme.colorScheme.primary
+                                tint = if (expanded) MaterialTheme.colorScheme.secondary
                                 else MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }

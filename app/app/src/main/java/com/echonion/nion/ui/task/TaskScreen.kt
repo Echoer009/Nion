@@ -574,12 +574,12 @@ private fun ReminderEntryRow(
             .padding(vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Alarm 图标，已设置提醒时使用 primary 色
+        // Alarm 图标，已设置提醒时使用 secondary 色（信息性状态）
         Icon(
             Icons.Outlined.Alarm,
             contentDescription = null,
             modifier = Modifier.size(18.dp),
-            tint = if (reminder != null) MaterialTheme.colorScheme.primary
+            tint = if (reminder != null) MaterialTheme.colorScheme.secondary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
         )
         Spacer(modifier = Modifier.width(8.dp))
@@ -603,7 +603,8 @@ private fun ReminderEntryRow(
             } ?: "设置提醒",
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
-            color = if (reminder != null) MaterialTheme.colorScheme.primary
+            // 提醒时间文字使用 secondary（信息性状态）
+            color = if (reminder != null) MaterialTheme.colorScheme.secondary
                 else MaterialTheme.colorScheme.onSurfaceVariant,
         )
     }
@@ -840,14 +841,16 @@ private fun AddTaskOverlay(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    // 面板图标背景使用 tertiaryContainer
+                                    color = MaterialTheme.colorScheme.tertiaryContainer,
                                     modifier = Modifier.size(40.dp),
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             Icons.Outlined.Alarm,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
+                                            // 面板图标色调使用 secondary
+                                            tint = MaterialTheme.colorScheme.secondary,
                                             modifier = Modifier.size(22.dp),
                                         )
                                     }
@@ -889,14 +892,16 @@ private fun AddTaskOverlay(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    // 面板图标背景使用 tertiaryContainer
+                                    color = MaterialTheme.colorScheme.tertiaryContainer,
                                     modifier = Modifier.size(40.dp),
                                 ) {
                                     Box(contentAlignment = Alignment.Center) {
                                         Icon(
                                             Icons.Outlined.Repeat,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
+                                            // 面板图标色调使用 secondary
+                                            tint = MaterialTheme.colorScheme.secondary,
                                             modifier = Modifier.size(22.dp),
                                         )
                                     }
@@ -1161,7 +1166,8 @@ private fun GroupTabBar(
                         Icons.Default.AddCircleOutline,
                         contentDescription = "新建分组",
                         modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.primary,
+                        // 次要操作使用 secondary
+                        tint = MaterialTheme.colorScheme.secondary,
                     )
                 }
             }

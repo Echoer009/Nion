@@ -171,12 +171,12 @@ private fun AttachmentCard(
                     )
                 }
             } else {
-                // 非图片类型：显示文件图标
+                // 非图片类型：显示文件图标，使用 tertiary 装饰色
                 Icon(
                     imageVector = fileIconForType(attachment.mimeType),
                     contentDescription = null,
                     modifier = Modifier.size(36.dp),
-                    tint = MaterialTheme.colorScheme.primary,
+                    tint = MaterialTheme.colorScheme.tertiary,
                 )
             }
 

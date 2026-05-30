@@ -164,7 +164,8 @@ fun ReminderTimePicker(
                 // 当前提醒时间或"设置提醒"，点击展开/收起
                 Surface(
                     shape = RoundedCornerShape(8.dp),
-                    color = if (reminder != null) MaterialTheme.colorScheme.primaryContainer
+                    // 提醒已设置时使用 tertiaryContainer 背景（装饰性状态）
+                    color = if (reminder != null) MaterialTheme.colorScheme.tertiaryContainer
                         else MaterialTheme.colorScheme.surfaceContainerHighest,
                     modifier = Modifier
                         .clip(RoundedCornerShape(8.dp))
@@ -178,7 +179,8 @@ fun ReminderTimePicker(
                         text = formatReminderDisplay(reminder),
                         style = MaterialTheme.typography.labelLarge,
                         fontWeight = FontWeight.SemiBold,
-                        color = if (reminder != null) MaterialTheme.colorScheme.primary
+                        // 提醒已设置文字使用 tertiary
+                        color = if (reminder != null) MaterialTheme.colorScheme.tertiary
                             else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
                     )
@@ -300,7 +302,8 @@ fun ReminderTimePicker(
                                     Icons.AutoMirrored.Outlined.KeyboardArrowLeft,
                                     contentDescription = "返回选择日期",
                                     modifier = Modifier.size(20.dp),
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    // 导航返回箭头使用 tertiary
+                                    tint = MaterialTheme.colorScheme.tertiary,
                                 )
                                 Spacer(modifier = Modifier.width(4.dp))
                                 // 显示已选日期，如 "6月15日"
@@ -310,7 +313,8 @@ fun ReminderTimePicker(
                                     } ?: "",
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.primary,
+                                    // 日期显示文字使用 tertiary
+                                    color = MaterialTheme.colorScheme.tertiary,
                                 )
                             }
 
@@ -354,7 +358,8 @@ fun ReminderTimePicker(
                                         .fillMaxWidth()
                                         .height(itemHeight),
                                     shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    // 时间滚轮选中行使用 tertiaryContainer
+                                    color = MaterialTheme.colorScheme.tertiaryContainer,
                                 ) {}
 
                                 Row(

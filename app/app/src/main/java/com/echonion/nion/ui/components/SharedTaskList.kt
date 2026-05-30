@@ -120,6 +120,16 @@ fun SharedTaskList(
     /** 拖拽浮起时的圆角形状，让 graphicsLayer 的阴影也跟随圆角而非直角 */
     val dragCardShape = remember { RoundedCornerShape(12.dp) }
 
+    /**
+     * 拖拽异步写库中间态标志。
+     * onDragStopped 调用 handleDrop（launch coroutine）前设为 true，
+     * 表示"拖拽已完成但异步 moveAndReorderTasks 尚未写回新顺序"，
+     * 此时 todoItems 还是旧顺序而 reorderableItems 已是拖拽后顺序，需要跳过同步避免回滚。
+     * 每次 remember(todoItems) 触发时消费此标志（置 false），
+     * 之后若再次收到同 ID 不同顺序的 todoItems，说明是外部排序（如 AI 工具），需正常同步。
+     */
+    var pendingDragReorder by remember { mutableStateOf(false) }
+
      /**
       * 同步 todoItems 到 reorderableItems — 使用 remember(todoItems) 在 composition 阶段同步执行，
       * 确保 reorderableItems 与 todoItems 在同一帧内一致，避免 todo/done 区出现重复 key 导致闪退。
@@ -127,9 +137,9 @@ fun SharedTaskList(
       * 增量 diff（只移除离开的、只添加新来的）避免 clear()+addAll() 导致的全部 item 闪动。
       * 拖拽期间（draggedGroupId != null）跳过同步，由 onDragStopped 回调负责最终同步。
       *
-      * 关键优化：当 ID 集合相同但顺序不同时（拖拽重排后的中间态，异步 moveAndReorderTasks
-      * 尚未完成），跳过重排以避免将 reorderableItems 回滚到拖拽前的旧顺序。
-      * 等 async 完成后 todoItems 更新为正确的新顺序，此时再同步。
+      * 当 ID 集合相同但顺序不同时分两种情况：
+      * - pendingDragReorder == true：拖拽异步中间态，跳过避免回滚，并消费标志
+      * - pendingDragReorder == false：外部排序（如 AI 工具），正常同步顺序
       * 内容同步（depth、parentId、isGroupLast 等字段）始终执行，确保元数据及时更新。
       */
      remember(todoItems) {
@@ -140,10 +150,15 @@ fun SharedTaskList(
                  val newIdSet = newIds.toSet()
                  val currentIdSet = currentIds.toSet()
                  if (newIdSet == currentIdSet) {
-                     /* ID 集合相同但顺序不同 —— 拖拽重排的中间态，
-                      * 异步 moveAndReorderTasks 尚未完成，todoItems 还是旧顺序。
-                      * 跳过重排，保留 reorderableItems 的拖拽后顺序，
-                      * 等 async 完成后 todoItems 更新为新顺序再同步。 */
+                     if (pendingDragReorder) {
+                         /* 拖拽异步中间态：reorderableItems 是拖拽后顺序，todoItems 还是旧顺序。
+                          * 跳过重排避免回滚，消费标志，等异步完成后 todoItems 更新为新顺序再同步。 */
+                         pendingDragReorder = false
+                     } else {
+                         /* 外部排序（如 AI 操作工具）：todoItems 已是新顺序，同步到 reorderableItems */
+                         val targetOrder = newIds.withIndex().associate { (i, id) -> id to i }
+                         reorderableItems.sortBy { targetOrder[it.task.id] ?: Int.MAX_VALUE }
+                     }
                  } else {
                      /* ID 集合不同（有新增或删除）—— 全量同步 */
                      reorderableItems.removeAll { it.task.id !in newIds }
@@ -398,6 +413,9 @@ fun SharedTaskList(
                                             val subs = todoItems.filter { it.task.id in subIds }
                                             reorderableItems.addAll(mainIdx + 1, subs)
                                         }
+                                        /* 标记拖拽异步中间态，防止 remember(todoItems) 在异步完成前
+                                         * 将 reorderableItems 的拖拽后顺序回滚为 todoItems 的旧顺序 */
+                                        pendingDragReorder = true
                                         handleDrop(reorderableItems, draggedId, reorderCallback)
                                     } else {
                                         /* 长按未拖动 → 进入选择模式 */
@@ -779,9 +797,10 @@ private fun handleDrop(
  */
 @Composable
 fun SectionHeader(title: String, count: Int, isError: Boolean = false) {
-    val color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
-    val containerColor = if (isError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer
-    val onContainerColor = if (isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+    // 分区标题：普通分区使用 secondary（信息性），错误分区保持 error
+    val color = if (isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondary
+    val containerColor = if (isError) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.secondaryContainer
+    val onContainerColor = if (isError) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSecondaryContainer
     Row(
         modifier = Modifier
             .fillMaxWidth()

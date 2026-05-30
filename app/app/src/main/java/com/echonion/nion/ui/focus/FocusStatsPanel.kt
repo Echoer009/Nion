@@ -375,7 +375,8 @@ private fun SummaryCard(
 ) {
     Surface(
         shape = RoundedCornerShape(16.dp),
-        color = MaterialTheme.colorScheme.primaryContainer,
+        // 统计摘要卡片使用 secondaryContainer（信息性）
+        color = MaterialTheme.colorScheme.secondaryContainer,
         modifier = Modifier.fillMaxWidth(),
     ) {
         Column(
@@ -465,8 +466,9 @@ private fun DailyBarRow(
                     .fillMaxSize(fraction)
                     .clip(RoundedCornerShape(6.dp))
                     .background(
+                        // 今日柱状图使用 primary，历史柱状图使用 tertiary（装饰性区分）
                         if (isToday) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                        else MaterialTheme.colorScheme.tertiary
                     ),
             )
         }

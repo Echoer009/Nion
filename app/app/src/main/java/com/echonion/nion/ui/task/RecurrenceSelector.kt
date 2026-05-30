@@ -248,7 +248,8 @@ fun RecurrenceSelector(
                             .fillMaxWidth()
                             .height(itemHeight),
                         shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.primaryContainer,
+                        // 时间滚轮选中行使用 tertiaryContainer
+                        color = MaterialTheme.colorScheme.tertiaryContainer,
                     ) {}
 
                     // 两列滚轮并排

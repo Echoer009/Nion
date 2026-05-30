@@ -93,7 +93,8 @@ fun AttachmentButton(
                             imageVector = Icons.Outlined.Image,
                             contentDescription = "选择图片",
                             modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.primary,
+                            // 附件按钮图标使用 tertiary（装饰性功能入口）
+                            tint = MaterialTheme.colorScheme.tertiary,
                         )
                     }
                     Spacer(modifier = Modifier.width(2.dp))
@@ -108,7 +109,8 @@ fun AttachmentButton(
                             imageVector = Icons.AutoMirrored.Outlined.InsertDriveFile,
                             contentDescription = "选择文件",
                             modifier = Modifier.size(20.dp),
-                            tint = MaterialTheme.colorScheme.primary,
+                            // 附件按钮图标使用 tertiary
+                            tint = MaterialTheme.colorScheme.tertiary,
                         )
                     }
                 }
