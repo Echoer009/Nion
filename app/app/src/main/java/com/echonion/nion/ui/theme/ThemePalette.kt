@@ -1,10 +1,11 @@
 package com.echonion.nion.ui.theme
 
 import androidx.compose.ui.graphics.Color
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * 完整主题色板数据类 —— 承载一个主题的全部颜色配置（约 30 个槽位）。
+ * 主题色板数据类 —— 承载一个主题的全部颜色配置（21 个槽位）。
  *
  * 用途：
  * - 预设主题通过 [NionColorTheme.palette()] 生成实例
@@ -14,70 +15,50 @@ import org.json.JSONObject
  * 序列化格式：所有颜色以 "#RRGGBB" 字符串存储（不含 alpha），
  * 遵循 CSS hex color 规范，方便 AI 伴伴工具直接读写。
  *
- * @property primary 亮色模式主色（影响按钮、FAB、高亮元素）
- * @property primaryContainer 亮色模式主色容器（影响 chip 背景、浅色填充）
- * @property onPrimaryContainer 亮色模式主色容器上的文字/图标
- * @property darkPrimary 暗色模式主色
- * @property darkOnPrimary 暗色模式主色上的文字/图标
- * @property secondary 亮色模式辅色
- * @property secondaryContainer 亮色模式辅色容器
- * @property onSecondaryContainer 亮色模式辅色容器上的文字
- * @property darkSecondary 暗色模式辅色
- * @property darkOnSecondary 暗色模式辅色上的文字
- * @property darkSecondaryContainer 暗色模式辅色容器
- * @property tertiary 亮色模式第三色
- * @property tertiaryContainer 亮色模式第三色容器
- * @property onTertiaryContainer 亮色模式第三色容器上的文字
- * @property darkTertiary 暗色模式第三色
- * @property darkOnTertiary 暗色模式第三色上的文字
- * @property darkTertiaryContainer 暗色模式第三色容器
- * @property lightBackground 亮色模式背景色
- * @property lightOnBackground 亮色模式背景上的文字
- * @property lightSurfaceVariant 亮色模式表面变体（侧边栏、卡片等）
- * @property lightOnSurfaceVariant 亮色模式表面变体上的文字
- * @property lightSurfaceHigh 亮色模式高强调表面
- * @property lightSurfaceHighest 亮色模式最高强调表面
- * @property lightOutline 亮色模式边框线
- * @property lightOutlineVariant 亮色模式次要边框线
- * @property darkBackground 暗色模式背景色
- * @property darkSurface 暗色模式表面色
- * @property darkSurfaceHigh 暗色模式高强调表面
- * @property darkSurfaceHighest 暗色模式最高强调表面
- * @property darkOnBackground 暗色模式背景上的文字
- * @property darkOnSurfaceVariant 暗色模式表面变体上的文字
+ * @property primary 主色（影响按钮、FAB、高亮元素）
+ * @property primaryContainer 主色容器（影响 chip 背景、浅色填充）
+ * @property onPrimaryContainer 主色容器上的文字/图标
+ * @property secondary 辅色
+ * @property secondaryContainer 辅色容器
+ * @property onSecondaryContainer 辅色容器上的文字
+ * @property tertiary 第三色
+ * @property tertiaryContainer 第三色容器
+ * @property onTertiaryContainer 第三色容器上的文字
+ * @property background 全局背景色（页面底色）
+ * @property onBackground 背景上的正文颜色
+ * @property surfaceVariant 表面变体色（侧边栏/卡片区域背景）
+ * @property onSurfaceVariant 表面变体上的次要文字颜色
+ * @property surfaceHigh 高强调表面色（分割线区域/Tab背景）
+ * @property surfaceHighest 最高强调表面色（弹窗/下拉菜单背景）
+ * @property cardBackground 卡片背景色（任务卡片/设置卡片）
+ * @property outline 边框线颜色
+ * @property outlineVariant 次要边框线颜色（分割线/装饰线）
+ * @property priorityHigh 紧急优先级颜色（默认红色）
+ * @property priorityMedium 中等优先级颜色（默认深橙色）
+ * @property priorityLow 低优先级颜色（默认蓝灰色）
  */
 data class ThemePalette(
     val primary: Color,
     val primaryContainer: Color,
     val onPrimaryContainer: Color,
-    val darkPrimary: Color,
-    val darkOnPrimary: Color,
     val secondary: Color,
     val secondaryContainer: Color,
     val onSecondaryContainer: Color,
-    val darkSecondary: Color,
-    val darkOnSecondary: Color,
-    val darkSecondaryContainer: Color,
     val tertiary: Color,
     val tertiaryContainer: Color,
     val onTertiaryContainer: Color,
-    val darkTertiary: Color,
-    val darkOnTertiary: Color,
-    val darkTertiaryContainer: Color,
-    val lightBackground: Color,
-    val lightOnBackground: Color,
-    val lightSurfaceVariant: Color,
-    val lightOnSurfaceVariant: Color,
-    val lightSurfaceHigh: Color,
-    val lightSurfaceHighest: Color,
-    val lightOutline: Color,
-    val lightOutlineVariant: Color,
-    val darkBackground: Color,
-    val darkSurface: Color,
-    val darkSurfaceHigh: Color,
-    val darkSurfaceHighest: Color,
-    val darkOnBackground: Color,
-    val darkOnSurfaceVariant: Color,
+    val background: Color,
+    val onBackground: Color,
+    val surfaceVariant: Color,
+    val onSurfaceVariant: Color,
+    val surfaceHigh: Color,
+    val surfaceHighest: Color,
+    val cardBackground: Color,
+    val outline: Color,
+    val outlineVariant: Color,
+    val priorityHigh: Color,
+    val priorityMedium: Color,
+    val priorityLow: Color,
 ) {
     companion object {
 
@@ -87,17 +68,14 @@ data class ThemePalette(
          */
         val COLOR_KEYS: List<String> = listOf(
             "primary", "primaryContainer", "onPrimaryContainer",
-            "darkPrimary", "darkOnPrimary",
             "secondary", "secondaryContainer", "onSecondaryContainer",
-            "darkSecondary", "darkOnSecondary", "darkSecondaryContainer",
             "tertiary", "tertiaryContainer", "onTertiaryContainer",
-            "darkTertiary", "darkOnTertiary", "darkTertiaryContainer",
-            "lightBackground", "lightOnBackground",
-            "lightSurfaceVariant", "lightOnSurfaceVariant",
-            "lightSurfaceHigh", "lightSurfaceHighest",
-            "lightOutline", "lightOutlineVariant",
-            "darkBackground", "darkSurface", "darkSurfaceHigh", "darkSurfaceHighest",
-            "darkOnBackground", "darkOnSurfaceVariant",
+            "background", "onBackground",
+            "surfaceVariant", "onSurfaceVariant",
+            "surfaceHigh", "surfaceHighest",
+            "cardBackground",
+            "outline", "outlineVariant",
+            "priorityHigh", "priorityMedium", "priorityLow",
         )
 
         /**
@@ -105,50 +83,31 @@ data class ThemePalette(
          * 顺序与 [COLOR_KEYS] 一一对应。
          */
         val COLOR_DESCRIPTIONS: Map<String, String> = mapOf(
-            "primary" to "亮色模式主色调，影响按钮/FAB/高亮元素/选中态",
-            "primaryContainer" to "亮色模式主色容器，影响 chip 背景/浅色填充/标签底色",
-            "onPrimaryContainer" to "亮色模式主色容器上的文字和图标颜色",
-            "darkPrimary" to "暗色模式主色调",
-            "darkOnPrimary" to "暗色模式主色上的文字和图标颜色",
-            "secondary" to "亮色模式辅色，用于次要操作和装饰元素",
-            "secondaryContainer" to "亮色模式辅色容器",
-            "onSecondaryContainer" to "亮色模式辅色容器上的文字",
-            "darkSecondary" to "暗色模式辅色",
-            "darkOnSecondary" to "暗色模式辅色上的文字",
-            "darkSecondaryContainer" to "暗色模式辅色容器",
-            "tertiary" to "亮色模式第三色，用于对比/点缀",
-            "tertiaryContainer" to "亮色模式第三色容器",
-            "onTertiaryContainer" to "亮色模式第三色容器上的文字",
-            "darkTertiary" to "暗色模式第三色",
-            "darkOnTertiary" to "暗色模式第三色上的文字",
-            "darkTertiaryContainer" to "暗色模式第三色容器",
-            "lightBackground" to "亮色模式全局背景色（页面底色）",
-            "lightOnBackground" to "亮色模式背景上的正文颜色",
-            "lightSurfaceVariant" to "亮色模式表面变体色（侧边栏/卡片/输入框背景）",
-            "lightOnSurfaceVariant" to "亮色模式表面变体上的次要文字颜色",
-            "lightSurfaceHigh" to "亮色模式高强调表面色（分割线区域/Tab背景）",
-            "lightSurfaceHighest" to "亮色模式最高强调表面色（弹窗/下拉菜单背景）",
-            "lightOutline" to "亮色模式边框线颜色",
-            "lightOutlineVariant" to "亮色模式次要边框线颜色（分割线/装饰线）",
-            "darkBackground" to "暗色模式全局背景色",
-            "darkSurface" to "暗色模式表面色（卡片/组件背景）",
-            "darkSurfaceHigh" to "暗色模式高强调表面色",
-            "darkSurfaceHighest" to "暗色模式最高强调表面色",
-            "darkOnBackground" to "暗色模式背景上的正文颜色",
-            "darkOnSurfaceVariant" to "暗色模式表面变体上的次要文字颜色",
+            "primary" to "主色调，影响按钮/FAB/高亮元素/选中态",
+            "primaryContainer" to "主色容器，影响 chip 背景/浅色填充/标签底色",
+            "onPrimaryContainer" to "主色容器上的文字和图标颜色",
+            "secondary" to "辅色，用于次要操作和装饰元素",
+            "secondaryContainer" to "辅色容器",
+            "onSecondaryContainer" to "辅色容器上的文字",
+            "tertiary" to "第三色，用于对比/点缀",
+            "tertiaryContainer" to "第三色容器",
+            "onTertiaryContainer" to "第三色容器上的文字",
+            "background" to "全局背景色（页面底色）",
+            "onBackground" to "背景上的正文颜色",
+            "surfaceVariant" to "表面变体色（侧边栏/卡片区域背景）",
+            "onSurfaceVariant" to "表面变体上的次要文字颜色",
+            "surfaceHigh" to "高强调表面色（分割线区域/Tab背景）",
+            "surfaceHighest" to "最高强调表面色（弹窗/下拉菜单背景）",
+            "cardBackground" to "卡片背景色（任务卡片/设置卡片）",
+            "outline" to "边框线颜色",
+            "outlineVariant" to "次要边框线颜色（分割线/装饰线）",
+            "priorityHigh" to "紧急优先级颜色（默认红色，用于任务优先级标记）",
+            "priorityMedium" to "中等优先级颜色（默认深橙色，用于任务优先级标记）",
+            "priorityLow" to "低优先级颜色（默认蓝灰色，用于任务优先级标记）",
         )
 
         /**
          * 从 JSON 反序列化为 ThemePalette。
-         *
-         * JSON 格式示例：
-         * ```json
-         * {
-         *   "primary": "#D4845A",
-         *   "primaryContainer": "#F5D5C0",
-         *   ...
-         * }
-         * ```
          *
          * @param json 包含所有颜色槽位的 JSONObject
          * @return 反序列化后的 ThemePalette 实例
@@ -158,42 +117,42 @@ data class ThemePalette(
                 primary = parseColor(json, "primary"),
                 primaryContainer = parseColor(json, "primaryContainer"),
                 onPrimaryContainer = parseColor(json, "onPrimaryContainer"),
-                darkPrimary = parseColor(json, "darkPrimary"),
-                darkOnPrimary = parseColor(json, "darkOnPrimary"),
                 secondary = parseColor(json, "secondary"),
                 secondaryContainer = parseColor(json, "secondaryContainer"),
                 onSecondaryContainer = parseColor(json, "onSecondaryContainer"),
-                darkSecondary = parseColor(json, "darkSecondary"),
-                darkOnSecondary = parseColor(json, "darkOnSecondary"),
-                darkSecondaryContainer = parseColor(json, "darkSecondaryContainer"),
                 tertiary = parseColor(json, "tertiary"),
                 tertiaryContainer = parseColor(json, "tertiaryContainer"),
                 onTertiaryContainer = parseColor(json, "onTertiaryContainer"),
-                darkTertiary = parseColor(json, "darkTertiary"),
-                darkOnTertiary = parseColor(json, "darkOnTertiary"),
-                darkTertiaryContainer = parseColor(json, "darkTertiaryContainer"),
-                lightBackground = parseColor(json, "lightBackground"),
-                lightOnBackground = parseColor(json, "lightOnBackground"),
-                lightSurfaceVariant = parseColor(json, "lightSurfaceVariant"),
-                lightOnSurfaceVariant = parseColor(json, "lightOnSurfaceVariant"),
-                lightSurfaceHigh = parseColor(json, "lightSurfaceHigh"),
-                lightSurfaceHighest = parseColor(json, "lightSurfaceHighest"),
-                lightOutline = parseColor(json, "lightOutline"),
-                lightOutlineVariant = parseColor(json, "lightOutlineVariant"),
-                darkBackground = parseColor(json, "darkBackground"),
-                darkSurface = parseColor(json, "darkSurface"),
-                darkSurfaceHigh = parseColor(json, "darkSurfaceHigh"),
-                darkSurfaceHighest = parseColor(json, "darkSurfaceHighest"),
-                darkOnBackground = parseColor(json, "darkOnBackground"),
-                darkOnSurfaceVariant = parseColor(json, "darkOnSurfaceVariant"),
+                background = parseColor(json, "background"),
+                onBackground = parseColor(json, "onBackground"),
+                surfaceVariant = parseColor(json, "surfaceVariant"),
+                onSurfaceVariant = parseColor(json, "onSurfaceVariant"),
+                surfaceHigh = parseColor(json, "surfaceHigh"),
+                surfaceHighest = parseColor(json, "surfaceHighest"),
+                cardBackground = parseColor(json, "cardBackground"),
+                outline = parseColor(json, "outline"),
+                outlineVariant = parseColor(json, "outlineVariant"),
+                priorityHigh = parseColor(json, "priorityHigh"),
+                priorityMedium = parseColor(json, "priorityMedium"),
+                priorityLow = parseColor(json, "priorityLow"),
             )
         }
 
         /**
          * 从 JSONObject 中解析指定键的颜色值。
          * 支持 "#RRGGBB" 和 "#AARRGGBB" 两种格式。
+         * 如果键不存在，返回 fallback 颜色。
          */
         private fun parseColor(json: JSONObject, key: String): Color {
+            if (!json.has(key)) {
+                return when (key) {
+                    "cardBackground" -> Color.White
+                    "priorityHigh" -> Color(0xFFD32F2F)
+                    "priorityMedium" -> Color(0xFFF4511E)
+                    "priorityLow" -> Color(0xFF607D8B)
+                    else -> Color.White
+                }
+            }
             val hex = json.getString(key)
             val argb = android.graphics.Color.parseColor(hex)
             return Color(argb)
@@ -211,34 +170,24 @@ data class ThemePalette(
             put("primary", colorToHex(primary))
             put("primaryContainer", colorToHex(primaryContainer))
             put("onPrimaryContainer", colorToHex(onPrimaryContainer))
-            put("darkPrimary", colorToHex(darkPrimary))
-            put("darkOnPrimary", colorToHex(darkOnPrimary))
             put("secondary", colorToHex(secondary))
             put("secondaryContainer", colorToHex(secondaryContainer))
             put("onSecondaryContainer", colorToHex(onSecondaryContainer))
-            put("darkSecondary", colorToHex(darkSecondary))
-            put("darkOnSecondary", colorToHex(darkOnSecondary))
-            put("darkSecondaryContainer", colorToHex(darkSecondaryContainer))
             put("tertiary", colorToHex(tertiary))
             put("tertiaryContainer", colorToHex(tertiaryContainer))
             put("onTertiaryContainer", colorToHex(onTertiaryContainer))
-            put("darkTertiary", colorToHex(darkTertiary))
-            put("darkOnTertiary", colorToHex(darkOnTertiary))
-            put("darkTertiaryContainer", colorToHex(darkTertiaryContainer))
-            put("lightBackground", colorToHex(lightBackground))
-            put("lightOnBackground", colorToHex(lightOnBackground))
-            put("lightSurfaceVariant", colorToHex(lightSurfaceVariant))
-            put("lightOnSurfaceVariant", colorToHex(lightOnSurfaceVariant))
-            put("lightSurfaceHigh", colorToHex(lightSurfaceHigh))
-            put("lightSurfaceHighest", colorToHex(lightSurfaceHighest))
-            put("lightOutline", colorToHex(lightOutline))
-            put("lightOutlineVariant", colorToHex(lightOutlineVariant))
-            put("darkBackground", colorToHex(darkBackground))
-            put("darkSurface", colorToHex(darkSurface))
-            put("darkSurfaceHigh", colorToHex(darkSurfaceHigh))
-            put("darkSurfaceHighest", colorToHex(darkSurfaceHighest))
-            put("darkOnBackground", colorToHex(darkOnBackground))
-            put("darkOnSurfaceVariant", colorToHex(darkOnSurfaceVariant))
+            put("background", colorToHex(background))
+            put("onBackground", colorToHex(onBackground))
+            put("surfaceVariant", colorToHex(surfaceVariant))
+            put("onSurfaceVariant", colorToHex(onSurfaceVariant))
+            put("surfaceHigh", colorToHex(surfaceHigh))
+            put("surfaceHighest", colorToHex(surfaceHighest))
+            put("cardBackground", colorToHex(cardBackground))
+            put("outline", colorToHex(outline))
+            put("outlineVariant", colorToHex(outlineVariant))
+            put("priorityHigh", colorToHex(priorityHigh))
+            put("priorityMedium", colorToHex(priorityMedium))
+            put("priorityLow", colorToHex(priorityLow))
         }
     }
 
@@ -268,5 +217,104 @@ data class ThemePalette(
             }
         }
         return fromJson(json)
+    }
+}
+
+/**
+ * 自定义主题条目 —— 存储在自定义主题列表中的一个条目。
+ *
+ * 每个条目包含唯一 ID、名称、完整色板、创建时使用的种子色（方便后续微调）、
+ * 以及创建时间戳。
+ *
+ * 序列化为 JSON 存储在 settings key `custom_themes_list` 中。
+ *
+ * @property id 唯一标识（UUID 字符串）
+ * @property name 主题名称（如"樱花粉"、"深海蓝"）
+ * @property palette 完整的 21 槽位色板
+ * @property seedColors 创建时使用的种子色映射，null 表示旧数据迁移（无种子信息）
+ * @property createdAt 创建时间戳（毫秒）
+ */
+data class CustomThemeEntry(
+    val id: String,
+    val name: String,
+    val palette: ThemePalette,
+    val seedColors: Map<String, String>?,
+    val createdAt: Long,
+) {
+    companion object {
+
+        /**
+         * 从 JSON 反序列化为 CustomThemeEntry。
+         *
+         * @param json 包含 id / name / palette / seedColors / createdAt 的 JSONObject
+         * @return 反序列化后的 CustomThemeEntry 实例
+         */
+        fun fromJson(json: JSONObject): CustomThemeEntry {
+            // 解析种子色（可选字段，旧数据迁移时可能不存在）
+            val seedColorsMap = if (json.has("seedColors")) {
+                val sc = json.getJSONObject("seedColors")
+                val map = mutableMapOf<String, String>()
+                val keys = sc.keys()
+                while (keys.hasNext()) {
+                    val key = keys.next()
+                    map[key] = sc.getString(key)
+                }
+                map.ifEmpty { null }
+            } else null
+
+            return CustomThemeEntry(
+                id = json.getString("id"),
+                name = json.getString("name"),
+                palette = ThemePalette.fromJson(json.getJSONObject("palette")),
+                seedColors = seedColorsMap,
+                createdAt = json.optLong("createdAt", System.currentTimeMillis()),
+            )
+        }
+
+        /**
+         * 从 JSON 字符串反序列化为自定义主题列表。
+         *
+         * @param jsonStr JSON Array 字符串
+         * @return 自定义主题条目列表
+         */
+        fun listFromJson(jsonStr: String): List<CustomThemeEntry> {
+            if (jsonStr.isBlank()) return emptyList()
+            val arr = JSONArray(jsonStr)
+            return (0 until arr.length()).map { i ->
+                fromJson(arr.getJSONObject(i))
+            }
+        }
+
+        /**
+         * 将自定义主题列表序列化为 JSON 字符串。
+         *
+         * @param themes 自定义主题条目列表
+         * @return JSON Array 字符串
+         */
+        fun listToJson(themes: List<CustomThemeEntry>): String {
+            val arr = JSONArray()
+            themes.forEach { entry -> arr.put(entry.toJson()) }
+            return arr.toString()
+        }
+    }
+
+    /**
+     * 序列化为 JSON。
+     *
+     * @return 包含所有字段的 JSONObject
+     */
+    fun toJson(): JSONObject {
+        return JSONObject().apply {
+            put("id", id)
+            put("name", name)
+            put("palette", palette.toJson())
+            put("createdAt", createdAt)
+            // 种子色可选保存（方便 AI 后续微调时知道原来的种子）
+            seedColors?.let { sc ->
+                val scJson = JSONObject()
+                sc.forEach { (k, v) -> scJson.put(k, v) }
+                put("seedColors", scJson)
+            }
+        }
     }
 }
