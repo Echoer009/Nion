@@ -1349,6 +1349,9 @@ class CompanionViewModel(
         viewModelScope.launch {
             runAgentLoop(provider, key, model)
             isLoading = false
+            // Agent Loop 结束后，保留完整的 tool_calls + tool result 消息。
+            // 原因：删除后 AI 看不到自己使用工具的记录，几轮对话后不再主动调用工具。
+            requestSave()
             Log.d(TAG, "[sendMessage] AgentLoop 结束 → msgCount=${messages.size}")
         }
     }
@@ -1517,9 +1520,8 @@ class CompanionViewModel(
 
     private suspend fun runAgentLoop(provider: ProviderConfig, apiKey: String, model: String) {
         var iteration = 0
-        // 累积所有迭代的缓存命中统计，最终追加到 AI 消息末尾供调试
-        var totalCacheHit = 0
-        var totalCacheMiss = 0
+        // 收集每次迭代的缓存统计，用于最终汇总
+        val iterStats = mutableListOf<Triple<Int, Int, Int>>() // (iteration, hit, miss)
         Log.d(TAG, "[AgentLoop] 开始 iteration=0 msgCount=${messages.size}")
         while (iteration < maxAgentIterations) {
             iteration++
@@ -1567,10 +1569,9 @@ class CompanionViewModel(
             val response = result.getOrThrow()
             Log.d(TAG, "Response: streamedText=${streamingAssistantText?.take(100)}, toolCalls=${response.toolCalls?.size}")
 
-            // 累积本次迭代的缓存命中统计
-            totalCacheHit += response.cacheHitTokens
-            totalCacheMiss += response.cacheMissTokens
-            Log.d(TAG, "[CacheStats] iter=$iteration hit=${response.cacheHitTokens} miss=${response.cacheMissTokens} totalHit=$totalCacheHit totalMiss=$totalCacheMiss")
+            // 记录本次迭代的缓存命中统计
+            iterStats.add(Triple(iteration, response.cacheHitTokens, response.cacheMissTokens))
+            Log.d(TAG, "[CacheStats] iter=$iteration hit=${response.cacheHitTokens} miss=${response.cacheMissTokens}")
 
             // 情况 1：LLM 请求执行工具
             if (response.toolCalls != null && response.toolCalls.isNotEmpty()) {
@@ -1581,6 +1582,9 @@ class CompanionViewModel(
                     appendAssistantMessage(streamedText, reasoningContent = response.reasoningContent)
                 }
                 endStreaming()
+
+                // 工具调用后、工具执行前，显示本次迭代的独立缓存统计
+                appendIterCacheDebug(iteration, response.cacheHitTokens, response.cacheMissTokens)
 
                 // 追加 assistant tool_calls 到对话历史（含 reasoning_content）
                 appendAssistantToolCallsMessage(response.toolCalls, response.reasoningContent)
@@ -1640,12 +1644,64 @@ class CompanionViewModel(
             appendAssistantMessage("抱歉，工具调用次数过多，请简化你的请求后重试。")
         }
 
-        // 调试信息：追加缓存命中统计到 UI（不计入 conversationHistory，不影响后续 API 请求）
-        val totalTokens = totalCacheHit + totalCacheMiss
-        if (totalTokens > 0) {
-            val hitRate = if (totalTokens > 0) totalCacheHit * 100 / totalTokens else 0
-            appendCacheDebugMessage("缓存命中: $totalCacheHit | 未命中: $totalCacheMiss | 命中率: ${hitRate}%")
+        // 汇总所有迭代的缓存命中统计
+        appendSummaryCacheDebug(iterStats)
+    }
+
+    /**
+     * 显示单次 agent loop 迭代的缓存命中统计。
+     *
+     * 在工具调用后、工具执行前插入 UI 消息，让用户看到每次独立 API 请求的缓存效率。
+     * 仅当 [CACHE_DEBUG_ENABLED] 为 true 时才显示。
+     *
+     * @param iter 当前迭代序号（1-based）
+     * @param hit 本次请求的缓存命中 token 数
+     * @param miss 本次请求的缓存未命中 token 数
+     */
+    private fun appendIterCacheDebug(iter: Int, hit: Int, miss: Int) {
+        if (!CACHE_DEBUG_ENABLED) return
+        val total = hit + miss
+        if (total <= 0) return
+        val rate = hit * 100 / total
+        appendCacheDebugMessage("请求$iter: 命中 $hit | 未命中 $miss (${rate}%)")
+    }
+
+    /**
+     * 显示 agent loop 全部迭代的缓存命中汇总。
+     *
+     * 如果只有 1 次迭代，只显示该次结果（不重复）。
+     * 如果有多次迭代，显示每次的独立命中率 + 累计汇总。
+     * 仅当 [CACHE_DEBUG_ENABLED] 为 true 时才显示。
+     *
+     * @param stats 每次迭代的统计列表，元素为 (iteration, hit, miss)
+     */
+    private fun appendSummaryCacheDebug(stats: List<Triple<Int, Int, Int>>) {
+        if (!CACHE_DEBUG_ENABLED) return
+        if (stats.isEmpty()) return
+        // 只有一次迭代且已经通过 appendIterCacheDebug 显示过，这里不重复
+        if (stats.size == 1) {
+            val (_, hit, miss) = stats[0]
+            val total = hit + miss
+            if (total <= 0) return
+            val rate = hit * 100 / total
+            appendCacheDebugMessage("缓存命中: $hit | 未命中: $miss (${rate}%)")
+            return
         }
+        // 多次迭代：逐行显示每次独立命中率，最后显示累加汇总
+        val sb = StringBuilder("缓存统计（${stats.size} 次请求）:")
+        var sumHit = 0
+        var sumMiss = 0
+        for ((iter, hit, miss) in stats) {
+            val total = hit + miss
+            val rate = if (total > 0) hit * 100 / total else 0
+            sb.append("\n  请求$iter: $hit/$total (${rate}%)")
+            sumHit += hit
+            sumMiss += miss
+        }
+        val sumTotal = sumHit + sumMiss
+        val sumRate = if (sumTotal > 0) sumHit * 100 / sumTotal else 0
+        sb.append("\n  汇总: $sumHit/$sumTotal (${sumRate}%)")
+        appendCacheDebugMessage(sb.toString())
     }
 
     /**
@@ -1761,6 +1817,8 @@ class CompanionViewModel(
         viewModelScope.launch {
             runAgentLoop(provider, key, model)
             isLoading = false
+            // 同 sendMessage，保留 tool 历史不删除
+            requestSave()
         }
     }
 
@@ -1855,6 +1913,7 @@ class CompanionViewModel(
         })
     }
 
+
     /**
      * 构建发送给 LLM API 的完整消息列表。
      *
@@ -1916,140 +1975,22 @@ class CompanionViewModel(
             put("content", stableContent)
         })
 
-        // 追加对话历史，对旧的 tool result 进行压缩以节省上下文
-        // 压缩规则：如果 tool result 后面跟着 assistant 回复，说明 AI 已经处理完该结果，
-        // 后续请求只需要知道操作是否成功，不需要完整数据
-        val compressedHistory = compressToolResults(conversationHistory)
-        apiMessages.addAll(compressedHistory)
+        // 直接追加原始对话历史，不做任何压缩或修改
+        // 之前的压缩逻辑会改变 tool result 内容，导致每次请求前缀不同，缓存全部失效
+        apiMessages.addAll(conversationHistory)
 
         return apiMessages
     }
 
-    /**
-     * 压缩对话历史中的旧工具结果，减少上下文 token 消耗。
-     *
-     * AI 在 agent loop 中拿到工具结果后会生成回复。回复一旦生成，
-     * 历史中的完整工具结果数据对后续对话就不再有价值——AI 的回复已经包含了关键信息。
-     * 将旧的 tool result content 替换为简短摘要，可大幅减少 token。
-     *
-     * 判断"旧"的逻辑：从后往前扫描，最后一个 tool result 保留完整（可能是当前 agent loop 的），
-     * 更早的 tool result 全部压缩。
-     *
-     * 不修改原始 conversationHistory，返回新的列表。
-     */
-    private fun compressToolResults(history: List<JSONObject>): List<JSONObject> {
-        if (history.size <= 3) return history
-
-        // 找到最后一个 tool 消息的位置
-        // 从该位置往前的所有 tool 消息都压缩（AI 已处理过）
-        // 该位置及之后的 tool 消息保留完整（可能是当前 agent loop 的）
-        var lastToolIndex = -1
-        for (i in history.lastIndex downTo 0) {
-            if (history[i].optString("role") == "tool") {
-                lastToolIndex = i
-                break
-            }
-        }
-
-        // 没有工具结果或只有一个，不需要压缩
-        if (lastToolIndex <= 0) return history
-
-        return history.mapIndexed { index, msg ->
-            // 只压缩最后一个 tool 之前的旧 tool result
-            if (index < lastToolIndex && msg.optString("role") == "tool") {
-                val compressed = compressToolContent(msg.optString("content", ""))
-                JSONObject().apply {
-                    put("role", "tool")
-                    put("tool_call_id", msg.optString("tool_call_id", ""))
-                    put("content", compressed)
-                }
-            } else {
-                msg
-            }
-        }
-    }
-
-    /**
-     * 将工具结果的 JSON 内容压缩为简短摘要。
-     *
-     * 保留 success/error 状态和关键信息（如创建的实体 ID/名称），
-     * 去掉大块数据（如完整的任务列表、色板数据）。
-     *
-     * @param content 原始工具结果 JSON 字符串
-     * @return 压缩后的简短字符串
-     */
-    private fun compressToolContent(content: String): String {
-        return try {
-            val json = JSONObject(content)
-            // 如果本身就很短（<100字符），不需要压缩
-            if (content.length < 100) return content
-
-            val success = json.optBoolean("success", true)
-            if (!success) {
-                // 错误结果保留错误信息
-                val error = json.optString("error", "unknown error")
-                return """{"success":false,"error":"$error"}"""
-            }
-
-            // 成功结果：提取实体类型和数量，去掉大数据
-            val sb = StringBuilder("{\"success\":true")
-            val entityType = json.optString("entity_type", "")
-            if (entityType.isNotEmpty()) sb.append(",\"entity_type\":\"$entityType\"")
-
-            // 提取数量信息
-            val count = json.optInt("count", -1)
-            if (count >= 0) sb.append(",\"count\":$count")
-            val successCount = json.optInt("success_count", -1)
-            if (successCount >= 0) sb.append(",\"success_count\":$successCount")
-
-            // 提取 message（通常包含简短的操作描述）
-            val message = json.optString("message", "")
-            if (message.isNotEmpty()) sb.append(",\"message\":\"$message\"")
-
-            // 提取创建/更新返回的实体 ID（方便后续引用）
-            val taskObj = json.optJSONObject("task")
-            if (taskObj != null) {
-                sb.append(",\"id\":\"${taskObj.optString("id", "")}\"")
-                sb.append(",\"title\":\"${taskObj.optString("title", "")}\"")
-            }
-            val checklistObj = json.optJSONObject("checklist")
-            if (checklistObj != null) {
-                sb.append(",\"id\":\"${checklistObj.optString("id", "")}\"")
-                sb.append(",\"name\":\"${checklistObj.optString("name", "")}\"")
-            }
-            val groupObj = json.optJSONObject("group")
-            if (groupObj != null) {
-                sb.append(",\"id\":\"${groupObj.optString("id", "")}\"")
-                sb.append(",\"name\":\"${groupObj.optString("name", "")}\"")
-            }
-
-            // 记忆工具：保留 scope 和 item 摘要
-            val scope = json.optString("scope", "")
-            if (scope.isNotEmpty()) sb.append(",\"scope\":\"$scope\"")
-            val item = json.optJSONObject("item")
-            if (item != null) {
-                sb.append(",\"item_id\":\"${item.optString("id", "")}\"")
-            }
-
-            // 设置工具：只保留更新了几个槽位
-            val updatedKeys = json.optJSONArray("updated_keys")
-            if (updatedKeys != null) {
-                sb.append(",\"updated_count\":${updatedKeys.length()}")
-            }
-            val updated = json.optJSONObject("updated")
-            if (updated != null) {
-                sb.append(",\"updated_count\":${updated.length()}")
-            }
-
-            sb.append("}")
-            sb.toString()
-        } catch (_: Exception) {
-            // JSON 解析失败，截断原始内容
-            if (content.length > 80) content.take(80) + "..." else content
-        }
-    }
 
     companion object {
+        /**
+         * 缓存调试信息开关。
+         * true: 在对话中显示每次 API 请求的缓存命中/未命中统计（开发/调试用）
+         * false: 不显示任何缓存调试信息（Release 构建必须设为 false）
+         */
+        private const val CACHE_DEBUG_ENABLED = true
+
         /**
          * ViewModel 工厂 —— 从 Application 获取 NionCore 单例注入 ViewModel。
          */

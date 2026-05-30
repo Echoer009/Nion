@@ -26,7 +26,7 @@ import uniffi.nion_core.TaskData
  */
 fun taskToJson(task: TaskData): JSONObject = JSONObject().apply {
     put("id", task.id)
-    put("title", task.title)
+    put("name", task.name)
     put("status", task.status)
     put("priority", task.priority)
     // description: 非空时才输出
@@ -342,15 +342,15 @@ object QueryTool : Tool {
  * 支持批量创建：传 items 数组可一次创建多个实体，减少 API 往返次数。
  *
  * Agent 场景示例：
- * - "帮我建一个任务" → entity_type="task", title="..."
- * - "帮我建三个任务：买牛奶、跑步、读书" → entity_type="task", items=[{"title":"买牛奶"},{"title":"跑步"},{"title":"读书"}]
+ * - "帮我建一个任务" → entity_type="task", name="..."
+ * - "帮我建三个任务：买牛奶、跑步、读书" → entity_type="task", items=[{"name":"买牛奶"},{"name":"跑步"},{"name":"读书"}]
  * - "建一个学习清单" → entity_type="checklist", name="学习"
  * - "在语文清单下建一个分组" → entity_type="group", name="数学", checklist_id="xxx"
  */
 object CreateTool : Tool {
     override val name = "create"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "创建实体，支持批量(items数组)。entity_type: task需title, checklist需name, group需name+checklist_id。"
+    override val description = "创建实体，支持批量(items数组)。所有实体统一用name表示名称。entity_type: task需name, checklist需name, group需name+checklist_id。"
 
     private val schema = """
     {
@@ -360,7 +360,6 @@ object CreateTool : Tool {
                 "type": "string",
                 "enum": ["task", "checklist", "group"]
             },
-            "title": { "type": "string" },
             "description": { "type": "string" },
             "priority": {
                 "type": "string",
@@ -418,7 +417,7 @@ object CreateTool : Tool {
         var failCount = 0
 
         // 外层参数作为批量默认值：item 未指定时自动继承
-        // 用法示例：{ "entity_type":"task", "parent_id":"abc", "items":[{"title":"子1"},{"title":"子2"}] }
+        // 用法示例：{ "entity_type":"task", "parent_id":"abc", "items":[{"name":"子1"},{"name":"子2"}] }
         // 子1、子2 会自动继承 parent_id="abc"，无需每项重复指定
         val outerCategoryId = params.optString("category_id", "").takeIf { it.isNotEmpty() }
         val outerParentId = params.optString("parent_id", "").takeIf { it.isNotEmpty() }
@@ -429,14 +428,14 @@ object CreateTool : Tool {
             try {
                 when (entityType) {
                     "task" -> {
-                        val title = itemParams.optString("title", "").takeIf { it.isNotEmpty() }
-                            ?: throw IllegalArgumentException("批量创建任务时每项必须包含 title，第 ${i + 1} 项缺失")
+                        val name = itemParams.optString("name", "").takeIf { it.isNotEmpty() }
+                            ?: throw IllegalArgumentException("批量创建任务时每项必须包含 name，第 ${i + 1} 项缺失")
                         // item 有值用 item 的，没有则 fallback 到外层参数
                         val categoryId = itemParams.optString("category_id", "").takeIf { it.isNotEmpty() } ?: outerCategoryId
                         val parentId = itemParams.optString("parent_id", "").takeIf { it.isNotEmpty() } ?: outerParentId
                         val groupId = itemParams.optString("group_id", "").takeIf { it.isNotEmpty() } ?: outerGroupId
                         val task = core.createTask(
-                            title = title,
+                            name = name,
                             description = itemParams.optString("description", "").takeIf { it.isNotEmpty() },
                             priority = itemParams.optString("priority", "medium"),
                             categoryId = categoryId,
@@ -505,11 +504,11 @@ object CreateTool : Tool {
 
     /** 创建任务 */
     private fun executeCreateTask(params: JSONObject, core: NionCore): String {
-        val title = params.optString("title", "").takeIf { it.isNotEmpty() }
-            ?: return """{"error":"创建任务时必须指定 title"}"""
+        val name = params.optString("name", "").takeIf { it.isNotEmpty() }
+            ?: return """{"error":"创建任务时必须指定 name"}"""
 
         val task = core.createTask(
-            title = title,
+            name = name,
             description = params.optString("description", "").takeIf { it.isNotEmpty() },
             priority = params.optString("priority", "medium"),
             categoryId = params.optString("category_id", "").takeIf { it.isNotEmpty() },
@@ -572,7 +571,7 @@ object CreateTool : Tool {
 object UpdateTool : Tool {
     override val name = "update"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "更新实体，支持批量(ids数组)。只传需修改的字段。task可改title/status/priority/reminder等；checklist改name；group改name/color。"
+    override val description = "更新实体，支持批量(ids数组)。只传需修改的字段。task可改name/status/priority/reminder等；checklist改name；group改name/color。"
 
     private val schema = """
     {
@@ -587,7 +586,6 @@ object UpdateTool : Tool {
                 "type": "array",
                 "items": { "type": "string" }
             },
-            "title": { "type": "string" },
             "description": { "type": "string" },
             "priority": {
                 "type": "string",
@@ -651,7 +649,7 @@ object UpdateTool : Tool {
                     "task" -> {
                         val task = core.updateTask(
                             id = id,
-                            title = params.optString("title", "").takeIf { it.isNotEmpty() },
+                            name = params.optString("name", "").takeIf { it.isNotEmpty() },
                             description = params.optString("description", "").takeIf { it.isNotEmpty() },
                             priority = params.optString("priority", "").takeIf { it.isNotEmpty() },
                             status = params.optString("status", "").takeIf { it.isNotEmpty() },
@@ -716,7 +714,7 @@ object UpdateTool : Tool {
     private fun executeUpdateTask(id: String, params: JSONObject, core: NionCore): String {
         val task = core.updateTask(
             id = id,
-            title = params.optString("title", "").takeIf { it.isNotEmpty() },
+            name = params.optString("name", "").takeIf { it.isNotEmpty() },
             description = params.optString("description", "").takeIf { it.isNotEmpty() },
             priority = params.optString("priority", "").takeIf { it.isNotEmpty() },
             status = params.optString("status", "").takeIf { it.isNotEmpty() },
@@ -1049,7 +1047,7 @@ object ManageTool : Tool {
         // 设置新的 category_id
         val task = core.updateTask(
             id = taskId,
-            title = null,
+            name = null,
             description = null,
             priority = null,
             status = null,
@@ -1076,7 +1074,7 @@ object ManageTool : Tool {
         // 同时更新 group_id 和 category_id（继承分组的清单归属）
         val task = core.updateTask(
             id = taskId,
-            title = null,
+            name = null,
             description = null,
             priority = null,
             status = null,
@@ -1124,7 +1122,7 @@ object ManageTool : Tool {
         return JSONObject().apply {
             put("success", true)
             put("task", taskToJson(task))
-            put("message", "任务已成为「${parentTask.title}」的子任务")
+            put("message", "任务已成为「${parentTask.name}」的子任务")
         }.toString()
     }
 
