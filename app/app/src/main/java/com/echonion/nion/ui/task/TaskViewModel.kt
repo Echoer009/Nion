@@ -38,7 +38,7 @@ import uniffi.nion_core.AttachmentData
 @Stable
 data class TaskItem(
     val id: String,
-    val title: String,
+    val name: String,
     val description: String?,
     val priority: String,
     val isDone: Boolean,
@@ -365,7 +365,7 @@ class TaskViewModel(
      * @return 新创建的任务 ID，失败时返回 null
      */
     fun createTask(
-        title: String,
+        name: String,
         description: String?,
         priority: String,
         recurrenceRule: String? = null,
@@ -380,7 +380,7 @@ class TaskViewModel(
                     else -> activeChecklistId
                 }
                 val newTask = withContext(Dispatchers.IO) {
-                    core.createTask(title, description, priority, realCategoryId, null, activeGroupId, recurrenceRule, recurrenceReminderTime)
+                    core.createTask(name, description, priority, realCategoryId, null, activeGroupId, recurrenceRule, recurrenceReminderTime)
                 }
                 // 创建成功后调度提醒闹钟
                 scheduleReminderIfNeeded(newTask)
@@ -396,7 +396,7 @@ class TaskViewModel(
     /**
      * 创建子任务。继承父任务所在的清单和分组。
      */
-    fun createSubtask(parentId: String, title: String, priority: String = "medium") {
+    fun createSubtask(parentId: String, name: String, priority: String = "medium") {
         viewModelScope.launch {
             try {
                 // 子任务继承父任务的分组归属
@@ -407,7 +407,7 @@ class TaskViewModel(
                     else -> activeChecklistId
                 }
                 withContext(Dispatchers.IO) {
-                    core.createTask(title, null, priority, realCategoryId, parentId, parentGroup, null, null)
+                    core.createTask(name, null, priority, realCategoryId, parentId, parentGroup, null, null)
                 }
                 tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()
@@ -419,7 +419,7 @@ class TaskViewModel(
 
     /**
      * 切换任务完成状态。
-     * 每日任务：操作 daily_completions 表，不改 tasks.status
+     * 每日任务：使用实例化 API（status 变 done + 自动创建/删除明天实例）
      * 普通任务：改 tasks.status 为 "done"/"todo"
      */
     fun toggleDone(task: TaskItem) {
@@ -431,18 +431,21 @@ class TaskViewModel(
     }
 
     /**
-     * 完成或取消完成过期每日任务的某一天。
-     * @param taskId 每日任务 ID
-     * @param date 要完成/取消的日期，格式 "YYYY-MM-DD"
+     * 完成或取消完成过期每日任务的某一天（新模型：实例化）。
+     * 过期任务是一个独立的任务实例，直接用 completeDailyTaskInstance 完成
+     * （会自动创建下一天的实例）或用 uncompleteDailyTaskInstance 取消。
+     * @param taskId 过期每日任务实例的 ID
+     * @param date 该实例的日期（从 overdueDate 获取）
+     * @param isCompleted 当前是否已完成（true = 要取消完成，false = 要标记完成）
      */
     fun toggleOverdueDailyDone(taskId: String, date: String, isCompleted: Boolean) {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     if (isCompleted) {
-                        core.uncompleteDailyTask(taskId, date)
+                        core.uncompleteDailyTaskInstance(taskId)
                     } else {
-                        core.completeDailyTask(taskId, date)
+                        core.completeDailyTaskInstance(taskId)
                     }
                 }
                 // 重新加载过期列表和今日任务
@@ -458,8 +461,10 @@ class TaskViewModel(
     }
 
     /**
-     * 每日任务的完成/取消：操作 daily_completions 表。
-     * 模板任务的 status 永远保持 "todo"，只有 completions 表变化。
+     * 每日任务的完成/取消（新模型：实例化）。
+     * 完成：调用 completeDailyTaskInstance → status 变 done + 自动创建明天的实例
+     * 取消：调用 uncompleteDailyTaskInstance → status 恢复 todo + 自动删除明天实例
+     * 完成后刷新整个任务列表（因为会新建/删除明天的任务）。
      */
     private fun toggleDailyDone(task: TaskItem) {
         val todayStr = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
@@ -471,15 +476,24 @@ class TaskViewModel(
             try {
                 withContext(Dispatchers.IO) {
                     if (markDone) {
-                        core.completeDailyTask(task.id, todayStr)
+                        // 完成并自动创建明天的实例
+                        core.completeDailyTaskInstance(task.id)
+                        // 取消今天的提醒闹钟
+                        ReminderStore.resetTriggerCount(app, task.id)
+                        ReminderScheduler.cancelReminder(app, task.id)
+                        NotificationHelper.dismissNotification(app, task.id)
                     } else {
-                        core.uncompleteDailyTask(task.id, todayStr)
+                        // 取消完成并删除明天的实例
+                        core.uncompleteDailyTaskInstance(task.id)
                     }
                 }
+                // 全量刷新（因为新建/删除了明天的任务，列表变化大）
+                tasks = loadTasksForCurrentView()
                 // 刷新过期列表
                 overdueDailyTasks = withContext(Dispatchers.IO) {
                     core.getOverdueDailyTasks(todayStr)
                 }
+                scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("更新失败: ${e.message}")
                 tasks = loadTasksForCurrentView()
@@ -520,11 +534,11 @@ class TaskViewModel(
      * 更新任务字段（标题、描述、优先级）。
      * 所有参数均为可选，仅非 null 参数会被更新。
      */
-    fun updateTask(id: String, title: String? = null, description: String? = null, priority: String? = null) {
+    fun updateTask(id: String, name: String? = null, description: String? = null, priority: String? = null) {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    core.updateTask(id, title, description, priority, null, null, null, null, null, null)
+                    core.updateTask(id, name, description, priority, null, null, null, null, null, null)
                 }
                 tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()
@@ -1137,17 +1151,17 @@ private fun removeTaskFromList(tasks: List<TaskItem>, targetId: String): List<Ta
 
 /**
  * 将 Rust 端 DailyTaskStatus 转换为 UI 模型。
- * 每日任务的完成状态由 completedForDate 决定，不看 tasks.status。
- * 普通任务的完成状态仍由 task.status 决定。
+ * 新模型：所有任务（含每日任务）的完成状态统一由 completedForDate 决定，
+ * completedForDate 来自 tasks.status == "done"（Rust 端已处理）。
  */
 private fun DailyTaskStatus.toUi(): TaskItem {
     val isDaily = task.recurrenceRule == "daily"
     return TaskItem(
         id = task.id,
-        title = task.title,
+        name = task.name,
         description = task.description,
         priority = task.priority,
-        isDone = if (isDaily) completedForDate else (task.status == "done"),
+        isDone = completedForDate,
         createdAt = task.createdAt,
         focusSeconds = task.focusSeconds,
         recurrenceRule = task.recurrenceRule,
@@ -1160,25 +1174,24 @@ private fun DailyTaskStatus.toUi(): TaskItem {
 
 /**
  * 将 Rust 端 TaskData 转换为 UI 模型（用于清单视图）。
- * 每日任务在清单视图中永远显示为未完成（status 保持 "todo"），
- * 因为它们的完成由 daily_completions 表追踪。
+ * 新模型：每日任务也是独立实例，完成状态由 tasks.status 决定（和普通任务一致）。
  */
 /** 将 Rust 端 TaskData 转换为 UI 模型，供 TaskViewModel 和 FocusSetupViewModel 共用 */
 internal fun TaskData.toUi(): TaskItem {
     val isDaily = recurrenceRule == "daily"
     return TaskItem(
         id = id,
-        title = title,
+        name = name,
         description = description,
         priority = priority,
-        isDone = if (isDaily) false else (status == "done"),
+        isDone = status == "done",
         createdAt = createdAt,
         focusSeconds = focusSeconds,
         recurrenceRule = recurrenceRule,
         recurrenceReminderTime = recurrenceReminderTime,
         reminder = reminder,
         isDaily = isDaily,
-        isCompletedForDate = false,
+        isCompletedForDate = isDaily && status == "done",
     )
 }
 

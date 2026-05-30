@@ -48,6 +48,7 @@ import androidx.compose.ui.unit.dp
 import com.echonion.nion.ui.task.formatReminder
 import com.echonion.nion.ui.task.isReminderOverdue
 import com.echonion.nion.ui.task.priorityColor
+import com.echonion.nion.ui.theme.LocalPriorityColors
 
 /**
  * 共享任务卡片 UI 数据模型 —— 统一任务列表和日程页面的卡片数据。
@@ -57,7 +58,7 @@ import com.echonion.nion.ui.task.priorityColor
  */
 data class TaskCardModel(
     val id: String,
-    val title: String,
+    val name: String,
     val description: String? = null,
     val priority: String,
     val isDone: Boolean,
@@ -121,8 +122,9 @@ fun SharedTaskCard(
         label = "checkBg",
     )
 
-    // 优先级颜色，复用 TaskUtils 的扩展属性
-    val priorityColor = model.priority.priorityColor
+    // 优先级颜色，通过 LocalPriorityColors 获取跟随主题变化的颜色
+    val priorityColors = LocalPriorityColors.current
+    val priorityColor = model.priority.priorityColor(priorityColors)
 
     // 紧凑模式下缩小内边距
     val horizontalPadding = if (compact) 14.dp else 16.dp
@@ -183,7 +185,7 @@ fun SharedTaskCard(
             // 标题行：任务名 + 每日循环图标
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    text = model.title,
+                    text = model.name,
                     style = MaterialTheme.typography.bodyLarge,
                     fontWeight = FontWeight.Medium,
                     textDecoration = if (model.isDone) TextDecoration.LineThrough else null,

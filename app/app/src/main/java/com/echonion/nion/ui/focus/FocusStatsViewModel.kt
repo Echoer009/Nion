@@ -146,7 +146,7 @@ class FocusStatsViewModel(
 
                 // 任务分布
                 db.rawQuery(
-                    """SELECT s.task_id, COALESCE(t.title, '(已删除)') as title, SUM(s.seconds) as total
+                    """SELECT s.task_id, COALESCE(t.name, '(已删除)') as name, SUM(s.seconds) as total
                        FROM focus_sessions s
                        LEFT JOIN tasks t ON t.id = s.task_id
                        WHERE s.created_at >= date('now', '-' || ? || ' days')

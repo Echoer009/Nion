@@ -92,7 +92,7 @@ class GreetingWorker(
                     + unscheduledPending.count { it.priority == "high" }
 
             // 1d. 合并任务标题列表（给 LLM 和模板兜底用）
-            val todayTaskTitles = todayScheduled.map { it.task.title } + unscheduledPending.map { it.title }
+            val todayTaskTitles = todayScheduled.map { it.task.name } + unscheduledPending.map { it.name }
 
             // ── 2. 生成问候文案（注入天气上下文） ──
             val weatherSummary = try {

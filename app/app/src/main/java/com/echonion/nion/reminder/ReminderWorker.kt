@@ -85,7 +85,7 @@ class ReminderWorker(
         try {
             // 1. 从 DB 读取任务详情
             val task = core.getTask(taskId)
-            val taskTitle = task.title
+            val taskTitle = task.name
             val taskPriority = task.priority
 
             // 2. 读取并递增 trigger_count

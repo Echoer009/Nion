@@ -946,7 +946,7 @@ private fun HierarchicalTaskCard(
             shape = RoundedCornerShape(if (depth == 0) 16.dp else 12.dp),
             color = MaterialTheme.colorScheme.surfaceContainerLowest,
             border = if (isSelected) BorderStroke(2.dp, primaryColor) else null,
-            onClick = { onSelectTask(item.task.id, item.task.title) },
+            onClick = { onSelectTask(item.task.id, item.task.name) },
         ) {
             Row(
                 modifier = Modifier
@@ -960,7 +960,7 @@ private fun HierarchicalTaskCard(
             ) {
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        item.task.title,
+                        item.task.name,
                         // 子任务使用较小字号
                         style = if (depth == 0) MaterialTheme.typography.bodyLarge
                             else MaterialTheme.typography.bodyMedium,

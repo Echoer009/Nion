@@ -22,6 +22,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import com.echonion.nion.ui.theme.LocalPriorityColors
 import androidx.compose.ui.unit.dp
 
 /**
@@ -49,7 +50,8 @@ fun PrioritySelector(
     ) {
         items.forEach { key ->
             val isSelected = selected == key
-            val color = key.priorityColor
+            val priorityColors = LocalPriorityColors.current
+            val color = key.priorityColor(priorityColors)
             // 指示条颜色：外部传入则用外部颜色，否则用优先级自身颜色
             val effectiveIndicatorColor = indicatorColor ?: color
             Column(

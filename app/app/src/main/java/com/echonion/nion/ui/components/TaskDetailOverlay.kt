@@ -229,7 +229,7 @@ fun TaskDetailOverlay(
 
                             // 提示：正在为哪个任务添加子任务
                             Text(
-                                "添加到：${task.title}",
+                                "添加到：${task.name}",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -330,7 +330,7 @@ fun TaskDetailOverlay(
 
                             // 提示正在为哪个任务设置循环
                             Text(
-                                "为「${task.title}」设置每日循环",
+                                "为「${task.name}」设置每日循环",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -448,7 +448,7 @@ fun TaskDetailOverlay(
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text(
-                                    task.title,
+                                    task.name,
                                     style = MaterialTheme.typography.titleLarge,
                                     fontWeight = FontWeight.Bold,
                                     modifier = Modifier.weight(1f),

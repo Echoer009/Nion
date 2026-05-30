@@ -282,7 +282,7 @@ fun TaskScreen(
                         },
                         /** 点击开始专注：直接导航到专注页，不关闭详情浮层，避免任务列表闪现 */
                         onStartFocus = { durationMinutes ->
-                            onStartFocus(task.id, task.title, durationMinutes)
+                            onStartFocus(task.id, task.name, durationMinutes)
                         },
                         sharedElementModifier = Modifier.sharedElement(
                             sharedContentState = rememberSharedContentState("task_detail_$taskId"),
@@ -383,7 +383,7 @@ fun TaskScreen(
                             onAdd = { title, desc, priority, recurrenceRule, recurrenceReminderTime, reminder ->
                                 val pending = pendingAttachmentData.toList()
                                 viewModel.createTask(
-                                    title = title,
+                                    name = title,
                                     description = desc,
                                     priority = priority,
                                     recurrenceRule = recurrenceRule,

@@ -65,7 +65,7 @@ class ReminderActionReceiver : BroadcastReceiver() {
         // 获取任务标题（优先从 intent extra 读取，fallback 到 DB）
         val taskTitle = intent.getStringExtra(EXTRA_TASK_TITLE) ?: try {
             val app = context.applicationContext as? NionApp
-            app?.core?.getTask(taskId)?.title ?: ""
+            app?.core?.getTask(taskId)?.name ?: ""
         } catch (_: Exception) {
             ""
         }

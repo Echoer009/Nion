@@ -40,6 +40,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.echonion.nion.ui.components.SharedTaskCard
 import com.echonion.nion.ui.components.TaskCardModel
+import com.echonion.nion.ui.theme.LocalPriorityColors
 
 /**
  * 扁平任务行 —— 根据 depth 分发到主任务行或子任务行。
@@ -150,7 +151,7 @@ private fun MainTaskRow(
     val cardModel = remember(task) {
         TaskCardModel(
             id = task.id,
-            title = task.title,
+            name = task.name,
             description = task.description,
             priority = task.priority,
             isDone = task.isDone,
@@ -194,7 +195,8 @@ private fun SubTaskRow(
     sharedElementModifier: Modifier = Modifier,
 ) {
     val task = item.task
-    val priorityColor = task.priority.priorityColor
+    val priorityColors = LocalPriorityColors.current
+    val priorityColor = task.priority.priorityColor(priorityColors)
     val checkSize = 18.dp
     val indentPerLevel = 20.dp
     val indent = indentPerLevel * item.depth
@@ -257,7 +259,7 @@ private fun SubTaskRow(
         }
         Spacer(modifier = Modifier.width(8.dp))
         Text(
-            task.title,
+            task.name,
             style = MaterialTheme.typography.bodyMedium,
             textDecoration = if (task.isDone) TextDecoration.LineThrough else null,
             color = if (task.isDone) MaterialTheme.colorScheme.onSurface.copy(alpha = NionAlpha.TEXT_SUBTITLE) else MaterialTheme.colorScheme.onSurface,

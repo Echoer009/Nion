@@ -1,17 +1,23 @@
 package com.echonion.nion.ui.task
 
 import androidx.compose.ui.graphics.Color
-import com.echonion.nion.ui.theme.NionColors
+import com.echonion.nion.ui.theme.LocalPriorityColors
+import androidx.compose.runtime.Composable
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
-/** 根据优先级字符串返回对应的颜色：高=红，中=橙，低=灰蓝 */
-val String.priorityColor: Color
-    get() = when (this) {
-        "high" -> NionColors.PriorityHigh
-        "medium" -> NionColors.PriorityMedium
-        else -> NionColors.PriorityLow
-    }
+/**
+ * 根据优先级字符串返回对应的主题颜色。
+ * 颜色跟随主题变化（通过 LocalPriorityColors），不再硬编码。
+ *
+ * @param priorityColors 当前主题的优先级颜色配置
+ * @return 对应优先级的颜色
+ */
+fun String.priorityColor(priorityColors: com.echonion.nion.ui.theme.PriorityColors): Color = when (this) {
+    "high" -> priorityColors.high
+    "medium" -> priorityColors.medium
+    else -> priorityColors.low
+}
 
 /** 根据优先级字符串返回中文标签 */
 val String.priorityLabel: String

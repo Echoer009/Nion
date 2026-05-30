@@ -89,7 +89,7 @@ class BatchReminderWorker(
                         .atZone(ZoneId.systemDefault()).toLocalDateTime()
                     // 只看今天且未来的提醒
                     if (dateTime.toLocalDate() == today && dateTime.isAfter(now)) {
-                        Triple(task.id, task.title, dateTime)
+                        Triple(task.id, task.name, dateTime)
                     } else null
                 }.sortedBy { it.third }
 
@@ -170,7 +170,7 @@ class BatchReminderWorker(
                                 .format(DateTimeFormatter.ofPattern("HH:mm"))
                         }
                     } ?: ""
-                    Triple(task.title, task.priority, reminderTime)
+                    Triple(task.name, task.priority, reminderTime)
                 } catch (_: Exception) { null }
             }
 

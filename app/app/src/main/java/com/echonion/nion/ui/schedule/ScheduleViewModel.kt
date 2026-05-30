@@ -39,7 +39,7 @@ import java.time.format.DateTimeFormatter
 @Stable
 data class ScheduleTaskItem(
     val id: String,
-    val title: String,
+    val name: String,
     val description: String? = null,
     val priority: String,
     val isDone: Boolean,
@@ -99,19 +99,23 @@ class ScheduleViewModel(
 
     /**
      * 乐观更新：切换任务完成状态——立即更新内存状态，异步持久化，失败时回退。
+     * 新模型：每日任务使用实例化 API（completeDailyTaskInstance / uncompleteDailyTaskInstance）
      */
     fun toggleDone(taskId: String, date: LocalDate, isCompleted: Boolean, isDaily: Boolean) {
         // 乐观更新：立即翻转内存中的 isDone 状态
         tasks = tasks.map { item ->
             if (item.id == taskId) item.copy(isDone = !isCompleted) else item
         }
-        val dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     if (isDaily) {
-                        if (isCompleted) core.uncompleteDailyTask(taskId, dateStr)
-                        else core.completeDailyTask(taskId, dateStr)
+                        // 新模型：实例化完成/取消
+                        if (isCompleted) {
+                            core.uncompleteDailyTaskInstance(taskId)
+                        } else {
+                            core.completeDailyTaskInstance(taskId)
+                        }
                     } else {
                         val newStatus = if (isCompleted) "todo" else "done"
                         core.updateTask(taskId, null, null, null, newStatus, null, null, null, null, null)
@@ -300,10 +304,10 @@ class ScheduleViewModel(
         val isDaily = task.recurrenceRule == "daily"
         return ScheduleTaskItem(
             id = task.id,
-            title = task.title,
+            name = task.name,
             description = task.description,
             priority = task.priority,
-            isDone = if (isDaily) completedForDate else (task.status == "done"),
+            isDone = completedForDate,
             isDaily = isDaily,
             reminderTime = task.recurrenceReminderTime,
             reminder = task.reminder,
@@ -314,7 +318,7 @@ class ScheduleViewModel(
 /** 将 ScheduleTaskItem 映射为共享任务卡片数据模型 */
 fun ScheduleTaskItem.toCardModel(): TaskCardModel = TaskCardModel(
     id = id,
-    title = title,
+    name = name,
     description = description,
     priority = priority,
     isDone = isDone,
@@ -326,7 +330,7 @@ fun ScheduleTaskItem.toCardModel(): TaskCardModel = TaskCardModel(
 /** 将 ScheduleTaskItem 转为 TaskItem（字段从 DailyTaskStatus 派生得来，缺少 createdAt/focusSeconds） */
 fun ScheduleTaskItem.toTaskItem(): TaskItem = TaskItem(
     id = id,
-    title = title,
+    name = name,
     description = description,
     priority = priority,
     isDone = isDone,
@@ -342,7 +346,7 @@ fun ScheduleTaskItem.toTaskItem(): TaskItem = TaskItem(
 /** 将 Rust 端 TaskData 转为 TaskItem */
 fun TaskData.toTaskItem(): TaskItem = TaskItem(
     id = id,
-    title = title,
+    name = name,
     description = description,
     priority = priority,
     isDone = status == "done",

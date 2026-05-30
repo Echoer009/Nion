@@ -70,6 +70,7 @@ import com.echonion.nion.NionApp
 import com.echonion.nion.R
 import com.echonion.nion.core
 import com.echonion.nion.ui.companion.MarkdownText
+import com.echonion.nion.ui.theme.CustomThemeEntry
 import com.echonion.nion.ui.theme.NionColorTheme
 import com.echonion.nion.ui.theme.NionTheme
 import com.echonion.nion.ui.theme.ThemePalette
@@ -269,9 +270,13 @@ class ReminderFloatingService : Service() {
                     val mode = app.core.getSetting("theme_mode") ?: "preset"
                     when (mode) {
                         "custom" -> {
-                            val json = app.core.getSetting("custom_theme") ?: ""
-                            if (json.isBlank()) NionColorTheme.CORAL.palette()
-                            else ThemePalette.fromJson(org.json.JSONObject(json))
+                            val activeId = app.core.getSetting("active_custom_theme_id") ?: ""
+                            if (activeId.isBlank()) NionColorTheme.CORAL.palette()
+                            else {
+                                val themes = CustomThemeEntry.listFromJson(app.core.getSetting("custom_themes_list") ?: "[]")
+                                val entry = themes.find { it.id == activeId }
+                                entry?.palette ?: NionColorTheme.CORAL.palette()
+                            }
                         }
                         else -> {
                             val name = app.core.getSetting("color_theme") ?: "CORAL"
