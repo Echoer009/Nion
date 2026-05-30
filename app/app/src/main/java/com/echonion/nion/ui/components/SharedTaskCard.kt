@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.components
 
+import com.echonion.nion.ui.theme.NionAlpha
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
@@ -198,7 +199,7 @@ fun SharedTaskCard(
                         Icons.Outlined.Repeat,
                         contentDescription = "每天",
                         modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                        tint = MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.TEXT_MEDIUM),
                     )
                 }
             }
@@ -229,14 +230,14 @@ fun SharedTaskCard(
                             contentDescription = null,
                             modifier = Modifier.size(12.dp),
                             tint = if (isOverdue) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            else MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.TEXT_MEDIUM),
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = model.reminder.formatReminder() ?: "",
                             style = MaterialTheme.typography.bodySmall,
                             color = if (isOverdue) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            else MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.TEXT_MEDIUM),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -248,13 +249,13 @@ fun SharedTaskCard(
                             Icons.Outlined.Schedule,
                             contentDescription = null,
                             modifier = Modifier.size(12.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = model.reminderTime,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )

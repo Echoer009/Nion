@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.task
 
+import com.echonion.nion.ui.theme.NionAlpha
 import android.app.Application
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -198,8 +199,8 @@ fun ReminderOverlay(
                         .shadow(
                             elevation = 6.dp,
                             shape = RoundedCornerShape(20.dp),
-                            ambientColor = cardColor.copy(alpha = 0.3f),
-                            spotColor = cardColor.copy(alpha = 0.2f),
+                            ambientColor = cardColor.copy(alpha = NionAlpha.SHADOW_AMBIENT),
+                            spotColor = cardColor.copy(alpha = NionAlpha.SHADOW_SPOT),
                         ),
                     shape = RoundedCornerShape(20.dp),
                     color = cardColor,
@@ -218,7 +219,7 @@ fun ReminderOverlay(
                             // 提醒图标，半透明圆形背景
                             Surface(
                                 shape = CircleShape,
-                                color = accentColor.copy(alpha = 0.15f),
+                                color = accentColor.copy(alpha = NionAlpha.BG_DECORATION),
                                 modifier = Modifier.size(36.dp),
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -246,7 +247,7 @@ fun ReminderOverlay(
                                     Text(
                                         "第 ${event.triggerCount} 次提醒",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = onCardColor.copy(alpha = 0.6f),
+                                        color = onCardColor.copy(alpha = NionAlpha.TEXT_SECONDARY),
                                     )
                                 }
                             }
@@ -270,7 +271,7 @@ fun ReminderOverlay(
                                         },
                                     ),
                                 // 使用强调色半透明背景，暗示"可操作"
-                                color = accentColor.copy(alpha = 0.15f),
+                                color = accentColor.copy(alpha = NionAlpha.BG_DECORATION),
                                 shape = CircleShape,
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -295,7 +296,7 @@ fun ReminderOverlay(
                                             dismissEvent(app, event) { dismissWithAnimation() }
                                         },
                                     ),
-                                color = onCardColor.copy(alpha = 0.15f),
+                                color = onCardColor.copy(alpha = NionAlpha.BG_DECORATION),
                                 shape = CircleShape,
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -303,7 +304,7 @@ fun ReminderOverlay(
                                         Icons.Default.Close,
                                         contentDescription = "关闭",
                                         modifier = Modifier.size(14.dp),
-                                        tint = onCardColor.copy(alpha = 0.7f),
+                                        tint = onCardColor.copy(alpha = NionAlpha.TEXT_MEDIUM),
                                     )
                                 }
                             }
@@ -315,7 +316,7 @@ fun ReminderOverlay(
                         MarkdownText(
                             content = displayMessage,
                             style = MaterialTheme.typography.bodyMedium.copy(
-                                color = onCardColor.copy(alpha = 0.85f),
+                                color = onCardColor.copy(alpha = NionAlpha.TEXT_HIGH),
                             ),
                             stickers = stickers,
                         )
@@ -331,7 +332,7 @@ fun ReminderOverlay(
                                     modifier = Modifier.weight(1f),
                                     shape = RoundedCornerShape(10.dp),
                                     // 半透明底色，与卡片背景区分
-                                    color = onCardColor.copy(alpha = 0.12f),
+                                    color = onCardColor.copy(alpha = NionAlpha.BG_HIGHLIGHT),
                                     onClick = {
                                         snoozeReminder(app, event.taskId, minutes)
                                         dismissWithAnimation()

@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.task
 
+import com.echonion.nion.ui.theme.NionAlpha
 import com.echonion.nion.util.BitmapUtils
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -64,7 +65,7 @@ fun ImagePreviewOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.9f))
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = NionAlpha.OVERLAY_DARK))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

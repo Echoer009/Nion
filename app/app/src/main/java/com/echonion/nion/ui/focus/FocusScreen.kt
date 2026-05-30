@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.focus
 
+import com.echonion.nion.ui.theme.NionAlpha
 import android.app.Application
 import androidx.activity.ComponentActivity
 import androidx.compose.animation.core.Animatable
@@ -540,7 +541,7 @@ fun FocusScreen(
                             val tickWidth = if (isMajor) 3.5f.dp.toPx() else 2f.dp.toPx()
 
                             val tickColor = if (isLit) primaryColor
-                                else primaryColor.copy(alpha = if (isMajor) 0.3f else 0.12f)
+                                else primaryColor.copy(alpha = if (isMajor) NionAlpha.BG_SUBTLE else NionAlpha.BG_HIGHLIGHT)
                             rotate(angleDeg.toFloat(), pivot = Offset(cx, cy)) {
                                 drawRoundRect(
                                     color = tickColor,
@@ -819,7 +820,7 @@ private fun TaskPanelOverlay(
                 Text(
                     "不选择则以空任务专注",
                     style = MaterialTheme.typography.bodySmall,
-                    color = primaryColor.copy(alpha = 0.6f),
+                    color = primaryColor.copy(alpha = NionAlpha.TEXT_SECONDARY),
                 )
 
                 Spacer(modifier = Modifier.height(24.dp))
@@ -828,7 +829,7 @@ private fun TaskPanelOverlay(
                     Text(
                         "暂无待办任务",
                         style = MaterialTheme.typography.bodyLarge,
-                        color = primaryColor.copy(alpha = 0.5f),
+                        color = primaryColor.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                         modifier = Modifier.padding(vertical = 24.dp),
                     )
                 } else {
@@ -865,7 +866,7 @@ private fun TaskPanelOverlay(
                                         Text(
                                             "空任务专注",
                                             style = MaterialTheme.typography.bodySmall,
-                                            color = if (noneSelected) primaryColor.copy(alpha = 0.7f)
+                                            color = if (noneSelected) primaryColor.copy(alpha = NionAlpha.TEXT_MEDIUM)
                                                 else MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                     }
@@ -975,7 +976,7 @@ private fun HierarchicalTaskCard(
                         Text(
                             formatFocusTime(item.task.focusSeconds),
                             style = MaterialTheme.typography.bodySmall,
-                            color = if (isSelected) primaryColor.copy(alpha = 0.7f)
+                            color = if (isSelected) primaryColor.copy(alpha = NionAlpha.TEXT_MEDIUM)
                                 else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }

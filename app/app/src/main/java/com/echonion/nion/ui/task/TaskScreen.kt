@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.task
 
+import com.echonion.nion.ui.theme.NionAlpha
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -671,7 +672,7 @@ private fun AddTaskOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = NionAlpha.OVERLAY_SCRIM))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,

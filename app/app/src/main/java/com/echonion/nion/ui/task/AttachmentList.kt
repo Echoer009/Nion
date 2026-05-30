@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.task
 
+import com.echonion.nion.ui.theme.NionAlpha
 import com.echonion.nion.util.BitmapUtils
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -166,7 +167,7 @@ private fun AttachmentCard(
                         imageVector = Icons.Default.Image,
                         contentDescription = null,
                         modifier = Modifier.size(36.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
                     )
                 }
             } else {
@@ -194,7 +195,7 @@ private fun AttachmentCard(
             Text(
                 text = formatFileSize(attachment.fileSize),
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
             )
         }
 
@@ -207,7 +208,7 @@ private fun AttachmentCard(
                     .size(20.dp)
                     .padding(0.dp),
                 colors = IconButtonDefaults.iconButtonColors(
-                    containerColor = MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f),
+                    containerColor = MaterialTheme.colorScheme.scrim.copy(alpha = NionAlpha.OVERLAY_MEDIUM),
                     contentColor = MaterialTheme.colorScheme.surface,
                 ),
             ) {

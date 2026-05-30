@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.schedule
 
+import com.echonion.nion.ui.theme.NionAlpha
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
@@ -334,7 +335,7 @@ private fun ScheduleContent(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("暂无日程", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("好好休息吧", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
+                        Text("好好休息吧", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY))
                     }
                 }
             } else {
@@ -392,7 +393,7 @@ private fun CalendarPickerOverlay(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = NionAlpha.OVERLAY_SCRIM))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -547,7 +548,7 @@ private fun WeekDaySelector(
                     Text(
                         dayLabels[index],
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                     )
                     Spacer(modifier = Modifier.height(6.dp))
                     Surface(
@@ -665,7 +666,7 @@ private fun CalendarPickerDialog(
                             label,
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                         )
                     }
                 }
@@ -764,7 +765,7 @@ private fun CalendarMonthGrid(
                             .clip(CircleShape)
                             .background(
                                 when {
-                                    isToday -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                    isToday -> MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.BG_HIGHLIGHT)
                                     else -> Color.Transparent
                                 }
                             )

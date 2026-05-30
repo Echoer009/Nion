@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.components
 
+import com.echonion.nion.ui.theme.NionAlpha
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
@@ -824,7 +825,7 @@ fun OverdueDailyTaskRow(
             .fillMaxWidth()
             .padding(vertical = 4.dp)
             .background(
-                MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f),
+                MaterialTheme.colorScheme.errorContainer.copy(alpha = NionAlpha.BG_SUBTLE),
                 RoundedCornerShape(12.dp),
             )
             .padding(horizontal = 16.dp, vertical = 10.dp),

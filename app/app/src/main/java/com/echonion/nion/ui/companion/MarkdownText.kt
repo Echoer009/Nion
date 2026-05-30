@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.companion
 
+import com.echonion.nion.ui.theme.NionAlpha
 import android.util.Log
 import android.graphics.BitmapFactory
 import androidx.compose.foundation.Image
@@ -510,7 +511,7 @@ private fun TaskListBlockBlock(
     Column {
         for ((index, item) in block.items.withIndex()) {
             Row(modifier = Modifier.fillMaxWidth()) {
-                val itemColor = if (item.checked) textColor.copy(alpha = 0.6f) else textColor
+                val itemColor = if (item.checked) textColor.copy(alpha = NionAlpha.TEXT_SECONDARY) else textColor
                 val iconSize = with(LocalDensity.current) {
                     baseStyle.fontSize.toDp()
                 }
@@ -565,7 +566,7 @@ private fun BlockquoteBlock(
         Column(modifier = Modifier.clipToBounds()) {
             for ((index, line) in block.lines.withIndex()) {
                 if (line.isNotBlank()) {
-                    val quoteColor = textColor.copy(alpha = 0.85f)
+                    val quoteColor = textColor.copy(alpha = NionAlpha.TEXT_HIGH)
                     val parsed = parseInline(line, baseStyle, quoteColor, stickerMap)
                     StickerAwareText(parsed, baseStyle.copy(color = quoteColor), quoteColor, stickerMap)
                 }
@@ -647,7 +648,7 @@ private fun TableBlockBlock(
                     }
                 }
                 if (rowIndex < rows.size - 1) {
-                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                    HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = NionAlpha.TEXT_HINT))
                 }
             }
         }
@@ -684,7 +685,7 @@ private fun HorizontalRuleBlock() {
     Spacer(modifier = Modifier.height(4.dp))
     HorizontalDivider(
         modifier = Modifier.padding(horizontal = 16.dp),
-        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+        color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
     )
     Spacer(modifier = Modifier.height(4.dp))
 }
@@ -905,7 +906,7 @@ private fun parseInline(
                             withStyle(SpanStyle(
                                 fontFamily = FontFamily.Monospace,
                                 fontSize = (style.fontSize.value * 0.9f).sp,
-                                background = color.copy(alpha = 0.12f),
+                                background = color.copy(alpha = NionAlpha.BG_HIGHLIGHT),
                             )) {
                                 append(raw.substring(i + 1, end))
                             }

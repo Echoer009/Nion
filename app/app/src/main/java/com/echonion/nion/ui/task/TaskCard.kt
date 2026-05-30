@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.task
 
+import com.echonion.nion.ui.theme.NionAlpha
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
@@ -251,7 +252,7 @@ private fun SubTaskRow(
             if (task.isDone) {
                 Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(10.dp))
             } else {
-                Icon(Icons.Default.RadioButtonUnchecked, contentDescription = null, tint = priorityColor.copy(alpha = 0.5f), modifier = Modifier.size(checkSize))
+                Icon(Icons.Default.RadioButtonUnchecked, contentDescription = null, tint = priorityColor.copy(alpha = NionAlpha.TEXT_SUBTITLE), modifier = Modifier.size(checkSize))
             }
         }
         Spacer(modifier = Modifier.width(8.dp))
@@ -259,7 +260,7 @@ private fun SubTaskRow(
             task.title,
             style = MaterialTheme.typography.bodyMedium,
             textDecoration = if (task.isDone) TextDecoration.LineThrough else null,
-            color = if (task.isDone) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f) else MaterialTheme.colorScheme.onSurface,
+            color = if (task.isDone) MaterialTheme.colorScheme.onSurface.copy(alpha = NionAlpha.TEXT_SUBTITLE) else MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f),

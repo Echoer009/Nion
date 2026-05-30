@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.companion
 
+import com.echonion.nion.ui.theme.NionAlpha
 import android.app.Application
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -170,8 +171,8 @@ fun GreetingOverlay(
                         .shadow(
                             elevation = 6.dp,
                             shape = RoundedCornerShape(20.dp),
-                            ambientColor = cardColor.copy(alpha = 0.3f),
-                            spotColor = cardColor.copy(alpha = 0.2f),
+                            ambientColor = cardColor.copy(alpha = NionAlpha.SHADOW_AMBIENT),
+                            spotColor = cardColor.copy(alpha = NionAlpha.SHADOW_SPOT),
                         ),
                     shape = RoundedCornerShape(20.dp),
                     color = cardColor,
@@ -190,7 +191,7 @@ fun GreetingOverlay(
                             // 问候图标，半透明圆形背景
                             Surface(
                                 shape = CircleShape,
-                                color = accentColor.copy(alpha = 0.15f),
+                                color = accentColor.copy(alpha = NionAlpha.BG_DECORATION),
                                 modifier = Modifier.size(36.dp),
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
@@ -216,7 +217,7 @@ fun GreetingOverlay(
                                 modifier = Modifier
                                     .size(28.dp)
                                     .clip(CircleShape),
-                                color = onCardColor.copy(alpha = 0.15f),
+                                color = onCardColor.copy(alpha = NionAlpha.BG_DECORATION),
                                 shape = CircleShape,
                                 onClick = { dismissWithAnimation() },
                             ) {
@@ -225,7 +226,7 @@ fun GreetingOverlay(
                                         Icons.Default.Close,
                                         contentDescription = "关闭",
                                         modifier = Modifier.size(14.dp),
-                                        tint = onCardColor.copy(alpha = 0.7f),
+                                        tint = onCardColor.copy(alpha = NionAlpha.TEXT_MEDIUM),
                                     )
                                 }
                             }
@@ -236,7 +237,7 @@ fun GreetingOverlay(
                         MarkdownText(
                             content = event.message,
                             style = MaterialTheme.typography.bodyMedium.copy(
-                                color = onCardColor.copy(alpha = 0.85f),
+                                color = onCardColor.copy(alpha = NionAlpha.TEXT_HIGH),
                             ),
                             stickers = stickers,
                         )

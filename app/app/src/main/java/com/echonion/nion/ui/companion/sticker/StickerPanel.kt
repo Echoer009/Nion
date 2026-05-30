@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.companion.sticker
 
+import com.echonion.nion.ui.theme.NionAlpha
 import android.content.Context
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -95,7 +96,7 @@ internal fun StickersPanel(
                 Text(
                     if (stickers.isEmpty()) "暂无表情包" else "共 ${stickers.size} 个表情包",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                 )
             }
         }
@@ -106,7 +107,7 @@ internal fun StickersPanel(
         Text(
             "添加表情包后，AI 会在回复中用 <标签名> 来发送表情",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
         )
 
         Spacer(modifier = Modifier.height(16.dp))
@@ -141,18 +142,18 @@ internal fun StickersPanel(
                     Icons.Outlined.SentimentSatisfied,
                     contentDescription = null,
                     modifier = Modifier.size(48.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.BG_SUBTLE),
                 )
                 Spacer(modifier = Modifier.height(8.dp))
                 Text(
                     "还没有添加表情包",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                 )
                 Text(
                     "点击上方按钮添加",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.BG_SUBTLE),
                 )
             }
         } else {
@@ -198,7 +199,7 @@ private fun StickerItem(
 
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = NionAlpha.OVERLAY_MEDIUM),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
@@ -252,7 +253,7 @@ private fun StickerItem(
                     Icons.Default.Delete,
                     contentDescription = "删除表情包",
                     modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                 )
             }
         }
@@ -323,7 +324,7 @@ private fun AddStickerDialog(
                         .fillMaxWidth()
                         .height(100.dp)
                         .clip(RoundedCornerShape(8.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = NionAlpha.BG_SUBTLE))
                         .clickable {
                             imagePicker.launch(
                                 PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)

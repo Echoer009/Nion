@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.components
 
+import com.echonion.nion.ui.theme.NionAlpha
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
@@ -144,7 +145,7 @@ fun TaskDetailOverlay(
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f))
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = NionAlpha.OVERLAY_SCRIM))
             .clickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
@@ -357,7 +358,7 @@ fun TaskDetailOverlay(
                                         },
                                         shape = RoundedCornerShape(14.dp),
                                         colors = ButtonDefaults.textButtonColors(
-                                            contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                            contentColor = MaterialTheme.colorScheme.error.copy(alpha = NionAlpha.TEXT_MEDIUM),
                                         ),
                                     ) {
                                         Text("移除循环", fontWeight = FontWeight.SemiBold, maxLines = 1)
@@ -481,7 +482,7 @@ fun TaskDetailOverlay(
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp),
                                     tint = if (task.recurrenceRule == "daily") MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
@@ -492,7 +493,7 @@ fun TaskDetailOverlay(
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = if (task.recurrenceRule == "daily") FontWeight.Medium else FontWeight.Normal,
                                     color = if (task.recurrenceRule == "daily") MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                                 )
                             }
 
@@ -513,7 +514,7 @@ fun TaskDetailOverlay(
                                     contentDescription = null,
                                     modifier = Modifier.size(16.dp),
                                     tint = if (task.reminder != null) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                                 )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
@@ -528,7 +529,7 @@ fun TaskDetailOverlay(
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = if (task.reminder != null) FontWeight.Medium else FontWeight.Normal,
                                     color = if (task.reminder != null) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                                 )
                             }
                         }
@@ -784,13 +785,13 @@ fun TaskDetailOverlay(
                                         Text(
                                             "·",
                                             style = MaterialTheme.typography.bodyLarge,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.BG_SUBTLE),
                                         )
                                         // 删除按钮
                                         TextButton(
                                             onClick = onDelete,
                                             colors = ButtonDefaults.textButtonColors(
-                                                contentColor = MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                                            contentColor = MaterialTheme.colorScheme.error.copy(alpha = NionAlpha.TEXT_MEDIUM),
                                             ),
                                         ) {
                                             Icon(

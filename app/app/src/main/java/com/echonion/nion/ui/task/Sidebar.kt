@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.task
 
+import com.echonion.nion.ui.theme.NionAlpha
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.tween
@@ -258,7 +259,7 @@ fun SidebarContent(
                         placeholder = {
                             Text(
                                 "清单名称",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                             )
                         },
                         shape = RoundedCornerShape(12.dp),
@@ -314,7 +315,7 @@ fun SidebarContent(
                 Surface(
                     onClick = { isAdding = true },
                     shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                     modifier = Modifier.fillMaxWidth(),
                     tonalElevation = 1.dp,
                 ) {
@@ -430,13 +431,13 @@ private fun SidebarChecklistItem(
                     Text(
                         "${taskCount}任务 · ${subtaskCount}子任务",
                         style = MaterialTheme.typography.labelSmall,
-                        color = contentColor.copy(alpha = 0.6f),
+                        color = contentColor.copy(alpha = NionAlpha.TEXT_SECONDARY),
                     )
                 } else {
                     Text(
                         "空清单",
                         style = MaterialTheme.typography.labelSmall,
-                        color = contentColor.copy(alpha = 0.35f),
+                        color = contentColor.copy(alpha = NionAlpha.TEXT_SUBTLE),
                     )
                 }
             }
@@ -448,7 +449,7 @@ private fun SidebarChecklistItem(
                     Icon(
                         Icons.Default.Close,
                         contentDescription = "删除",
-                        tint = contentColor.copy(alpha = 0.35f),
+                        tint = contentColor.copy(alpha = NionAlpha.TEXT_SUBTLE),
                         modifier = Modifier.size(16.dp),
                     )
                 }

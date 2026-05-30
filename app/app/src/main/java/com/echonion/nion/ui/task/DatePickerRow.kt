@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.task
 
+import com.echonion.nion.ui.theme.NionAlpha
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
@@ -197,7 +198,7 @@ fun NionCalendar(
                                             .clip(CircleShape)
                                             .background(
                                                 when {
-                                                    isCurrent -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                                    isCurrent -> MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.BG_HIGHLIGHT)
                                                     else -> Color.Transparent
                                                 }
                                             )
@@ -302,7 +303,7 @@ fun NionCalendar(
                                     label,
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                                 )
                             }
                         }
@@ -548,7 +549,7 @@ private fun CalendarMonthGrid(
                             .background(
                                 when {
                                     isSelected -> MaterialTheme.colorScheme.primary
-                                    isToday -> MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+                                    isToday -> MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.BG_HIGHLIGHT)
                                     else -> Color.Transparent
                                 }
                             )
