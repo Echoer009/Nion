@@ -8,16 +8,18 @@ import com.echonion.nion.NionApp
 import com.echonion.nion.ui.companion.PromptDefaults
 import com.echonion.nion.ui.companion.weather.WeatherAlertChecker
 import com.echonion.nion.ui.companion.weather.WeatherService
+import java.time.LocalTime
 
 /**
  * 天气预警 Worker —— 每小时检查一次天气数据，判断是否需要提醒用户。
  *
  * 执行流程：
- * 1. 通过 WeatherService 获取天气数据（含当前 + 逐小时 + 逐日预报）
- * 2. 用 WeatherAlertChecker 做纯代码阈值判断（降水/温度剧变/大风/UV/极端温度）
- * 3. 不需要提醒 → 静默结束
- * 4. 需要提醒 → 通过 ReminderLlmClient 调用 LLM 生成个性化提醒文案
- * 5. 通过 NotificationHelper 发送天气预警通知
+ * 1. 静默时段检查（22:00 ~ 07:00 直接跳过，夜间不骚扰用户）
+ * 2. 通过 WeatherService 获取天气数据（含当前 + 逐小时 + 逐日预报）
+ * 3. 用 WeatherAlertChecker 做纯代码阈值判断（降水/温度剧变/大风/UV/极端温度）
+ * 4. 不需要提醒 → 静默结束
+ * 5. 需要提醒 → 通过 ReminderLlmClient 调用 LLM 生成个性化提醒文案
+ * 6. 通过 OverlayDispatcher 三模分发：前台悬浮卡 / 后台悬浮窗 / 系统通知兜底
  *
  * 调度方式：
  * - 由 WeatherAlertScheduler 注册 PeriodicWorkRequest，间隔 1 小时
@@ -34,10 +36,30 @@ class WeatherAlertWorker(
 
     companion object {
         private const val TAG = "WeatherAlertWorker"
+
+        /** 静默时段起始时间（22:00）—— 此时间之后不发天气预警 */
+        private val QUIET_START = LocalTime.of(22, 0)
+
+        /** 静默时段结束时间（07:00）—— 此时间之前不发天气预警 */
+        private val QUIET_END = LocalTime.of(7, 0)
     }
 
     override suspend fun doWork(): Result {
         Log.d(TAG, "开始天气预警检查")
+
+        // ── 静默时段检查：夜间 22:00 ~ 07:00 不发预警 ──
+        val now = LocalTime.now()
+        val inQuietHours = if (QUIET_START.isBefore(QUIET_END)) {
+            // 不跨午夜的情况（如 06:00 ~ 08:00）
+            now.isAfter(QUIET_START) || now.isBefore(QUIET_END)
+        } else {
+            // 跨午夜的情况（22:00 ~ 07:00）
+            now.isAfter(QUIET_START) || now.isBefore(QUIET_END)
+        }
+        if (inQuietHours) {
+            Log.d(TAG, "当前处于静默时段 ($QUIET_START ~ $QUIET_END)，跳过天气预警")
+            return Result.success()
+        }
 
         val app = applicationContext as? NionApp ?: return Result.failure()
         val core = app.core
@@ -53,7 +75,7 @@ class WeatherAlertWorker(
         val weather = WeatherService.fetchWeather(applicationContext, core)
         if (weather == null) {
             Log.w(TAG, "获取天气数据失败，跳过预警检查")
-            return Result.success() // 不重试，下次定时任务再试
+            return Result.success()
         }
 
         // 3. 代码层判断是否需要预警
@@ -68,14 +90,36 @@ class WeatherAlertWorker(
         // 4. 通过 LLM 生成个性化提醒文案
         val message = generateAlertMessage(core, weather, alertResult)
 
-        // 5. 发送通知
+        // 5. 三模分发：前台悬浮卡 / 后台悬浮窗 / 系统通知兜底
+        // 先发系统通知作为兜底（前台/悬浮窗接管后会主动取消）
         NotificationHelper.showWeatherAlertNotification(
             applicationContext,
             message,
             alertResult.severity,
         )
 
-        Log.d(TAG, "天气预警通知已发送")
+        val severity = alertResult.severity
+        OverlayDispatcher.dispatch(
+            context = applicationContext,
+            onForeground = {
+                // 前台：发 SharedFlow 事件 → WeatherAlertOverlay 弹 App 内悬浮卡片
+                app.postWeatherAlertEvent(WeatherAlertEvent(severity, message))
+                // 前台 Overlay 已接管，取消系统通知避免双重提醒
+                NotificationHelper.dismissWeatherAlertNotification(applicationContext)
+            },
+            onBackgroundOverlay = {
+                // 后台 + 有悬浮窗权限 → 启动天气预警悬浮窗 Service
+                WeatherAlertFloatingService.start(applicationContext, severity, message)
+                // 悬浮窗已接管，取消系统通知避免双重提醒
+                NotificationHelper.dismissWeatherAlertNotification(applicationContext)
+            },
+            onFallback = {
+                // 兜底：保留系统通知（上面已发送）
+                Log.d(TAG, "App 在后台且无悬浮窗权限，保留系统通知")
+            },
+        )
+
+        Log.d(TAG, "天气预警已分发")
         return Result.success()
     }
 

@@ -369,4 +369,14 @@ object NotificationHelper {
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.cancel(notificationId)
     }
+
+    /**
+     * 取消天气预警通知。
+     * 当悬浮窗或 App 内 Overlay 接管后调用，避免通知栏残留。
+     */
+    fun dismissWeatherAlertNotification(context: Context) {
+        val notificationId = "weather_alert".hashCode() and 0x7FFFFFFF
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(notificationId)
+    }
 }

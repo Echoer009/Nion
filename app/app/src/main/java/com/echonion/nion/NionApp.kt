@@ -9,6 +9,7 @@ import com.echonion.nion.reminder.NotificationHelper
 import com.echonion.nion.reminder.GreetingEvent
 import com.echonion.nion.reminder.ReminderEvent
 import com.echonion.nion.reminder.ReminderScheduler
+import com.echonion.nion.reminder.WeatherAlertEvent
 import com.echonion.nion.reminder.WeatherAlertScheduler
 import com.echonion.nion.ui.companion.tools.DataType
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -87,6 +88,22 @@ class NionApp : Application() {
      */
     fun postGreetingEvent(event: GreetingEvent) {
         _greetingEvents.tryEmit(event)
+    }
+
+    /**
+     * 天气预警事件总线 —— WeatherAlertWorker 触发时通过此总线通知 UI 层。
+     *
+     * WeatherAlertOverlay 监听此事件流，收到事件后弹出天气预警悬浮卡片。
+     */
+    private val _weatherAlertEvents = MutableSharedFlow<WeatherAlertEvent>(extraBufferCapacity = 4)
+    val weatherAlertEvents: SharedFlow<WeatherAlertEvent> = _weatherAlertEvents.asSharedFlow()
+
+    /**
+     * 发送天气预警事件到 UI 层。
+     * 由 WeatherAlertWorker 在前台模式下调用。
+     */
+    fun postWeatherAlertEvent(event: WeatherAlertEvent) {
+        _weatherAlertEvents.tryEmit(event)
     }
 
     /**

@@ -67,6 +67,12 @@
             android:exported="false"
             android:foregroundServiceType="specialUse" />
 
+        <!-- 天气预警悬浮窗 Service：在 App 后台时通过 WindowManager 显示天气预警悬浮卡片 -->
+        <service
+            android:name=".reminder.WeatherAlertFloatingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse" />
+
         <!-- 开机重调度接收器，设备重启后重新注册所有闹钟 -->
         <receiver
             android:name=".reminder.BootReceiver"

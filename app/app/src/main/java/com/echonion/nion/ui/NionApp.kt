@@ -39,6 +39,7 @@ import com.echonion.nion.ui.components.DualPanelLayout
 import com.echonion.nion.ui.components.DualPanelState
 import com.echonion.nion.ui.companion.CompanionSidebar
 import com.echonion.nion.ui.companion.GreetingOverlay
+import com.echonion.nion.ui.companion.WeatherAlertOverlay
 import com.echonion.nion.ui.focus.FocusScreen
 import com.echonion.nion.ui.focus.FocusStatsPanel
 import com.echonion.nion.ui.schedule.ScheduleScreen
@@ -425,6 +426,9 @@ fun NionApp() {
 
             // 全局问候悬浮卡片，放在 Scaffold 之后（Z 轴上层），确保浮在所有界面之上
             GreetingOverlay(app = app)
+
+            // 全局天气预警悬浮卡片，放在 Scaffold 之后（Z 轴上层），确保浮在所有界面之上
+            WeatherAlertOverlay(app = app)
         }
     }
 }
