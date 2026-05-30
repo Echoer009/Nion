@@ -51,6 +51,7 @@ import com.echonion.nion.ui.task.taskViewModel
 import kotlinx.coroutines.launch
 import com.echonion.nion.NionApp
 import com.echonion.nion.ui.companion.tools.DataType
+import com.echonion.nion.ui.theme.CustomThemeEntry
 import com.echonion.nion.ui.theme.NionColorTheme
 import com.echonion.nion.ui.theme.NionTheme
 import com.echonion.nion.ui.theme.ThemePalette
@@ -332,16 +333,68 @@ fun NionApp() {
                             }
                         }
                         composable("settings") {
+                            // 将 customThemes 提升为 remember state，
+                            // 使得重命名/删除等操作可以直接更新 state 触发 UI 刷新
+                            var customThemes by remember {
+                                mutableStateOf(loadCustomThemesList(core))
+                            }
+
+                            // 监听 AI 工具修改主题后发出的 SETTINGS 事件，刷新自定义主题列表
+                            LaunchedEffect(Unit) {
+                                (app as NionApp).dataEvents.collect { event ->
+                                    if (DataType.SETTINGS in event.types) {
+                                        customThemes = loadCustomThemesList(core)
+                                    }
+                                }
+                            }
+
                             SettingsScreen(
                                 currentPresetName = currentPresetName,
                                 themePalette = themePalette,
+                                customThemes = customThemes,
                                 onThemeChange = {
                                     themePalette = it.palette()
                                     currentPresetName = it.name
                                     try {
                                         core.setSetting("theme_mode", "preset")
                                         core.setSetting("color_theme", it.name)
-                                        core.setSetting("custom_theme", "")
+                                        core.setSetting("active_custom_theme_id", "")
+                                    } catch (_: Exception) {}
+                                },
+                                onCustomThemeSelect = { entry ->
+                                    themePalette = entry.palette
+                                    currentPresetName = null
+                                    try {
+                                        core.setSetting("theme_mode", "custom")
+                                        core.setSetting("active_custom_theme_id", entry.id)
+                                    } catch (_: Exception) {}
+                                },
+                                onCustomThemeDelete = { id ->
+                                    try {
+                                        val themes = customThemes.toMutableList()
+                                        themes.removeAll { it.id == id }
+                                        core.setSetting("custom_themes_list", CustomThemeEntry.listToJson(themes))
+                                        // 如果删除的是当前活跃主题，切换到 CORAL
+                                        val activeId = core.getSetting("active_custom_theme_id") ?: ""
+                                        if (activeId == id) {
+                                            core.setSetting("theme_mode", "preset")
+                                            core.setSetting("color_theme", "CORAL")
+                                            core.setSetting("active_custom_theme_id", "")
+                                            themePalette = NionColorTheme.CORAL.palette()
+                                            currentPresetName = "CORAL"
+                                        }
+                                        customThemes = themes
+                                    } catch (_: Exception) {}
+                                },
+                                onCustomThemeRename = { id, newName ->
+                                    try {
+                                        val themes = customThemes.toMutableList()
+                                        val idx = themes.indexOfFirst { it.id == id }
+                                        if (idx >= 0) {
+                                            themes[idx] = themes[idx].copy(name = newName)
+                                            core.setSetting("custom_themes_list", CustomThemeEntry.listToJson(themes))
+                                            customThemes = themes
+                                        }
                                     } catch (_: Exception) {}
                                 },
                                 onOpenCompanion = { dualState.openRight() },
@@ -382,7 +435,7 @@ fun NionApp() {
  * 读取顺序：
  * 1. `theme_mode` — "preset" 或 "custom"
  * 2. 如果是 preset：读取 `color_theme` 获取预设名称，通过枚举的 palette() 返回
- * 3. 如果是 custom：读取 `custom_theme` JSON 反序列化为 ThemePalette
+ * 3. 如果是 custom：从 `custom_themes_list` 中按 `active_custom_theme_id` 查找对应条目
  *
  * @param core NionCore 单例
  * @return 当前主题色板，读取失败时回退到 CORAL 预设
@@ -392,9 +445,12 @@ private fun loadThemePalette(core: uniffi.nion_core.NionCore): ThemePalette {
         val mode = core.getSetting("theme_mode") ?: "preset"
         when (mode) {
             "custom" -> {
-                val json = core.getSetting("custom_theme") ?: return NionColorTheme.CORAL.palette()
-                if (json.isBlank()) return NionColorTheme.CORAL.palette()
-                ThemePalette.fromJson(org.json.JSONObject(json))
+                val activeId = core.getSetting("active_custom_theme_id") ?: ""
+                if (activeId.isBlank()) return NionColorTheme.CORAL.palette()
+                val themes = loadCustomThemesList(core)
+                val entry = themes.find { it.id == activeId }
+                    ?: return NionColorTheme.CORAL.palette()
+                entry.palette
             }
             else -> {
                 val name = core.getSetting("color_theme") ?: "CORAL"
@@ -420,5 +476,18 @@ private fun loadPresetName(core: uniffi.nion_core.NionCore): String? {
         else core.getSetting("color_theme") ?: "CORAL"
     } catch (_: Exception) {
         "CORAL"
+    }
+}
+
+/**
+ * 从设置中加载自定义主题列表。
+ */
+private fun loadCustomThemesList(core: uniffi.nion_core.NionCore): List<CustomThemeEntry> {
+    return try {
+        val json = core.getSetting("custom_themes_list") ?: return emptyList()
+        if (json.isBlank()) return emptyList()
+        CustomThemeEntry.listFromJson(json)
+    } catch (_: Exception) {
+        emptyList()
     }
 }
