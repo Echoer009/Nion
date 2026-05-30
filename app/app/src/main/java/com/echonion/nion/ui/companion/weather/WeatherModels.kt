@@ -91,7 +91,7 @@ data class DailyForecast(
 /**
  * 完整天气数据 —— 聚合当前实况 + 逐小时预报 + 逐日预报。
  *
- * 用于 [WeatherService] 返回完整结果，供 WeatherTool 和预警 Worker 使用。
+ * 用于 [WeatherService] 返回完整结果，供 QueryTool 天气查询和预警 Worker 使用。
  */
 data class FullWeatherData(
     val current: CurrentWeather,

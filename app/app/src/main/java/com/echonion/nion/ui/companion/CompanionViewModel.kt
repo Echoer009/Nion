@@ -437,7 +437,7 @@ class CompanionViewModel(
                     apiTypeName = core.getSetting("llm_api_type"),
                     companionName = core.getSetting("companion_name"),
                     prefsJson = core.getSetting("companion_user_preferences"),
-                    memoriesJson = core.getSetting(MemoryTool.SETTING_KEY),
+                    memoriesJson = core.getSetting(MemoryTool.FACTS_SETTING_KEY),
                     avatarUri = core.getSetting("companion_avatar_uri"),
                     promptPersona = core.getSetting(PromptDefaults.KEY_PERSONA),
                     promptFormat = core.getSetting(PromptDefaults.KEY_FORMAT),
@@ -1151,7 +1151,7 @@ class CompanionViewModel(
         }
         prefs.put(newPref)
         userPreferences = prefs
-        try { com.echonion.nion.ui.companion.tools.RememberTool.savePreferences(core, prefs) } catch (_: Exception) {}
+        try { com.echonion.nion.ui.companion.tools.MemoryTool.savePreferences(core, prefs) } catch (_: Exception) {}
     }
 
     /**
@@ -1169,7 +1169,7 @@ class CompanionViewModel(
             }
         }
         userPreferences = newArr
-        try { com.echonion.nion.ui.companion.tools.RememberTool.savePreferences(core, newArr) } catch (_: Exception) {}
+        try { com.echonion.nion.ui.companion.tools.MemoryTool.savePreferences(core, newArr) } catch (_: Exception) {}
     }
 
     /**
@@ -1178,7 +1178,7 @@ class CompanionViewModel(
      */
     fun refreshPreferences() {
         try {
-            val prefsJson = core.getSetting("companion_user_preferences")
+            val prefsJson = core.getSetting(MemoryTool.PREFS_SETTING_KEY)
             userPreferences = if (!prefsJson.isNullOrEmpty()) {
                 org.json.JSONArray(prefsJson)
             } else {
@@ -1193,7 +1193,7 @@ class CompanionViewModel(
      */
     fun refreshMemories() {
         try {
-            val memoriesJson = core.getSetting(MemoryTool.SETTING_KEY)
+            val memoriesJson = core.getSetting(MemoryTool.FACTS_SETTING_KEY)
             userMemories = if (!memoriesJson.isNullOrEmpty()) {
                 JSONArray(memoriesJson)
             } else {
@@ -1374,6 +1374,7 @@ class CompanionViewModel(
                 "task" -> "任务"
                 "checklist" -> "清单"
                 "group" -> "分组"
+                "weather" -> "天气"
                 else -> null
             }
         } catch (_: Exception) { null }
@@ -1384,10 +1385,14 @@ class CompanionViewModel(
             "create" -> "正在创建$suffix"
             "update" -> "正在更新$suffix"
             "delete" -> "正在删除$suffix"
-            "move" -> "正在移动$suffix"
-            "manage" -> "正在管理设置..."
-            "remember" -> "正在记录偏好..."
-            "memory" -> "$companionName 记住了一些事情..."
+            "manage" -> {
+                val action = try { JSONObject(argumentsJson).optString("action", "") } catch (_: Exception) { "" }
+                if (action == "move") "正在移动$suffix" else "正在排序$suffix"
+            }
+            "memory" -> {
+                val scope = try { JSONObject(argumentsJson).optString("scope", "fact") } catch (_: Exception) { "fact" }
+                if (scope == "preference") "正在记录偏好..." else "$companionName 记住了一些事情..."
+            }
             else -> "正在执行操作..."
         }
     }
@@ -1472,10 +1477,18 @@ class CompanionViewModel(
                     ToolPhrasePool.pick(companionStyle, subKey, mapOf("name" to entityName))
                 }
                 "delete" -> ToolPhrasePool.pick(companionStyle, "delete")
-                "move" -> ToolPhrasePool.pick(companionStyle, "move")
-                "manage" -> ToolPhrasePool.pick(companionStyle, "manage")
-                "remember" -> ToolPhrasePool.pick(companionStyle, "remember")
-                "memory" -> ToolPhrasePool.pick(companionStyle, "memory")
+                "manage" -> {
+                    // manage 工具包含 move 和 reorder 两种操作
+                    val action = args.optString("action", "")
+                    if (action == "move") ToolPhrasePool.pick(companionStyle, "move")
+                    else ToolPhrasePool.pick(companionStyle, "manage")
+                }
+                "memory" -> {
+                    // memory 工具通过 scope 区分偏好和事实
+                    val scope = args.optString("scope", "fact")
+                    if (scope == "preference") ToolPhrasePool.pick(companionStyle, "remember")
+                    else ToolPhrasePool.pick(companionStyle, "memory")
+                }
                 else -> ToolPhrasePool.pick(companionStyle, "create_generic")
             }
         } catch (_: Exception) {

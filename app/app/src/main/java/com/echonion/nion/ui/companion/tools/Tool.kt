@@ -50,7 +50,7 @@ interface Tool {
      *
      * 示例：
      * - CreateTool → `setOf(DataType.TASK_DATA)`
-     * - RememberTool → `setOf(DataType.PREFERENCES)`
+     * - MemoryTool → `setOf(DataType.PREFERENCES, DataType.MEMORIES)`
      * - QueryTool → `emptySet()`
      */
     val affectsData: Set<DataType>
@@ -196,7 +196,6 @@ class ToolExecutor(
         return when (toolName) {
             "update" -> params.has("reminder") || params.has("recurrence_rule") || params.has("recurrence_reminder_time")
             "create" -> params.has("reminder") || params.has("recurrence_rule") || params.has("recurrence_reminder_time")
-            "manage" -> true // manage 工具的 set_recurrence/remove_recurrence 都涉及提醒
             "delete" -> true // 删除任务需要取消闹钟
             else -> false
         }

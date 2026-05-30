@@ -1,5 +1,9 @@
 package com.echonion.nion.ui.companion.tools
 
+import com.echonion.nion.NionApp
+import com.echonion.nion.ui.companion.weather.FullWeatherData
+import com.echonion.nion.ui.companion.weather.WeatherService
+import com.echonion.nion.ui.companion.weather.weatherDescription
 import org.json.JSONArray
 import org.json.JSONObject
 import uniffi.nion_core.ChecklistData
@@ -124,9 +128,10 @@ fun groupListToJson(groups: List<GroupData>): JSONArray = JSONArray().apply {
 object QueryTool : Tool {
     override val name = "query"
     override val affectsData = emptySet<DataType>()
-    override val description = "查询数据。通过 entity_type 指定查询类型：task（任务）、checklist（清单）、group（分组）。" +
-        "task 支持 id（查单个）、category_id（按清单筛选）、parent_id（查子任务）；" +
-        "checklist 返回所有清单；group 需要传 checklist_id 查询指定清单下的分组。"
+    override val description = "查询数据。通过 entity_type 指定查询类型：task=任务, checklist=清单, group=分组, weather=天气。" +
+        "task 支持 id 查单个、category_id 按清单筛选、parent_id 查子任务；" +
+        "checklist 返回所有清单；group 需传 checklist_id 查询指定清单下的分组；" +
+        "weather 通过 type 指定 current 当前实况或 forecast 未来预报，需要 GPS 定位权限。"
 
     private val schema = """
     {
@@ -134,24 +139,29 @@ object QueryTool : Tool {
         "properties": {
             "entity_type": {
                 "type": "string",
-                "enum": ["task", "checklist", "group"],
-                "description": "查询的实体类型：task=任务, checklist=清单, group=分组"
+                "enum": ["task", "checklist", "group", "weather"],
+                "description": "查询的实体类型：task=任务, checklist=清单, group=分组, weather=天气"
             },
             "id": {
                 "type": "string",
-                "description": "按 ID 查询单个实体（仅 task 有效）"
+                "description": "按指定 ID 查询单个任务"
             },
             "category_id": {
                 "type": "string",
-                "description": "按清单 ID 筛选任务（仅 task 有效，不传则返回全部任务）"
+                "description": "按清单 ID 筛选任务，不传则返回全部"
             },
             "checklist_id": {
                 "type": "string",
-                "description": "查询指定清单下的分组（group 类型时必填）"
+                "description": "指定清单 ID，查询该清单下的分组"
             },
             "parent_id": {
                 "type": "string",
-                "description": "查询指定任务的子任务（仅 task 有效）"
+                "description": "指定父任务 ID，查询其子任务"
+            },
+            "type": {
+                "type": "string",
+                "enum": ["current", "forecast"],
+                "description": "天气查询模式：current=当前实况, forecast=未来预报"
             }
         },
         "required": ["entity_type"]
@@ -167,6 +177,7 @@ object QueryTool : Tool {
             "task" -> executeTaskQuery(params, core)
             "checklist" -> executeChecklistQuery(core)
             "group" -> executeGroupQuery(params, core)
+            "weather" -> executeWeatherQuery(params, core)
             else -> """{"error":"不支持的 entity_type: $entityType"}"""
         }
     }
@@ -227,6 +238,96 @@ object QueryTool : Tool {
             put("count", groups.size)
         }.toString()
     }
+
+    /**
+     * 天气查询 —— 查看用户所在位置的当前天气或未来预报。
+     *
+     * 从 NionApp 获取 Context，调用 WeatherService 获取数据，
+     * 根据 type 参数返回格式化的天气文本给 LLM。
+     *
+     * @param params 包含 type（"current" 或 "forecast"）的参数
+     * @param core   NionCore 单例（用于读取位置缓存和天气缓存）
+     * @return 格式化的天气信息文本
+     */
+    private fun executeWeatherQuery(params: JSONObject, core: NionCore): String {
+        val type = params.optString("type", "current")
+
+        val app = NionApp.instance
+            ?: return """{"error":"无法获取应用上下文"}"""
+
+        val weather = WeatherService.fetchWeather(app, core)
+            ?: return """{"error":"获取天气数据失败，可能是定位不可用或网络问题。请告诉用户天气功能暂时不可用，建议检查定位权限和网络连接。"}"""
+
+        return when (type) {
+            "current" -> formatCurrentWeather(weather)
+            "forecast" -> formatForecast(weather)
+            else -> """{"error":"不支持的天气查询类型: $type，可选：current, forecast"}"""
+        }
+    }
+
+    /**
+     * 格式化当前天气实况为 LLM 可理解的文本。
+     *
+     * 输出格式示例：
+     * ```
+     * 当前天气：晴
+     * 温度：22°C
+     * 湿度：65%
+     * 风速：12 km/h
+     * 降水量：0 mm
+     * ```
+     */
+    private fun formatCurrentWeather(data: FullWeatherData): String {
+        val current = data.current
+        val desc = weatherDescription(current.weatherCode)
+
+        val todayRange = if (data.daily.days.isNotEmpty()) {
+            val today = data.daily.days[0]
+            "\n今日温度范围：${"%.0f".format(today.tempMin)}°C ~ ${"%.0f".format(today.tempMax)}°C"
+        } else ""
+
+        return buildString {
+            append("当前天气：$desc\n")
+            append("温度：${"%.1f".format(current.temperature)}°C\n")
+            append("湿度：${current.humidity}%\n")
+            append("风速：${"%.1f".format(current.windSpeed)} km/h\n")
+            append("降水量：${"%.1f".format(current.precipitation)} mm")
+            append(todayRange)
+        }
+    }
+
+    /**
+     * 格式化天气预报为 LLM 可理解的文本。
+     *
+     * 包含两部分：
+     * 1. 未来 24 小时逐小时预报（温度、降水概率、天气、风速、UV）
+     * 2. 未来 7 天逐日预报（最高/最低温、总降水、最大风速、UV峰值）
+     */
+    private fun formatForecast(data: FullWeatherData): String {
+        val sb = StringBuilder()
+
+        sb.appendLine("=== 未来 24 小时逐小时预报 ===")
+        for (h in data.hourly.hours) {
+            val timeLabel = h.hour.substring(11)
+            val desc = weatherDescription(h.weatherCode)
+            val precipMark = if (h.precipitationProb >= 50) " ⚠" else ""
+            sb.appendLine(
+                "$timeLabel | $desc | ${"%.0f".format(h.temperature)}°C | 降水${h.precipitationProb}% | 风速${"%.0f".format(h.windSpeed)}km/h | UV${"%.0f".format(h.uvIndex)}$precipMark"
+            )
+        }
+
+        sb.appendLine()
+
+        sb.appendLine("=== 未来 7 天逐日预报 ===")
+        for (d in data.daily.days) {
+            val dateLabel = d.date.substring(5)
+            sb.appendLine(
+                "$dateLabel | ${"%.0f".format(d.tempMin)}°C ~ ${"%.0f".format(d.tempMax)}°C | 降水${d.precipitationProbabilityMax}% ${"%.1f".format(d.precipitationSum)}mm | 最大风速${"%.0f".format(d.windSpeedMax)}km/h | UV峰值${"%.0f".format(d.uvIndexMax)}"
+            )
+        }
+
+        return sb.toString()
+    }
 }
 
 /**
@@ -243,11 +344,10 @@ object QueryTool : Tool {
 object CreateTool : Tool {
     override val name = "create"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "创建新实体，支持批量。通过 entity_type 指定类型：task（任务）、checklist（清单）、group（分组）。" +
-        "单个创建传 title/name 等字段；批量创建传 items 数组，每项包含对应实体所需的字段。" +
-        "task 需 title，支持 reminder（一次性提醒，ISO 8601 如 2026-06-01T15:00）、" +
-        "recurrence_rule（循环规则，传\"daily\"=每天循环）、recurrence_reminder_time（提醒时间 HH:MM）；" +
-        "checklist 需 name；group 需 name 和 checklist_id。"
+    override val description = "创建新实体，支持批量。通过 entity_type 指定类型：task=任务, checklist=清单, group=分组。" +
+        "单个创建传 title/name 等字段，批量创建传 items 数组。" +
+        "task 需 title，支持 reminder 一次性提醒、recurrence_rule 循环规则传 daily 表示每天循环、recurrence_reminder_time 每日提醒时间。" +
+        "checklist 需 name，group 需 name 和 checklist_id。"
 
     private val schema = """
     {
@@ -260,60 +360,60 @@ object CreateTool : Tool {
             },
             "title": {
                 "type": "string",
-                "description": "任务标题（entity_type=task 且非批量时必填）"
+                "description": "任务标题"
             },
             "description": {
                 "type": "string",
-                "description": "任务描述（可选，仅 task）"
+                "description": "任务描述"
             },
             "priority": {
                 "type": "string",
                 "enum": ["low", "medium", "high"],
-                "description": "任务优先级（可选，仅 task）：low=低, medium=中, high=高，默认 medium"
+                "description": "任务优先级：low=低, medium=中, high=高，默认 medium"
             },
             "category_id": {
                 "type": "string",
-                "description": "任务所属清单 ID（可选，仅 task）"
+                "description": "任务所属清单 ID"
             },
             "parent_id": {
                 "type": "string",
-                "description": "父任务 ID，用于创建子任务（可选，仅 task）"
+                "description": "父任务 ID，用于创建子任务"
             },
             "group_id": {
                 "type": "string",
-                "description": "任务所属分组 ID（可选，仅 task）"
+                "description": "任务所属分组 ID"
             },
             "recurrence_rule": {
                 "type": "string",
                 "enum": ["daily"],
-                "description": "循环规则（可选，仅 task）。不传或传 null 表示不循环，传\"daily\"表示每天循环"
+                "description": "循环规则，传 daily 表示每天循环，不传表示不循环"
             },
             "recurrence_reminder_time": {
                 "type": "string",
-                "description": "每日循环提醒时间，格式 HH:MM，如 09:00，精确到分钟（仅 task，需搭配 recurrence_rule 使用）"
+                "description": "每日循环提醒时间，格式 HH:MM 如 09:00，需搭配 recurrence_rule"
             },
             "reminder": {
                 "type": "string",
-                "description": "一次性提醒时间，ISO 8601 格式如 2026-06-01T15:00（可选，仅 task）。设置后 Nion 会在该时间主动提醒用户"
+                "description": "一次性提醒时间，ISO 8601 格式如 2026-06-01T15:00，设置后 Nion 会在该时间主动提醒用户"
             },
             "name": {
                 "type": "string",
-                "description": "清单或分组的名称（entity_type=checklist 或 group 且非批量时必填）"
+                "description": "清单或分组的名称"
             },
             "checklist_id": {
                 "type": "string",
-                "description": "分组所属的清单 ID（entity_type=group 时必填）"
+                "description": "分组所属的清单 ID"
             },
             "color": {
                 "type": "string",
-                "description": "分组颜色，十六进制格式如 #FF5722（可选，仅 group）"
+                "description": "分组颜色，十六进制格式如 #FF5722"
             },
             "items": {
                 "type": "array",
-                "description": "批量创建时的实体列表。每项是一个对象，包含该实体类型所需的字段（task 需 title，checklist 需 name，group 需 name+checklist_id）。批量创建时不需要传 title/name 等单字段参数",
+                "description": "批量创建的实体列表，每项包含该实体类型所需字段。task 需 title，checklist 需 name，group 需 name + checklist_id",
                 "items": {
                     "type": "object",
-                    "description": "单个实体的创建参数对象"
+                    "description": "单个实体的创建参数"
                 }
             }
         },
@@ -506,11 +606,10 @@ object CreateTool : Tool {
 object UpdateTool : Tool {
     override val name = "update"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "更新实体信息，支持批量。通过 entity_type 指定类型，只传入需要修改的字段即可。" +
-        "单个更新传 id；批量更新传 ids 数组，所有实体应用相同的变更字段。" +
-        "task 支持修改 title/description/priority/status/category_id/reminder/group_id/" +
-        "recurrence_rule（daily=每天循环）/recurrence_reminder_time（HH:MM 提醒时间）；" +
-        "checklist 支持修改 name；group 支持修改 name/color。"
+    override val description = "更新实体信息，支持批量。通过 entity_type 指定类型，只传需要修改的字段。" +
+        "单个更新传 id，批量更新传 ids 数组，所有实体应用相同变更。" +
+        "task 可修改 title/description/priority/status/category_id/reminder/group_id/recurrence_rule/recurrence_reminder_time；" +
+        "checklist 可修改 name；group 可修改 name/color。"
 
     private val schema = """
     {
@@ -523,59 +622,59 @@ object UpdateTool : Tool {
             },
             "id": {
                 "type": "string",
-                "description": "单个更新时的实体 ID（与 ids 二选一）"
+                "description": "单个更新时的实体 ID"
             },
             "ids": {
                 "type": "array",
-                "description": "批量更新时的实体 ID 列表（与 id 二选一），所有实体应用相同的变更字段",
+                "description": "批量更新时的实体 ID 列表，所有实体应用相同变更",
                 "items": { "type": "string" }
             },
             "title": {
                 "type": "string",
-                "description": "任务新标题（仅 task）"
+                "description": "任务新标题"
             },
             "description": {
                 "type": "string",
-                "description": "任务新描述（仅 task）"
+                "description": "任务新描述"
             },
             "priority": {
                 "type": "string",
                 "enum": ["low", "medium", "high"],
-                "description": "任务新优先级（仅 task）"
+                "description": "任务新优先级"
             },
             "status": {
                 "type": "string",
                 "enum": ["todo", "in_progress", "done"],
-                "description": "任务新状态（仅 task）：todo=待办, in_progress=进行中, done=已完成"
+                "description": "任务新状态：todo=待办, in_progress=进行中, done=已完成"
             },
             "category_id": {
                 "type": "string",
-                "description": "任务新所属清单 ID（仅 task）。注意：移动任务到其他清单请用 move 工具"
+                "description": "任务新所属清单 ID。移动任务到其他清单请用 manage 工具的 move 操作"
             },
             "reminder": {
                 "type": "string",
-                "description": "任务新提醒时间，ISO 8601 格式（仅 task）"
+                "description": "任务新提醒时间，ISO 8601 格式"
             },
             "group_id": {
                 "type": "string",
-                "description": "任务新分组 ID（仅 task）。注意：移动任务到其他分组请用 move 工具"
+                "description": "任务新分组 ID。移动任务到其他分组请用 manage 工具的 move 操作"
             },
             "recurrence_rule": {
                 "type": "string",
                 "enum": ["daily"],
-                "description": "循环规则（仅 task）。传\"daily\"表示每天循环，传 null 表示不循环"
+                "description": "循环规则，传 daily 表示每天循环，传 null 表示取消循环"
             },
             "recurrence_reminder_time": {
                 "type": "string",
-                "description": "每日循环提醒时间，格式 HH:MM 如 09:00（仅 task，精确到分钟）"
+                "description": "每日循环提醒时间，格式 HH:MM 如 09:00"
             },
             "name": {
                 "type": "string",
-                "description": "清单或分组的新名称（checklist / group）"
+                "description": "清单或分组的新名称"
             },
             "color": {
                 "type": "string",
-                "description": "分组新颜色，十六进制格式如 #4CAF50（仅 group）"
+                "description": "分组新颜色，十六进制格式如 #4CAF50"
             }
         },
         "required": ["entity_type"]
@@ -742,10 +841,9 @@ object UpdateTool : Tool {
 object DeleteTool : Tool {
     override val name = "delete"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "永久删除实体，支持批量。此操作不可撤销。" +
-        "单个删除传 id；批量删除传 ids 数组。" +
-        "删除清单时其中的任务不会被删除（变为未分类）；" +
-        "删除分组时组内任务不会被删除（移至未分组）。"
+    override val description = "永久删除实体，支持批量，不可撤销。" +
+        "单个删除传 id，批量删除传 ids 数组。" +
+        "删除清单时其中的任务不会被删除而是变为未分类，删除分组时组内任务不会被删除而是移至未分组。"
 
     private val schema = """
     {
@@ -758,11 +856,11 @@ object DeleteTool : Tool {
             },
             "id": {
                 "type": "string",
-                "description": "单个删除时的实体 ID（与 ids 二选一）"
+                "description": "单个删除时的实体 ID"
             },
             "ids": {
                 "type": "array",
-                "description": "批量删除时的实体 ID 列表（与 id 二选一）",
+                "description": "批量删除时的实体 ID 列表",
                 "items": { "type": "string" }
             }
         },
@@ -842,79 +940,120 @@ object DeleteTool : Tool {
 }
 
 /**
- * 移动工具 —— 将实体从一个容器移动到另一个，保留所有数据（如专注时长）。
+ * 通用操作工具 —— 负责结构性操作：移动和排序。
  *
- * 支持批量移动：传 ids 数组可一次移动多个同类型实体到同一目标。
+ * 通过 action 参数路由到不同操作，当前支持：
+ * - move：将实体从一个容器移动到另一个，保留所有数据（如专注时长），支持批量
+ * - reorder：自由排序任务/清单/分组，AI 按期望顺序传入 ordered_ids 即可
  *
- * 支持的移动操作：
+ * move 操作的子类型（通过 entity_type + target_type 组合路由）：
  * - task → checklist：将任务移到另一个清单（自动清除旧分组归属）
  * - task → group：将任务移到另一个分组（自动继承分组的清单归属）
- * - group → checklist：将整个分组移到另一个清单（组内任务也跟随移动）
+ * - task → task：将任务移到另一个任务下成为子任务
+ * - task → root：将子任务提升为独立主任务
+ * - group → checklist：将整个分组移到另一个清单（组内任务跟随移动）
  *
  * Agent 场景示例：
- * - "把这个任务移到工作清单" → entity_type="task", id="xxx", target_type="checklist", target_id="xxx"
- * - "把这三个任务都移到语文分组" → entity_type="task", ids=["id1","id2","id3"], target_type="group", target_id="xxx"
- * - "把数学分组移到工作清单" → entity_type="group", id="xxx", target_type="checklist", target_id="xxx"
+ * - "把这个任务移到工作清单" → action="move", entity_type="task", id="xxx", target_type="checklist", target_id="xxx"
+ * - "把这三个任务都移到语文分组" → action="move", entity_type="task", ids=["id1","id2","id3"], target_type="group", target_id="xxx"
+ * - "把数学分组移到工作清单" → action="move", entity_type="group", id="xxx", target_type="checklist", target_id="xxx"
+ * - "把这个任务变成子任务" → action="move", entity_type="task", id="xxx", target_type="task", target_id="parent_id"
+ * - "把这个子任务提升为主任务" → action="move", entity_type="task", id="xxx", target_type="root"
+ * - "按优先级排一下任务" → action="reorder", entity_type="task", ordered_ids=["高优id","中优id","低优id"]
+ * - "调整清单顺序" → action="reorder", entity_type="checklist", ordered_ids=["id3","id1","id2"]
+ * - "分组排序" → action="reorder", entity_type="group", ordered_ids=["id2","id1"]
  */
-object MoveTool : Tool {
-    override val name = "move"
+object ManageTool : Tool {
+    override val name = "manage"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "移动实体到新的容器，保留所有数据（如专注时长），支持批量。" +
-        "单个移动传 id；批量移动传 ids 数组，所有实体移到同一目标。" +
-        "支持：task→checklist（任务移到其他清单）、task→group（任务移到其他分组）、" +
-        "task→task（任务成为另一任务的子任务）、task→root（提升子任务为独立主任务）、" +
-        "group→checklist（分组移到其他清单，组内任务跟随）。"
+    override val description = "结构性操作：移动和排序实体。" +
+        "action=move 时移动实体到新容器，保留所有数据如专注时长，支持批量。" +
+        "支持 task 移到 checklist/group/task/root，group 移到 checklist 且组内任务跟随移动。" +
+        "单个移动传 id，批量移动传 ids 数组。" +
+        "action=reorder 时自由排序，传入 ordered_ids 按期望顺序排列，支持 task/checklist/group 三种实体。"
 
     private val schema = """
     {
         "type": "object",
         "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["move", "reorder"],
+                "description": "操作类型：move=移动实体, reorder=自由排序"
+            },
             "entity_type": {
                 "type": "string",
-                "enum": ["task", "group"],
-                "description": "要移动的实体类型：task=任务, group=分组"
+                "enum": ["task", "checklist", "group"],
+                "description": "实体类型。move 时为要移动的实体类型 task 或 group，reorder 时为要排序的实体类型"
             },
             "id": {
                 "type": "string",
-                "description": "单个移动时的实体 ID（与 ids 二选一）"
+                "description": "单个操作时的实体 ID"
             },
             "ids": {
                 "type": "array",
-                "description": "批量移动时的实体 ID 列表（与 id 二选一），所有实体移到同一目标",
+                "description": "批量操作时的实体 ID 列表，仅 move 支持批量",
                 "items": { "type": "string" }
             },
             "target_type": {
                 "type": "string",
                 "enum": ["checklist", "group", "task", "root"],
-                "description": "目标类型：checklist=清单, group=分组, task=成为目标任务的子任务, root=提升为独立主任务"
+                "description": "移动目标类型：checklist=清单, group=分组, task=成为目标任务的子任务, root=提升为独立主任务"
             },
             "target_id": {
                 "type": "string",
-                "description": "目标容器/任务的 ID（root 类型不需要此字段）"
+                "description": "目标容器或任务的 ID，root 类型不需要此字段"
+            },
+            "ordered_ids": {
+                "type": "array",
+                "description": "按期望顺序排列的 ID 列表，第一个排在最前，最后一个排在最后",
+                "items": { "type": "string" }
             }
         },
-        "required": ["entity_type", "target_type"]
+        "required": ["action"]
     }
     """.trimIndent()
 
     override fun parametersSchema(): JSONObject = JSONObject(schema)
 
     override suspend fun execute(params: JSONObject, core: NionCore): String {
-        val entityType = params.getString("entity_type")
+        val action = params.getString("action")
+
+        return when (action) {
+            "move" -> executeMove(params, core)
+            "reorder" -> executeReorder(params, core)
+            else -> """{"error":"不支持的 action: $action"}"""
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // move 操作
+    // ═══════════════════════════════════════════════════════════════
+
+    /**
+     * 移动操作路由。
+     * 解析 entity_type、target_type、id/ids，路由到对应的移动方法。
+     * 支持批量移动（ids 数组）和单个移动（id）。
+     */
+    private fun executeMove(params: JSONObject, core: NionCore): String {
+        val entityType = params.optString("entity_type", "").takeIf { it.isNotEmpty() }
+            ?: return """{"error":"move 操作必须指定 entity_type（task/group）"}"""
+        val targetType = params.optString("target_type", "").takeIf { it.isNotEmpty() }
+            ?: return """{"error":"move 操作必须指定 target_type（checklist/group/task/root）"}"""
+        // root 类型不需要 target_id
+        val targetId = params.optString("target_id", "").takeIf { it.isNotEmpty() }
+            ?: if (targetType != "root") return """{"error":"move 操作必须指定 target_id（root 类型除外）"}""" else ""
+
         val singleId = params.optString("id", "").takeIf { it.isNotEmpty() }
         val idsArray = params.optJSONArray("ids")
-        val targetType = params.getString("target_type")
-        // root 类型不需要 target_id，其他类型必填
-        val targetId = params.optString("target_id", "").takeIf { it.isNotEmpty() }
-            ?: if (targetType != "root") return """{"error":"移动操作必须指定 target_id"}""" else ""
 
-        // 批量移动模式
+        // 批量移动
         if (idsArray != null && idsArray.length() > 0) {
             return executeBatchMove(entityType, idsArray, targetType, targetId, core)
         }
 
-        // 单个移动模式（向后兼容）
-        if (singleId == null) return """{"error":"移动操作必须指定 id 或 ids"}"""
+        // 单个移动
+        if (singleId == null) return """{"error":"move 操作必须指定 id 或 ids"}"""
 
         return executeSingleMove(entityType, singleId, targetType, targetId, core)
     }
@@ -933,8 +1072,8 @@ object MoveTool : Tool {
      * 批量移动实体。
      * 遍历 ids 数组，逐个移动到同一目标，收集结果。
      */
-    private fun executeBatchMove(entityType: String, ids: org.json.JSONArray, targetType: String, targetId: String, core: NionCore): String {
-        val results = org.json.JSONArray()
+    private fun executeBatchMove(entityType: String, ids: JSONArray, targetType: String, targetId: String, core: NionCore): String {
+        val results = JSONArray()
         var successCount = 0
         var failCount = 0
 
@@ -943,43 +1082,28 @@ object MoveTool : Tool {
             try {
                 when {
                     entityType == "task" && targetType == "checklist" -> {
-                        val result = moveTaskToChecklist(id, targetId, core)
-                        results.put(JSONObject(result).apply {
-                            put("id", id)
-                            put("success", true)
-                        })
+                        moveTaskToChecklist(id, targetId, core)
+                        results.put(JSONObject().apply { put("id", id); put("success", true) })
                         successCount++
                     }
                     entityType == "task" && targetType == "group" -> {
-                        val result = moveTaskToGroup(id, targetId, core)
-                        results.put(JSONObject(result).apply {
-                            put("id", id)
-                            put("success", true)
-                        })
-                        successCount++
-                    }
-                    entityType == "group" && targetType == "checklist" -> {
-                        val result = moveGroupToChecklist(id, targetId, core)
-                        results.put(JSONObject(result).apply {
-                            put("id", id)
-                            put("success", true)
-                        })
+                        moveTaskToGroup(id, targetId, core)
+                        results.put(JSONObject().apply { put("id", id); put("success", true) })
                         successCount++
                     }
                     entityType == "task" && targetType == "task" -> {
-                        val result = moveTaskToParent(id, targetId, core)
-                        results.put(JSONObject(result).apply {
-                            put("id", id)
-                            put("success", true)
-                        })
+                        moveTaskToParent(id, targetId, core)
+                        results.put(JSONObject().apply { put("id", id); put("success", true) })
                         successCount++
                     }
                     entityType == "task" && targetType == "root" -> {
-                        val result = promoteTaskToRoot(id, core)
-                        results.put(JSONObject(result).apply {
-                            put("id", id)
-                            put("success", true)
-                        })
+                        promoteTaskToRoot(id, core)
+                        results.put(JSONObject().apply { put("id", id); put("success", true) })
+                        successCount++
+                    }
+                    entityType == "group" && targetType == "checklist" -> {
+                        moveGroupToChecklist(id, targetId, core)
+                        results.put(JSONObject().apply { put("id", id); put("success", true) })
                         successCount++
                     }
                     else -> throw IllegalArgumentException("不支持的批量移动操作：$entityType → $targetType")
@@ -1109,119 +1233,10 @@ object MoveTool : Tool {
             put("message", "任务已提升为独立主任务")
         }.toString()
     }
-}
 
-/**
- * 通用操作工具 —— 第 6 个工具，用于不归属于 CRUD 的其他操作。
- *
- * 通过 action 参数路由到不同操作，当前支持：
- * - set_recurrence：设置任务的每日循环规则和提醒时间
- * - remove_recurrence：移除任务的每日循环
- * - reorder：自由排序任务/清单/分组，AI 按期望顺序传入 ordered_ids 即可
- *
- * Agent 场景示例：
- * - "每天 9 点提醒我" → action="set_recurrence", task_id="xxx", recurrence_rule="daily", reminder_time="09:00"
- * - "取消每天循环" → action="remove_recurrence", task_id="xxx"
- * - "按优先级排一下任务" → action="reorder", entity_type="task", ordered_ids=["高优id","中优id","低优id"]
- * - "调整清单顺序" → action="reorder", entity_type="checklist", ordered_ids=["id3","id1","id2"]
- * - "分组排序" → action="reorder", entity_type="group", ordered_ids=["id2","id1"]
- */
-object ManageTool : Tool {
-    override val name = "manage"
-    override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "通用操作工具，用于不归属 CRUD 的其它操作。" +
-        "通过 action 字段指定操作类型。" +
-        "set_recurrence：设置任务每日循环（需 task_id、recurrence_rule、reminder_time）；" +
-        "remove_recurrence：移除任务的每日循环（需 task_id）；" +
-        "reorder：自由排序，AI 决定顺序后传入 ordered_ids（需 entity_type、ordered_ids）。" +
-        "支持 task / checklist / group 三种实体的排序。"
-
-    private val schema = """
-    {
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["set_recurrence", "remove_recurrence", "reorder"],
-                "description": "操作类型：set_recurrence=设置每日循环+提醒时间, remove_recurrence=移除每日循环, reorder=自由排序"
-            },
-            "task_id": {
-                "type": "string",
-                "description": "目标任务 ID（仅 set_recurrence / remove_recurrence 需要）"
-            },
-            "recurrence_rule": {
-                "type": "string",
-                "enum": ["daily"],
-                "description": "循环规则（仅 set_recurrence 需要）。传\"daily\"表示每天循环"
-            },
-            "reminder_time": {
-                "type": "string",
-                "description": "每日提醒时间，格式 HH:MM 如 09:00，精确到分钟（仅 set_recurrence 需要）"
-            },
-            "entity_type": {
-                "type": "string",
-                "enum": ["task", "checklist", "group"],
-                "description": "排序的实体类型（仅 reorder 需要）：task=任务, checklist=清单, group=分组"
-            },
-            "ordered_ids": {
-                "type": "array",
-                "description": "按期望顺序排列的 ID 列表（仅 reorder 需要）。数组第一个元素排在最前面，最后一个排在最后面",
-                "items": { "type": "string" }
-            }
-        },
-        "required": ["action"]
-    }
-    """.trimIndent()
-
-    override fun parametersSchema(): JSONObject = JSONObject(schema)
-
-    override suspend fun execute(params: JSONObject, core: NionCore): String {
-        val action = params.getString("action")
-
-        return when (action) {
-            "set_recurrence", "remove_recurrence" -> {
-                // recurrence 系列操作需要 task_id
-                val taskId = params.optString("task_id", "").takeIf { it.isNotEmpty() }
-                    ?: return """{"error":"manage 操作必须指定 task_id"}"""
-                when (action) {
-                    "set_recurrence" -> executeSetRecurrence(taskId, params, core)
-                    "remove_recurrence" -> executeRemoveRecurrence(taskId, core)
-                    else -> """{"error":"不支持的 action: $action"}"""
-                }
-            }
-            "reorder" -> executeReorder(params, core)
-            else -> """{"error":"不支持的 action: $action"}"""
-        }
-    }
-
-    /**
-     * 设置任务的每日循环规则和提醒时间。
-     * 调用 Rust 端 set_task_recurrence 方法。
-     */
-    private fun executeSetRecurrence(taskId: String, params: JSONObject, core: NionCore): String {
-        val rule = params.optString("recurrence_rule", "").takeIf { it.isNotEmpty() }
-        val time = params.optString("reminder_time", "").takeIf { it.isNotEmpty() }
-
-        val task = core.setTaskRecurrence(taskId, rule, time)
-        return JSONObject().apply {
-            put("success", true)
-            put("task", taskToJson(task))
-            put("message", if (rule == "daily") "已设置每日循环${if (time != null) "，提醒时间 $time" else ""}" else "已清除循环设置")
-        }.toString()
-    }
-
-    /**
-     * 移除任务的每日循环。
-     * 调用 Rust 端 remove_task_recurrence 方法。
-     */
-    private fun executeRemoveRecurrence(taskId: String, core: NionCore): String {
-        val task = core.removeTaskRecurrence(taskId)
-        return JSONObject().apply {
-            put("success", true)
-            put("task", taskToJson(task))
-            put("message", "已移除每日循环")
-        }.toString()
-    }
+    // ═══════════════════════════════════════════════════════════════
+    // reorder 操作
+    // ═══════════════════════════════════════════════════════════════
 
     /**
      * 自由排序实体。

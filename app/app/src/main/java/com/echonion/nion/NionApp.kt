@@ -28,7 +28,7 @@ data class DataChangeEvent(val types: Set<DataType>)
 
 class NionApp : Application() {
     companion object {
-        /** 全局 Application 实例引用，供 WeatherTool 等需要 Context 的组件使用 */
+        /** 全局 Application 实例引用，供 QueryTool 天气查询等需要 Context 的组件使用 */
         var instance: NionApp? = null
             private set
     }
