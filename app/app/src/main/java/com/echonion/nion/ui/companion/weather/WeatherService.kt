@@ -105,13 +105,27 @@ object WeatherService {
                 // 4. 解析 JSON 响应
                 val weather = parseResponse(body)
 
-                // 5. 缓存结果
+                // 5. 同时获取空气质量数据（独立缓存，失败不影响天气数据）
+                val airQuality = try {
+                    AirQualityService.fetchAirQuality(context, core)
+                } catch (e: Exception) {
+                    Log.w(TAG, "获取空气质量数据失败，不影响天气数据", e)
+                    null
+                }
+
+                // 6. 合并天气 + 空气质量 + 缓存天气原始 JSON
+                val fullData = weather?.copy(airQuality = airQuality)
+
+                // 7. 缓存天气结果（空气质量有自己独立的缓存）
                 if (weather != null) {
                     tryWriteCache(core, location, body)
                     Log.d(TAG, "天气数据获取成功: 当前温度=${weather.current.temperature}°C, 天气=${weatherDescription(weather.current.weatherCode)}")
+                    if (airQuality != null) {
+                        Log.d(TAG, "空气质量: PM2.5=${airQuality.pm25}, AQI=${airQuality.aqi} (${aqiDescription(airQuality.aqi)})")
+                    }
                 }
 
-                weather
+                fullData
             } catch (e: Exception) {
                 Log.e(TAG, "获取天气数据异常", e)
                 null
@@ -123,22 +137,37 @@ object WeatherService {
      * 获取简化的当前天气描述文本。
      * 用于问候和通知等场景，不需要完整数据结构。
      *
-     * @return 格式化的天气描述文本，如 "晴，气温 22°C，湿度 65%，风速 12 km/h"
+     * @return 格式化的天气描述文本，包含体感温度和空气质量（如有）
      */
     suspend fun fetchWeatherSummary(context: Context, core: NionCore): String? {
         val weather = fetchWeather(context, core) ?: return null
         val current = weather.current
         val desc = weatherDescription(current.weatherCode)
-        return "$desc，气温 ${current.temperature}°C，湿度 ${current.humidity}%，风速 ${current.windSpeed} km/h"
+        val dayNight = if (current.isDay) "" else "（夜间）"
+        val base = "$desc$dayNight，气温 ${current.temperature}°C"
+        val apparent = if (current.apparentTemperature != current.temperature) {
+            "，体感 ${current.apparentTemperature}°C"
+        } else ""
+        val baseInfo = "$base$apparent，湿度 ${current.humidity}%，风速 ${current.windSpeed} km/h"
+
+        // 附加空气质量信息
+        val aqInfo = weather.airQuality?.let { aq ->
+            "，PM2.5 ${aq.pm25}μg/m³，AQI ${aq.aqi}（${aqiDescription(aq.aqi)}）"
+        } ?: ""
+
+        return baseInfo + aqInfo
     }
 
     /**
      * 构建 Open-Meteo API 请求 URL。
+     *
+     * current 字段包含：气温、体感温度、湿度、风速、天气代码、降水、是否白天、云量、能见度。
+     * hourly / daily 字段同前，保持逐小时和逐日预报数据。
      */
     private fun buildUrl(lat: String, lon: String): String {
         return "$BASE_URL?" +
             "latitude=$lat&longitude=$lon" +
-            "&current=temperature_2m,relative_humidity_2m,wind_speed_10m,weather_code,precipitation" +
+            "&current=temperature_2m,apparent_temperature,relative_humidity_2m,wind_speed_10m,weather_code,precipitation,is_day,cloud_cover,visibility" +
             "&hourly=temperature_2m,precipitation_probability,wind_speed_10m,weather_code,uv_index,precipitation" +
             "&daily=temperature_2m_max,temperature_2m_min,precipitation_sum,wind_speed_10m_max,uv_index_max,precipitation_probability_max" +
             "&timezone=auto" +
@@ -160,6 +189,14 @@ object WeatherService {
                 windSpeed = currentJson.getDouble("wind_speed_10m"),
                 weatherCode = currentJson.getInt("weather_code"),
                 precipitation = currentJson.optDouble("precipitation", 0.0),
+                // 体感温度：综合考虑风速、湿度、辐射的"实际感受"温度
+                apparentTemperature = currentJson.optDouble("apparent_temperature", currentJson.getDouble("temperature_2m")),
+                // 是否白天：1=白天，0=夜间，影响天气描述（如"晴"vs"晴夜"）
+                isDay = currentJson.optInt("is_day", 1) == 1,
+                // 云量：0-100%，天空被云覆盖的比例
+                cloudCover = currentJson.optInt("cloud_cover", 0),
+                // 能见度：单位米，低于 1000m 为大雾级别
+                visibility = currentJson.optDouble("visibility", 10000.0),
             )
 
             // 解析 hourly 部分

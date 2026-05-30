@@ -19,6 +19,10 @@ package com.echonion.nion.ui.companion.weather
  * @property windSpeed 10 米高度风速（km/h）
  * @property weatherCode WMO 天气代码（0=晴, 1-3=多云, 45-48=雾, 51-67=雨, 71-77=雪, 80-82=阵雨, 95-99=雷暴）
  * @property precipitation 过去 1 小时降水量（mm）
+ * @property apparentTemperature 体感温度（°C），综合考虑风速、湿度、辐射等因素
+ * @property isDay 是否白天（true=白天，false=夜间），影响天气描述的呈现方式
+ * @property cloudCover 云量（0-100%），天空被云覆盖的百分比
+ * @property visibility 能见度（米），影响出行建议
  */
 data class CurrentWeather(
     val temperature: Double,
@@ -26,6 +30,10 @@ data class CurrentWeather(
     val windSpeed: Double,
     val weatherCode: Int,
     val precipitation: Double,
+    val apparentTemperature: Double = temperature,
+    val isDay: Boolean = true,
+    val cloudCover: Int = 0,
+    val visibility: Double = 10000.0,
 )
 
 /**
@@ -89,14 +97,20 @@ data class DailyForecast(
 )
 
 /**
- * 完整天气数据 —— 聚合当前实况 + 逐小时预报 + 逐日预报。
+ * 完整天气数据 —— 聚合当前实况 + 逐小时预报 + 逐日预报 + 空气质量。
  *
  * 用于 [WeatherService] 返回完整结果，供 QueryTool 天气查询和预警 Worker 使用。
+ *
+ * @property current 当前天气实况
+ * @property hourly 逐小时预报（未来 24 小时）
+ * @property daily 逐日预报（未来 7 天）
+ * @property airQuality 空气质量数据（AQI、PM2.5 等），获取失败时为 null
  */
 data class FullWeatherData(
     val current: CurrentWeather,
     val hourly: HourlyForecast,
     val daily: DailyForecast,
+    val airQuality: AirQualityData? = null,
 )
 
 /**
