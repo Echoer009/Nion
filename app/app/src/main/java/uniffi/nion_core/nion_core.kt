@@ -642,6 +642,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_complete_daily_task(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_complete_daily_task_instance(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_checklist(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_group(
@@ -718,6 +720,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_uncomplete_daily_task(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_uncomplete_daily_task_instance(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_update_checklist_name(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_update_group(
@@ -760,13 +764,15 @@ external fun uniffi_nion_core_fn_method_nioncore_add_focus_time(`ptr`: Long,`tas
 ): Unit
 external fun uniffi_nion_core_fn_method_nioncore_complete_daily_task(`ptr`: Long,`taskId`: RustBuffer.ByValue,`date`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_complete_daily_task_instance(`ptr`: Long,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_create_checklist(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_create_group(`ptr`: Long,`name`: RustBuffer.ByValue,`checklistId`: RustBuffer.ByValue,`color`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_create_sticker(`ptr`: Long,`tag`: RustBuffer.ByValue,`fileName`: RustBuffer.ByValue,`filePath`: RustBuffer.ByValue,`mimeType`: RustBuffer.ByValue,`fileSize`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_nion_core_fn_method_nioncore_create_task(`ptr`: Long,`title`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,`recurrenceRule`: RustBuffer.ByValue,`recurrenceReminderTime`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_nion_core_fn_method_nioncore_create_task(`ptr`: Long,`name`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,`recurrenceRule`: RustBuffer.ByValue,`recurrenceReminderTime`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_delete_checklist(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
@@ -836,11 +842,13 @@ external fun uniffi_nion_core_fn_method_nioncore_set_task_recurrence(`ptr`: Long
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_uncomplete_daily_task(`ptr`: Long,`taskId`: RustBuffer.ByValue,`date`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
+external fun uniffi_nion_core_fn_method_nioncore_uncomplete_daily_task_instance(`ptr`: Long,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_update_checklist_name(`ptr`: Long,`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_update_group(`ptr`: Long,`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`color`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_nion_core_fn_method_nioncore_update_task(`ptr`: Long,`id`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`status`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`reminder`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,`recurrenceRule`: RustBuffer.ByValue,`recurrenceReminderTime`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_nion_core_fn_method_nioncore_update_task(`ptr`: Long,`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`status`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`reminder`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,`recurrenceRule`: RustBuffer.ByValue,`recurrenceReminderTime`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_update_task_group(`ptr`: Long,`taskId`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -974,6 +982,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_complete_daily_task() != 44576.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_complete_daily_task_instance() != 22598.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_create_checklist() != 24825.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -983,7 +994,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_create_sticker() != 29120.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_nion_core_checksum_method_nioncore_create_task() != 43294.toShort()) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_create_task() != 58348.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_delete_checklist() != 38463.toShort()) {
@@ -1004,7 +1015,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_attachments() != 50172.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_nion_core_checksum_method_nioncore_get_calendar_date_markers() != 55949.toShort()) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_calendar_date_markers() != 59964.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_checklists() != 18608.toShort()) {
@@ -1028,7 +1039,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_groups_by_checklist() != 13216.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_nion_core_checksum_method_nioncore_get_overdue_daily_tasks() != 23938.toShort()) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_overdue_daily_tasks() != 28623.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_setting() != 36220.toShort()) {
@@ -1055,7 +1066,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_tasks_due_today() != 2268.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_nion_core_checksum_method_nioncore_get_tasks_for_date() != 41240.toShort()) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_tasks_for_date() != 30602.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_move_group_to_checklist() != 6120.toShort()) {
@@ -1088,13 +1099,16 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_uncomplete_daily_task() != 48393.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_uncomplete_daily_task_instance() != 26461.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_update_checklist_name() != 4118.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_update_group() != 36991.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_nion_core_checksum_method_nioncore_update_task() != 54740.toShort()) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_update_task() != 20380.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_update_task_group() != 57415.toShort()) {
@@ -1504,6 +1518,19 @@ public interface NionCoreInterface {
      */
     fun `completeDailyTask`(`taskId`: kotlin.String, `date`: kotlin.String): DailyCompletion
     
+    /**
+     * 完成每日任务实例：将任务标记为 done，并自动创建下一天的实例。
+     *
+     * 新模型逻辑：
+     * 1. 将当前任务的 status 设为 "done"，completed_at 设为当前时间
+     * 2. 根据 task_date 计算下一天（task_date + 1 天）
+     * 3. 检查下一天是否已存在同标题、同清单、同分组的每日任务实例（防重复）
+     * 4. 不存在则创建新实例，携带相同的 recurrence_rule、recurrence_reminder_time 等属性
+     *
+     * 返回 DailyInstanceResult（完成的任务 + 可选的新建任务）
+     */
+    fun `completeDailyTaskInstance`(`taskId`: kotlin.String): DailyInstanceResult
+    
     fun `createChecklist`(`name`: kotlin.String): ChecklistData
     
     /**
@@ -1517,7 +1544,7 @@ public interface NionCoreInterface {
      */
     fun `createSticker`(`tag`: kotlin.String, `fileName`: kotlin.String, `filePath`: kotlin.String, `mimeType`: kotlin.String, `fileSize`: kotlin.Long): StickerData
     
-    fun `createTask`(`title`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `categoryId`: kotlin.String?, `parentId`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?): TaskData
+    fun `createTask`(`name`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `categoryId`: kotlin.String?, `parentId`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?): TaskData
     
     fun `deleteChecklist`(`id`: kotlin.String): kotlin.Boolean
     
@@ -1545,7 +1572,7 @@ public interface NionCoreInterface {
     
     /**
      * 获取日历日期标记 —— 用于日程页面的日历标记
-     * 返回 start_date..=end_date 范围内每个日期的任务统计
+     * 新模型：统计每个日期的任务实例状态（含每日任务实例）
      */
     fun `getCalendarDateMarkers`(`startDate`: kotlin.String, `endDate`: kotlin.String): List<CalendarDateMarker>
     
@@ -1585,10 +1612,9 @@ public interface NionCoreInterface {
     fun `getGroupsByChecklist`(`checklistId`: kotlin.String): List<GroupData>
     
     /**
-     * 获取所有过期的每日任务
-     * 对每个 recurrence_rule='daily' 的模板任务，查找其 created_at 日期到 before_date 之间
-     * 没有 daily_completions 记录的日期，每缺一天返回一条 OverdueDailyTask
-     * 最多回溯 365 天，避免性能问题
+     * 获取所有过期的每日任务实例
+     * 新模型：查找 recurrence_rule='daily'、status='todo'、reminder 日期 < before_date 的任务
+     * 这些是未完成的每日任务实例（被跳过的日期），按过期日期降序排列
      */
     fun `getOverdueDailyTasks`(`beforeDate`: kotlin.String): List<OverdueDailyTask>
     
@@ -1631,8 +1657,8 @@ public interface NionCoreInterface {
     fun `getTasksDueToday`(`date`: kotlin.String): List<DailyTaskStatus>
     
     /**
-     * 获取指定日期的所有任务（含每日任务的完成状态）
-     * 用于日程页面：返回 reminder 日期 = date 的普通任务 + 所有每日模板（附带该日完成状态）
+     * 获取指定日期的所有任务（含每日任务实例的完成状态）
+     * 新模型：每日任务是独立实例，完成状态由 tasks.status 决定
      */
     fun `getTasksForDate`(`date`: kotlin.String): List<DailyTaskStatus>
     
@@ -1684,6 +1710,15 @@ public interface NionCoreInterface {
     fun `uncompleteDailyTask`(`taskId`: kotlin.String, `date`: kotlin.String): kotlin.Boolean
     
     /**
+     * 取消完成每日任务实例：将任务恢复为 todo，并自动删除之前生成的下一天实例。
+     *
+     * 逻辑：
+     * 1. 将任务 status 设回 "todo"，清空 completed_at
+     * 2. 查找并删除下一天自动生成的实例（同标题、同清单、同分组、reminder 日期 = task_date + 1）
+     */
+    fun `uncompleteDailyTaskInstance`(`taskId`: kotlin.String): TaskData
+    
+    /**
      * 修改清单名称
      */
     fun `updateChecklistName`(`id`: kotlin.String, `name`: kotlin.String): ChecklistData
@@ -1693,7 +1728,7 @@ public interface NionCoreInterface {
      */
     fun `updateGroup`(`id`: kotlin.String, `name`: kotlin.String, `color`: kotlin.String?): GroupData
     
-    fun `updateTask`(`id`: kotlin.String, `title`: kotlin.String?, `description`: kotlin.String?, `priority`: kotlin.String?, `status`: kotlin.String?, `categoryId`: kotlin.String?, `reminder`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?): TaskData
+    fun `updateTask`(`id`: kotlin.String, `name`: kotlin.String?, `description`: kotlin.String?, `priority`: kotlin.String?, `status`: kotlin.String?, `categoryId`: kotlin.String?, `reminder`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?): TaskData
     
     /**
      * 更新任务的分组归属：将任务移到指定分组，或移出分组（group_id = None）。
@@ -1869,6 +1904,31 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
 
     
+    /**
+     * 完成每日任务实例：将任务标记为 done，并自动创建下一天的实例。
+     *
+     * 新模型逻辑：
+     * 1. 将当前任务的 status 设为 "done"，completed_at 设为当前时间
+     * 2. 根据 task_date 计算下一天（task_date + 1 天）
+     * 3. 检查下一天是否已存在同标题、同清单、同分组的每日任务实例（防重复）
+     * 4. 不存在则创建新实例，携带相同的 recurrence_rule、recurrence_reminder_time 等属性
+     *
+     * 返回 DailyInstanceResult（完成的任务 + 可选的新建任务）
+     */
+    @Throws(NionException::class)override fun `completeDailyTaskInstance`(`taskId`: kotlin.String): DailyInstanceResult {
+            return FfiConverterTypeDailyInstanceResult.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_complete_daily_task_instance(
+        it,
+        FfiConverterString.lower(`taskId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
     @Throws(NionException::class)override fun `createChecklist`(`name`: kotlin.String): ChecklistData {
             return FfiConverterTypeChecklistData.lift(
     callWithHandle {
@@ -1918,13 +1978,13 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
 
     
-    @Throws(NionException::class)override fun `createTask`(`title`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `categoryId`: kotlin.String?, `parentId`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?): TaskData {
+    @Throws(NionException::class)override fun `createTask`(`name`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `categoryId`: kotlin.String?, `parentId`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?): TaskData {
             return FfiConverterTypeTaskData.lift(
     callWithHandle {
     uniffiRustCallWithError(NionException) { _status ->
     UniffiLib.uniffi_nion_core_fn_method_nioncore_create_task(
         it,
-        FfiConverterString.lower(`title`),FfiConverterOptionalString.lower(`description`),FfiConverterString.lower(`priority`),FfiConverterOptionalString.lower(`categoryId`),FfiConverterOptionalString.lower(`parentId`),FfiConverterOptionalString.lower(`groupId`),FfiConverterOptionalString.lower(`recurrenceRule`),FfiConverterOptionalString.lower(`recurrenceReminderTime`),_status)
+        FfiConverterString.lower(`name`),FfiConverterOptionalString.lower(`description`),FfiConverterString.lower(`priority`),FfiConverterOptionalString.lower(`categoryId`),FfiConverterOptionalString.lower(`parentId`),FfiConverterOptionalString.lower(`groupId`),FfiConverterOptionalString.lower(`recurrenceRule`),FfiConverterOptionalString.lower(`recurrenceReminderTime`),_status)
 }
     }
     )
@@ -2030,7 +2090,7 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
     /**
      * 获取日历日期标记 —— 用于日程页面的日历标记
-     * 返回 start_date..=end_date 范围内每个日期的任务统计
+     * 新模型：统计每个日期的任务实例状态（含每日任务实例）
      */
     @Throws(NionException::class)override fun `getCalendarDateMarkers`(`startDate`: kotlin.String, `endDate`: kotlin.String): List<CalendarDateMarker> {
             return FfiConverterSequenceTypeCalendarDateMarker.lift(
@@ -2166,10 +2226,9 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
 
     
     /**
-     * 获取所有过期的每日任务
-     * 对每个 recurrence_rule='daily' 的模板任务，查找其 created_at 日期到 before_date 之间
-     * 没有 daily_completions 记录的日期，每缺一天返回一条 OverdueDailyTask
-     * 最多回溯 365 天，避免性能问题
+     * 获取所有过期的每日任务实例
+     * 新模型：查找 recurrence_rule='daily'、status='todo'、reminder 日期 < before_date 的任务
+     * 这些是未完成的每日任务实例（被跳过的日期），按过期日期降序排列
      */
     @Throws(NionException::class)override fun `getOverdueDailyTasks`(`beforeDate`: kotlin.String): List<OverdueDailyTask> {
             return FfiConverterSequenceTypeOverdueDailyTask.lift(
@@ -2320,8 +2379,8 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
 
     
     /**
-     * 获取指定日期的所有任务（含每日任务的完成状态）
-     * 用于日程页面：返回 reminder 日期 = date 的普通任务 + 所有每日模板（附带该日完成状态）
+     * 获取指定日期的所有任务（含每日任务实例的完成状态）
+     * 新模型：每日任务是独立实例，完成状态由 tasks.status 决定
      */
     @Throws(NionException::class)override fun `getTasksForDate`(`date`: kotlin.String): List<DailyTaskStatus> {
             return FfiConverterSequenceTypeDailyTaskStatus.lift(
@@ -2500,6 +2559,27 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
 
     
     /**
+     * 取消完成每日任务实例：将任务恢复为 todo，并自动删除之前生成的下一天实例。
+     *
+     * 逻辑：
+     * 1. 将任务 status 设回 "todo"，清空 completed_at
+     * 2. 查找并删除下一天自动生成的实例（同标题、同清单、同分组、reminder 日期 = task_date + 1）
+     */
+    @Throws(NionException::class)override fun `uncompleteDailyTaskInstance`(`taskId`: kotlin.String): TaskData {
+            return FfiConverterTypeTaskData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_uncomplete_daily_task_instance(
+        it,
+        FfiConverterString.lower(`taskId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * 修改清单名称
      */
     @Throws(NionException::class)override fun `updateChecklistName`(`id`: kotlin.String, `name`: kotlin.String): ChecklistData {
@@ -2533,13 +2613,13 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
 
     
-    @Throws(NionException::class)override fun `updateTask`(`id`: kotlin.String, `title`: kotlin.String?, `description`: kotlin.String?, `priority`: kotlin.String?, `status`: kotlin.String?, `categoryId`: kotlin.String?, `reminder`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?): TaskData {
+    @Throws(NionException::class)override fun `updateTask`(`id`: kotlin.String, `name`: kotlin.String?, `description`: kotlin.String?, `priority`: kotlin.String?, `status`: kotlin.String?, `categoryId`: kotlin.String?, `reminder`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?): TaskData {
             return FfiConverterTypeTaskData.lift(
     callWithHandle {
     uniffiRustCallWithError(NionException) { _status ->
     UniffiLib.uniffi_nion_core_fn_method_nioncore_update_task(
         it,
-        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`title`),FfiConverterOptionalString.lower(`description`),FfiConverterOptionalString.lower(`priority`),FfiConverterOptionalString.lower(`status`),FfiConverterOptionalString.lower(`categoryId`),FfiConverterOptionalString.lower(`reminder`),FfiConverterOptionalString.lower(`groupId`),FfiConverterOptionalString.lower(`recurrenceRule`),FfiConverterOptionalString.lower(`recurrenceReminderTime`),_status)
+        FfiConverterString.lower(`id`),FfiConverterOptionalString.lower(`name`),FfiConverterOptionalString.lower(`description`),FfiConverterOptionalString.lower(`priority`),FfiConverterOptionalString.lower(`status`),FfiConverterOptionalString.lower(`categoryId`),FfiConverterOptionalString.lower(`reminder`),FfiConverterOptionalString.lower(`groupId`),FfiConverterOptionalString.lower(`recurrenceRule`),FfiConverterOptionalString.lower(`recurrenceReminderTime`),_status)
 }
     }
     )
@@ -2975,6 +3055,53 @@ public object FfiConverterTypeDailyFocusStat: FfiConverterRustBuffer<DailyFocusS
 
 
 /**
+ * 每日任务实例化结果 —— 完成每日任务后的返回值
+ */
+data class DailyInstanceResult (
+    /**
+     * 已完成的任务数据（status 已变为 "done"）
+     */
+    var `completedTask`: TaskData
+    , 
+    /**
+     * 自动创建的下一天任务实例（如果已存在则不创建，返回 None）
+     */
+    var `newTask`: TaskData?
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeDailyInstanceResult: FfiConverterRustBuffer<DailyInstanceResult> {
+    override fun read(buf: ByteBuffer): DailyInstanceResult {
+        return DailyInstanceResult(
+            FfiConverterTypeTaskData.read(buf),
+            FfiConverterOptionalTypeTaskData.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: DailyInstanceResult) = (
+            FfiConverterTypeTaskData.allocationSize(value.`completedTask`) +
+            FfiConverterOptionalTypeTaskData.allocationSize(value.`newTask`)
+    )
+
+    override fun write(value: DailyInstanceResult, buf: ByteBuffer) {
+            FfiConverterTypeTaskData.write(value.`completedTask`, buf)
+            FfiConverterOptionalTypeTaskData.write(value.`newTask`, buf)
+    }
+}
+
+
+
+/**
  * 带日期完成状态的任务 —— 用于每日视图返回
  * 每日任务的"完成"不再看 tasks.status，而是看 daily_completions 中有无记录
  */
@@ -3281,7 +3408,7 @@ public object FfiConverterTypeStickerData: FfiConverterRustBuffer<StickerData> {
 data class TaskData (
     var `id`: kotlin.String
     , 
-    var `title`: kotlin.String
+    var `name`: kotlin.String
     , 
     var `description`: kotlin.String?
     , 
@@ -3350,7 +3477,7 @@ public object FfiConverterTypeTaskData: FfiConverterRustBuffer<TaskData> {
 
     override fun allocationSize(value: TaskData) = (
             FfiConverterString.allocationSize(value.`id`) +
-            FfiConverterString.allocationSize(value.`title`) +
+            FfiConverterString.allocationSize(value.`name`) +
             FfiConverterOptionalString.allocationSize(value.`description`) +
             FfiConverterString.allocationSize(value.`priority`) +
             FfiConverterString.allocationSize(value.`status`) +
@@ -3368,7 +3495,7 @@ public object FfiConverterTypeTaskData: FfiConverterRustBuffer<TaskData> {
 
     override fun write(value: TaskData, buf: ByteBuffer) {
             FfiConverterString.write(value.`id`, buf)
-            FfiConverterString.write(value.`title`, buf)
+            FfiConverterString.write(value.`name`, buf)
             FfiConverterOptionalString.write(value.`description`, buf)
             FfiConverterString.write(value.`priority`, buf)
             FfiConverterString.write(value.`status`, buf)
@@ -3393,7 +3520,7 @@ public object FfiConverterTypeTaskData: FfiConverterRustBuffer<TaskData> {
 data class TaskFocusStat (
     var `taskId`: kotlin.String
     , 
-    var `taskTitle`: kotlin.String
+    var `taskName`: kotlin.String
     , 
     var `seconds`: kotlin.Long
     
@@ -3420,13 +3547,13 @@ public object FfiConverterTypeTaskFocusStat: FfiConverterRustBuffer<TaskFocusSta
 
     override fun allocationSize(value: TaskFocusStat) = (
             FfiConverterString.allocationSize(value.`taskId`) +
-            FfiConverterString.allocationSize(value.`taskTitle`) +
+            FfiConverterString.allocationSize(value.`taskName`) +
             FfiConverterLong.allocationSize(value.`seconds`)
     )
 
     override fun write(value: TaskFocusStat, buf: ByteBuffer) {
             FfiConverterString.write(value.`taskId`, buf)
-            FfiConverterString.write(value.`taskTitle`, buf)
+            FfiConverterString.write(value.`taskName`, buf)
             FfiConverterLong.write(value.`seconds`, buf)
     }
 }
@@ -3595,6 +3722,38 @@ public object FfiConverterOptionalTypeStickerData: FfiConverterRustBuffer<Sticke
         } else {
             buf.put(1)
             FfiConverterTypeStickerData.write(value, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterOptionalTypeTaskData: FfiConverterRustBuffer<TaskData?> {
+    override fun read(buf: ByteBuffer): TaskData? {
+        if (buf.get().toInt() == 0) {
+            return null
+        }
+        return FfiConverterTypeTaskData.read(buf)
+    }
+
+    override fun allocationSize(value: TaskData?): ULong {
+        if (value == null) {
+            return 1UL
+        } else {
+            return 1UL + FfiConverterTypeTaskData.allocationSize(value)
+        }
+    }
+
+    override fun write(value: TaskData?, buf: ByteBuffer) {
+        if (value == null) {
+            buf.put(0)
+        } else {
+            buf.put(1)
+            FfiConverterTypeTaskData.write(value, buf)
         }
     }
 }
