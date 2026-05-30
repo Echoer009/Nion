@@ -702,6 +702,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_move_group_to_checklist(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_next_conversation_id(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_remove_attachment(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_remove_task_recurrence(
@@ -823,6 +825,8 @@ external fun uniffi_nion_core_fn_method_nioncore_get_tasks_due_today(`ptr`: Long
 external fun uniffi_nion_core_fn_method_nioncore_get_tasks_for_date(`ptr`: Long,`date`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_move_group_to_checklist(`ptr`: Long,`groupId`: RustBuffer.ByValue,`checklistId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_next_conversation_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_remove_attachment(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
@@ -1070,6 +1074,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_move_group_to_checklist() != 6120.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_next_conversation_id() != 2584.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_remove_attachment() != 54601.toShort()) {
@@ -1668,6 +1675,11 @@ public interface NionCoreInterface {
      * category_id，并对每个有子任务的父任务递归级联，确保子孙任务的归属也同步变更。
      */
     fun `moveGroupToChecklist`(`groupId`: kotlin.String, `checklistId`: kotlin.String): GroupData
+    
+    /**
+     * 生成下一个对话 ID（纯数字递增）
+     */
+    fun `nextConversationId`(): kotlin.String
     
     /**
      * 删除附件记录，同时删除磁盘上的文件
@@ -2408,6 +2420,23 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     UniffiLib.uniffi_nion_core_fn_method_nioncore_move_group_to_checklist(
         it,
         FfiConverterString.lower(`groupId`),FfiConverterString.lower(`checklistId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 生成下一个对话 ID（纯数字递增）
+     */
+    @Throws(NionException::class)override fun `nextConversationId`(): kotlin.String {
+            return FfiConverterString.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_next_conversation_id(
+        it,
+        _status)
 }
     }
     )

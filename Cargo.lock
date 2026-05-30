@@ -476,7 +476,6 @@ dependencies = [
  "serde_json",
  "thiserror",
  "uniffi",
- "uuid",
 ]
 
 [[package]]
@@ -978,17 +977,6 @@ dependencies = [
  "textwrap",
  "uniffi_meta",
  "weedle2",
-]
-
-[[package]]
-name = "uuid"
-version = "1.23.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddd74a9687298c6858e9b88ec8935ec45d22e8fd5e6394fa1bd4e99a87789c76"
-dependencies = [
- "getrandom",
- "js-sys",
- "wasm-bindgen",
 ]
 
 [[package]]

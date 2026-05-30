@@ -339,7 +339,7 @@ impl NionCore {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
         })?;
-        let id = Uuid::new_v4().to_string();
+        let id = next_id(&db, "tasks")?;
         let now = chrono::Utc::now().to_rfc3339();
 
         // 新模型：每日任务自动设置 reminder 为今天的日期 + 提醒时间
@@ -546,7 +546,7 @@ impl NionCore {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
         })?;
-        let id = Uuid::new_v4().to_string();
+        let id = next_id(&db, "attachments")?;
         let now = chrono::Utc::now().to_rfc3339();
         db.execute(
             "INSERT INTO attachments (id, task_id, file_name, file_path, mime_type, file_size, created_at)
@@ -634,7 +634,7 @@ impl NionCore {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
         })?;
-        let id = Uuid::new_v4().to_string();
+        let id = next_id(&db, "stickers")?;
         let now = chrono::Utc::now().to_rfc3339();
         db.execute(
             "INSERT INTO stickers (id, tag, file_name, file_path, mime_type, file_size, created_at)
@@ -790,7 +790,7 @@ impl NionCore {
         )
         .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         // 写入专注会话日志，用于后续按日/周/月统计
-        let session_id = Uuid::new_v4().to_string();
+        let session_id = next_id(&db, "focus_sessions")?;
         db.execute(
             "INSERT INTO focus_sessions (id, task_id, seconds, created_at) VALUES (?1, ?2, ?3, ?4)",
             params![session_id, task_id, seconds, now],
@@ -944,7 +944,7 @@ impl NionCore {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
         })?;
-        let id = Uuid::new_v4().to_string();
+        let id = next_id(&db, "task_groups")?;
         let now = chrono::Utc::now().to_rfc3339();
 
         // 自动计算 sort_order：取当前清单下最大 sort_order + 1
@@ -1312,7 +1312,7 @@ impl NionCore {
 
         // 6. 不存在则创建
         let new_task = if existing.is_none() {
-            let new_id = Uuid::new_v4().to_string();
+            let new_id = next_id(&db, "tasks")?;
             let new_now = chrono::Utc::now().to_rfc3339();
             db.execute(
                 "INSERT INTO tasks (id, name, description, priority, status, category_id, parent_id, group_id, reminder, recurrence_rule, recurrence_reminder_time, created_at, updated_at) \
@@ -1579,6 +1579,14 @@ impl NionCore {
     }
 
     // ==================== 对话记录（Conversation）CRUD ====================
+
+    /// 生成下一个对话 ID（纯数字递增）
+    pub fn next_conversation_id(&self) -> Result<String, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        next_id(&db, "chat_conversations")
+    }
 
     /// 保存对话：如果 id 已存在则更新，否则新建
     pub fn save_conversation(&self, id: String, title: String, messages: String, api_history: String) -> Result<ConversationData, NionError> {
