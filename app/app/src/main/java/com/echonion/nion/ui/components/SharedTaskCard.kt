@@ -222,7 +222,8 @@ fun SharedTaskCard(
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     // 一次性提醒部分：铃铛图标 + 格式化的完整日期时间，逾期变红
                     if (hasReminder) {
-                        val isOverdue = model.reminder.isReminderOverdue()
+                        // 已完成的任务不再标红提醒时间
+                        val isOverdue = model.reminder.isReminderOverdue() && !model.isDone
                         Icon(
                             Icons.Outlined.Notifications,
                             contentDescription = null,

@@ -10,6 +10,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.expandVertically
@@ -495,45 +496,53 @@ private fun TaskScreenContent(
         },
         floatingActionButton = fab,
     ) { innerPadding ->
-        // 分组标签栏：选中真实清单时显示（"今天"和"收集箱"是虚拟视图，无分组）
-        val showGroupBar = viewModel.activeChecklistId != null
-                && viewModel.activeChecklistId != TaskViewModel.TODAY_ID
-                && viewModel.activeChecklistId != TaskViewModel.INBOX_ID
-        Column(modifier = Modifier.padding(innerPadding)) {
-            if (showGroupBar) {
-                /**
-                 * 分组标签栏 —— 水平滚动的分组选择器。
-                 * 显示"全部" + 各分组名称，点击切换筛选。
-                 * 最右侧有"+"按钮用于新建分组。
-                 */
-                GroupTabBar(
-                    groups = viewModel.groups,
-                    activeGroupId = viewModel.activeGroupId,
-                    onGroupSelected = { viewModel.setActiveGroup(it) },
-                    onCreateGroup = { viewModel.createGroup(it) },
-                    onDeleteGroup = { viewModel.deleteGroup(it) },
-                )
-            }
-            if (viewModel.tasks.isEmpty()) {
-                EmptyTaskView(modifier = Modifier.weight(1f))
-            } else {
-                SharedTaskList(
-                    todoItems = viewModel.flatTodoTasks,
-                    doneItems = viewModel.flatDoneTasks,
-                    overdueTasks = viewModel.overdueDailyTasks,
-                    onToggleDone = { viewModel.toggleDone(it) },
-                    onTaskClick = onTaskClick,
-                    onToggleOverdueDailyDone = { taskId, date, done -> viewModel.toggleOverdueDailyDone(taskId, date, done) },
-                    onToggleSelection = { viewModel.toggleSelection(it) },
-                    reorderCallback = { draggedId, newParentId, siblingIds -> viewModel.moveAndReorderTasks(draggedId, newParentId, siblingIds) },
-                    isSelectionMode = viewModel.isSelectionMode,
-                    selectedIds = viewModel.selectedTaskIds,
-                    taskSharedModifier = taskSharedModifier,
-                    reorderableItems = reorderableItems,
-                    listState = listState,
-                    innerPadding = androidx.compose.foundation.layout.PaddingValues(),
-                    modifier = Modifier.weight(1f),
-                )
+        // 清单切换 Crossfade 动画：切换 activeChecklistId 时内容淡入淡出
+        Crossfade(
+            targetState = viewModel.activeChecklistId,
+            animationSpec = tween(durationMillis = 300, easing = FastOutSlowInEasing),
+            label = "checklistSwitch",
+            modifier = Modifier.padding(innerPadding),
+        ) {
+            // 分组标签栏：选中真实清单时显示（"今天"和"收集箱"是虚拟视图，无分组）
+            val showGroupBar = it != null
+                    && it != TaskViewModel.TODAY_ID
+                    && it != TaskViewModel.INBOX_ID
+            Column(modifier = Modifier.fillMaxSize()) {
+                if (showGroupBar) {
+                    /**
+                     * 分组标签栏 —— 水平滚动的分组选择器。
+                     * 显示"全部" + 各分组名称，点击切换筛选。
+                     * 最右侧有"+"按钮用于新建分组。
+                     */
+                    GroupTabBar(
+                        groups = viewModel.groups,
+                        activeGroupId = viewModel.activeGroupId,
+                        onGroupSelected = { viewModel.setActiveGroup(it) },
+                        onCreateGroup = { viewModel.createGroup(it) },
+                        onDeleteGroup = { viewModel.deleteGroup(it) },
+                    )
+                }
+                if (viewModel.tasks.isEmpty()) {
+                    EmptyTaskView(modifier = Modifier.weight(1f))
+                } else {
+                    SharedTaskList(
+                        todoItems = viewModel.flatTodoTasks,
+                        doneItems = viewModel.flatDoneTasks,
+                        overdueTasks = viewModel.overdueDailyTasks,
+                        onToggleDone = { viewModel.toggleDone(it) },
+                        onTaskClick = onTaskClick,
+                        onToggleOverdueDailyDone = { taskId, date, done -> viewModel.toggleOverdueDailyDone(taskId, date, done) },
+                        onToggleSelection = { viewModel.toggleSelection(it) },
+                        reorderCallback = { draggedId, newParentId, siblingIds -> viewModel.moveAndReorderTasks(draggedId, newParentId, siblingIds) },
+                        isSelectionMode = viewModel.isSelectionMode,
+                        selectedIds = viewModel.selectedTaskIds,
+                        taskSharedModifier = taskSharedModifier,
+                        reorderableItems = reorderableItems,
+                        listState = listState,
+                        innerPadding = androidx.compose.foundation.layout.PaddingValues(),
+                        modifier = Modifier.weight(1f),
+                    )
+                }
             }
         }
     }
