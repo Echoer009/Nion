@@ -131,11 +131,8 @@ fi
 
 # ---------- 3. 构建 APK ----------
 step 3/$TOTAL_STEPS "构建 APK ($FLAVOR)"
-BUILD_OUTPUT=$(cd "$PROJECT_DIR/app" && ./gradlew "assemble${FLAVOR_CAPITALIZED}Debug" 2>&1)
-BUILD_EXIT=$?
-if [ $BUILD_EXIT -ne 0 ]; then
-    fail "构建失败:"
-    echo "$BUILD_OUTPUT" | tail -30
+if ! (cd "$PROJECT_DIR/app" && ./gradlew "assemble${FLAVOR_CAPITALIZED}Debug" 2>&1); then
+    fail "构建失败，中止部署"
     exit 1
 fi
 APK_SIZE=$(du -h "$APK_PATH" | cut -f1)
@@ -151,22 +148,31 @@ fi
 
 "$ADB" "${ADB_TARGET[@]}" shell am force-stop "$PACKAGE" 2>/dev/null || true
 
-# adb install 在 Git Bash 下输出可能被管道吞掉，直接运行检查退出码
-INSTALL_OK=false
-"$ADB" "${ADB_TARGET[@]}" install -r "$APK_PATH" && INSTALL_OK=true
-if ! $INSTALL_OK; then
-    warn "首次安装失败，重试中..."
+# adb install 在部分厂商 ROM（如 vivo 深度检查）下可能误报失败，
+# 实际安装成功但 adb 返回非零退出码。因此用 pm path 二次确认是否真正装上。
+install_and_verify() {
+    "$ADB" "${ADB_TARGET[@]}" install -r "$APK_PATH" 2>&1 || true
+    # 无论 adb install 返回什么，用 pm path 确认 App 是否已安装
+    sleep 2
+    "$ADB" "${ADB_TARGET[@]}" shell pm path "$PACKAGE" 2>/dev/null | grep -q "package:" 2>/dev/null
+}
+
+if install_and_verify; then
+    ok "安装完成"
+else
+    warn "首次安装未确认，重试中..."
     "$ADB" kill-server 2>/dev/null || true
     sleep 1
     "$ADB" start-server 2>/dev/null || true
     sleep 2
     "$ADB" "${ADB_TARGET[@]}" shell am force-stop "$PACKAGE" 2>/dev/null || true
-    "$ADB" "${ADB_TARGET[@]}" install -r "$APK_PATH" || {
+    if install_and_verify; then
+        ok "安装完成"
+    else
         fail "安装失败，请手动检查"
         exit 1
-    }
+    fi
 fi
-ok "安装完成"
 
 "$ADB" "${ADB_TARGET[@]}" shell am start -n "$ACTIVITY" >/dev/null 2>&1
 ok "应用已启动"
