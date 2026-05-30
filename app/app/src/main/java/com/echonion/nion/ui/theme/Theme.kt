@@ -15,77 +15,81 @@ import androidx.compose.ui.platform.LocalView
 import androidx.core.view.WindowCompat
 
 /**
- * 构建亮色模式 ColorScheme —— 所有颜色均从主题枚举或 NionColors 常量获取，
+ * 构建亮色模式 ColorScheme —— 所有颜色均从 ThemePalette 或 NionColors 常量获取，
  * 不在此函数内硬编码任何 Color(0x…) 值。
+ *
+ * @param p 当前主题色板，包含所有颜色槽位
  */
-private fun buildLightScheme(theme: NionColorTheme) = lightColorScheme(
-    primary = theme.primary,
+private fun buildLightScheme(p: ThemePalette) = lightColorScheme(
+    primary = p.primary,
     onPrimary = Color.White,
-    primaryContainer = theme.primaryContainer,
-    onPrimaryContainer = theme.onPrimaryContainer,
-    inversePrimary = theme.darkPrimary,
-    secondary = theme.secondary,
+    primaryContainer = p.primaryContainer,
+    onPrimaryContainer = p.onPrimaryContainer,
+    inversePrimary = p.darkPrimary,
+    secondary = p.secondary,
     onSecondary = Color.White,
-    secondaryContainer = theme.secondaryContainer,
-    onSecondaryContainer = theme.onSecondaryContainer,
-    tertiary = theme.tertiary,
+    secondaryContainer = p.secondaryContainer,
+    onSecondaryContainer = p.onSecondaryContainer,
+    tertiary = p.tertiary,
     onTertiary = Color.White,
-    tertiaryContainer = theme.tertiaryContainer,
-    onTertiaryContainer = theme.onTertiaryContainer,
+    tertiaryContainer = p.tertiaryContainer,
+    onTertiaryContainer = p.onTertiaryContainer,
     error = NionColors.ErrorLight,
     onError = Color.White,
     errorContainer = NionColors.ErrorContainerLight,
     onErrorContainer = NionColors.OnErrorContainerLight,
-    background = theme.lightBackground,
-    onBackground = theme.lightOnBackground,
-    surface = theme.lightBackground,
-    onSurface = theme.lightOnBackground,
-    surfaceVariant = theme.lightSurfaceVariant,
-    onSurfaceVariant = theme.lightOnSurfaceVariant,
+    background = p.lightBackground,
+    onBackground = p.lightOnBackground,
+    surface = p.lightBackground,
+    onSurface = p.lightOnBackground,
+    surfaceVariant = p.lightSurfaceVariant,
+    onSurfaceVariant = p.lightOnSurfaceVariant,
     surfaceContainerLowest = Color.White,
-    surfaceContainerLow = theme.lightBackground,
-    surfaceContainer = theme.lightSurfaceVariant,
-    surfaceContainerHigh = theme.lightSurfaceHigh,
-    surfaceContainerHighest = theme.lightSurfaceHighest,
+    surfaceContainerLow = p.lightBackground,
+    surfaceContainer = p.lightSurfaceVariant,
+    surfaceContainerHigh = p.lightSurfaceHigh,
+    surfaceContainerHighest = p.lightSurfaceHighest,
     inverseSurface = NionColors.InverseSurfaceLight,
     inverseOnSurface = NionColors.InverseOnSurfaceLight,
-    outline = theme.lightOutline,
-    outlineVariant = theme.lightOutlineVariant,
+    outline = p.lightOutline,
+    outlineVariant = p.lightOutlineVariant,
     scrim = Color.Black,
 )
 
 /**
- * 构建暗色模式 ColorScheme —— 所有颜色均从主题枚举或 NionColors 常量获取，
+ * 构建暗色模式 ColorScheme —— 所有颜色均从 ThemePalette 或 NionColors 常量获取，
  * 不在此函数内硬编码任何 Color(0x…) 值。
+ *
+ * @param p 当前主题色板，包含所有颜色槽位
  */
-private fun buildDarkScheme(theme: NionColorTheme) = darkColorScheme(
-    primary = theme.darkPrimary,
-    onPrimary = theme.darkOnPrimary,
-    primaryContainer = theme.primary,
-    onPrimaryContainer = theme.primaryContainer,
-    inversePrimary = theme.primary,
-    secondary = theme.darkSecondary,
-    onSecondary = theme.darkOnSecondary,
-    secondaryContainer = theme.darkSecondaryContainer,
-    onSecondaryContainer = theme.secondaryContainer,
-    tertiary = theme.darkTertiary,
-    onTertiary = theme.darkOnTertiary,
-    tertiaryContainer = theme.darkTertiaryContainer,
-    onTertiaryContainer = theme.tertiaryContainer,
+private fun buildDarkScheme(p: ThemePalette) = darkColorScheme(
+    primary = p.darkPrimary,
+    onPrimary = p.darkOnPrimary,
+    primaryContainer = p.primary,
+    onPrimaryContainer = p.primaryContainer,
+    inversePrimary = p.primary,
+    secondary = p.darkSecondary,
+    onSecondary = p.darkOnSecondary,
+    secondaryContainer = p.darkSecondaryContainer,
+    onSecondaryContainer = p.secondaryContainer,
+    tertiary = p.darkTertiary,
+    onTertiary = p.darkOnTertiary,
+    tertiaryContainer = p.darkTertiaryContainer,
+    onTertiaryContainer = p.tertiaryContainer,
     error = NionColors.ErrorDark,
     onError = NionColors.OnErrorDark,
     errorContainer = NionColors.ErrorContainerDark,
     onErrorContainer = NionColors.ErrorContainerLight,
-    background = theme.darkBackground,
-    onBackground = theme.darkOnBackground,
-    surface = theme.darkSurface,
-    onSurface = theme.darkOnBackground,
-    surfaceVariant = theme.darkSurfaceHigh,
-    onSurfaceVariant = theme.darkOnSurfaceVariant,
+    background = p.darkBackground,
+    onBackground = p.darkOnBackground,
+    surface = p.darkSurface,
+    onSurface = p.darkOnBackground,
+    surfaceVariant = p.darkSurfaceHigh,
+    onSurfaceVariant = p.darkOnSurfaceVariant,
     surfaceContainerLowest = NionColors.SurfaceContainerLowestDark,
-    surfaceContainerLow = theme.darkBackground,
-    surfaceContainer = theme.darkSurfaceHigh,
-    surfaceContainerHigh = theme.darkSurfaceHighest,
+    surfaceContainerLow = p.darkBackground,
+    surfaceContainer = p.darkSurfaceHigh,
+    surfaceContainerHigh = p.darkSurfaceHighest,
     surfaceContainerHighest = NionColors.SurfaceContainerHighestDark,
     inverseSurface = NionColors.InverseSurfaceDark,
     inverseOnSurface = NionColors.InverseOnSurfaceDark,
@@ -95,16 +99,18 @@ private fun buildDarkScheme(theme: NionColorTheme) = darkColorScheme(
 )
 
 /**
- * Nion 全局主题包装 —— 接收当前主题枚举和暗色模式开关，
+ * Nion 全局主题包装 —— 接收当前主题色板和暗色模式开关，
  * 构建 Material 3 ColorScheme 并注入到 Compose 树中。
  *
- * @param colorTheme 当前选中的主题色板，默认 CLAUDE
+ * 支持预设主题（通过 [NionColorTheme.palette()]）和自定义主题（通过 [ThemePalette] 直接传入）。
+ *
+ * @param palette 当前主题色板，包含所有颜色槽位
  * @param darkTheme 是否启用暗色模式，默认跟随系统
  * @param dynamicColor 是否使用动态取色（Android 12+），默认关闭
  */
 @Composable
 fun NionTheme(
-    colorTheme: NionColorTheme = NionColorTheme.CORAL,
+    palette: ThemePalette = NionColorTheme.CORAL.palette(),
     darkTheme: Boolean = isSystemInDarkTheme(),
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit,
@@ -115,8 +121,8 @@ fun NionTheme(
             if (darkTheme) dynamicDarkColorScheme(context)
             else dynamicLightColorScheme(context)
         }
-        darkTheme -> buildDarkScheme(colorTheme)
-        else -> buildLightScheme(colorTheme)
+        darkTheme -> buildDarkScheme(palette)
+        else -> buildLightScheme(palette)
     }
 
     val view = LocalView.current

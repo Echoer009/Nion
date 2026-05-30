@@ -68,6 +68,59 @@ object NionColors {
 }
 
 /**
+ * 全局透明度常量 —— 所有 .copy(alpha = ...) 调用统一引用此对象中的常量，
+ * 禁止在 UI 代码中直接使用浮点数字面量。
+ *
+ * 分类：
+ * - TEXT_* — 文字/图标强调等级，数值越低越淡
+ * - BG_*   — 背景/填充/装饰透明度
+ * - OVERLAY_* — 遮罩层透明度
+ * - SHADOW_*  — 卡片阴影透明度
+ */
+object NionAlpha {
+
+    // ── 文字/图标强调等级 ──
+    /** 高强调文字（卡片正文、引用文字、提醒正文） */
+    const val TEXT_HIGH = 0.85f
+    /** 中等强调文字（完成态任务文字、选中态标签文字、删除按钮文字） */
+    const val TEXT_MEDIUM = 0.7f
+    /** 次要文字/图标（副标题、任务计数、会话类型文字、标签名） */
+    const val TEXT_SECONDARY = 0.6f
+    /** 副标题/标签文字（详情页字段标签、时间戳、工具标签、建议文字） */
+    const val TEXT_SUBTITLE = 0.5f
+    /** 提示文字（分割线上方标签、按钮文字、贴纸名、输入提示） */
+    const val TEXT_HINT = 0.4f
+    /** 极淡文字（空状态标签、区块标题、Tab 图标） */
+    const val TEXT_SUBTLE = 0.35f
+
+    // ── 背景/填充等级 ──
+    /** 淡背景（滑动删除背景、次要刻度线、提醒装饰线） */
+    const val BG_SUBTLE = 0.3f
+    /** 选中 Tab 背景（伴伴面板活跃标签底色） */
+    const val BG_TAB_ACTIVE = 0.25f
+    /** 极淡背景/图标（删除图标着色、最近贴纸背景） */
+    const val BG_VERY_SUBTLE = 0.2f
+    /** 装饰线/输入框边框（提醒卡片装饰线、聊天输入框边框） */
+    const val BG_DECORATION = 0.15f
+    /** 高亮底色（今日日期标记、代码块背景） */
+    const val BG_HIGHLIGHT = 0.12f
+
+    // ── 遮罩层等级 ──
+    /** Modal 遮罩（详情页/日程页弹窗背景变暗） */
+    const val OVERLAY_SCRIM = 0.32f
+    /** 中等遮罩（附件删除按钮背景） */
+    const val OVERLAY_MEDIUM = 0.5f
+    /** 深色遮罩（图片全屏预览背景） */
+    const val OVERLAY_DARK = 0.9f
+
+    // ── 阴影等级 ──
+    /** 卡片阴影环境光（提醒/问候卡片阴影） */
+    const val SHADOW_AMBIENT = 0.3f
+    /** 卡片阴影聚光（提醒/问候卡片阴影） */
+    const val SHADOW_SPOT = 0.2f
+}
+
+/**
  * 主题色板枚举 —— 每个主题携带完整色板（primary/secondary/tertiary + 亮暗变体），
  * 构建 ColorScheme 时从此枚举取色，不再在 Theme.kt 中硬编码固定值。
  *
@@ -182,5 +235,47 @@ enum class NionColorTheme(
         darkSurfaceHighest = NionColors.DarkSurfaceHighest,
         darkOnBackground = Color(0xFFE6E2DA),
         darkOnSurfaceVariant = Color(0xFFCBC5BD),
-    ),
+    );
+
+    /**
+     * 将枚举预设转换为 [ThemePalette] 数据类实例。
+     *
+     * 用于：
+     * - [com.echonion.nion.ui.theme.NionTheme] 构建 Material 3 ColorScheme
+     * - SettingsTool 读取预设色板作为自定义主题的基础
+     * - SettingsScreen 展示预设色板信息
+     */
+    fun palette(): ThemePalette = ThemePalette(
+        primary = primary,
+        primaryContainer = primaryContainer,
+        onPrimaryContainer = onPrimaryContainer,
+        darkPrimary = darkPrimary,
+        darkOnPrimary = darkOnPrimary,
+        secondary = secondary,
+        secondaryContainer = secondaryContainer,
+        onSecondaryContainer = onSecondaryContainer,
+        darkSecondary = darkSecondary,
+        darkOnSecondary = darkOnSecondary,
+        darkSecondaryContainer = darkSecondaryContainer,
+        tertiary = tertiary,
+        tertiaryContainer = tertiaryContainer,
+        onTertiaryContainer = onTertiaryContainer,
+        darkTertiary = darkTertiary,
+        darkOnTertiary = darkOnTertiary,
+        darkTertiaryContainer = darkTertiaryContainer,
+        lightBackground = lightBackground,
+        lightOnBackground = lightOnBackground,
+        lightSurfaceVariant = lightSurfaceVariant,
+        lightOnSurfaceVariant = lightOnSurfaceVariant,
+        lightSurfaceHigh = lightSurfaceHigh,
+        lightSurfaceHighest = lightSurfaceHighest,
+        lightOutline = lightOutline,
+        lightOutlineVariant = lightOutlineVariant,
+        darkBackground = darkBackground,
+        darkSurface = darkSurface,
+        darkSurfaceHigh = darkSurfaceHigh,
+        darkSurfaceHighest = darkSurfaceHighest,
+        darkOnBackground = darkOnBackground,
+        darkOnSurfaceVariant = darkOnSurfaceVariant,
+    )
 }

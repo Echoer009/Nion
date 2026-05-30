@@ -72,6 +72,7 @@ import com.echonion.nion.core
 import com.echonion.nion.ui.companion.MarkdownText
 import com.echonion.nion.ui.theme.NionColorTheme
 import com.echonion.nion.ui.theme.NionTheme
+import com.echonion.nion.ui.theme.ThemePalette
 import uniffi.nion_core.StickerData
 
 /**
@@ -264,16 +265,25 @@ class ReminderFloatingService : Service() {
             setContent {
                 // 从 NionApp 获取当前主题设置
                 val app = applicationContext as NionApp
-                val colorTheme = try {
-                    val saved = app.core.getSetting("color_theme")
-                    NionColorTheme.entries.find { it.name == saved } ?: NionColorTheme.CORAL
+                val themePalette = try {
+                    val mode = app.core.getSetting("theme_mode") ?: "preset"
+                    when (mode) {
+                        "custom" -> {
+                            val json = app.core.getSetting("custom_theme") ?: ""
+                            if (json.isBlank()) NionColorTheme.CORAL.palette()
+                            else ThemePalette.fromJson(org.json.JSONObject(json))
+                        }
+                        else -> {
+                            val name = app.core.getSetting("color_theme") ?: "CORAL"
+                            NionColorTheme.entries.find { it.name == name }?.palette() ?: NionColorTheme.CORAL.palette()
+                        }
+                    }
                 } catch (_: Exception) {
-                    NionColorTheme.CORAL
+                    NionColorTheme.CORAL.palette()
                 }
-                // 直接通过 NionCore 查询表情包数据，Service 中无 ViewModel
                 val stickers = remember { app.core.getStickers() }
 
-                NionTheme(colorTheme = colorTheme) {
+                NionTheme(palette = themePalette) {
                     FloatingReminderCard(
                         taskTitle = taskTitle,
                         message = message,

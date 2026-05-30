@@ -49,8 +49,11 @@ import com.echonion.nion.ui.task.TaskViewModel
 import com.echonion.nion.ui.task.ReminderOverlay
 import com.echonion.nion.ui.task.taskViewModel
 import kotlinx.coroutines.launch
+import com.echonion.nion.NionApp
+import com.echonion.nion.ui.companion.tools.DataType
 import com.echonion.nion.ui.theme.NionColorTheme
 import com.echonion.nion.ui.theme.NionTheme
+import com.echonion.nion.ui.theme.ThemePalette
 import androidx.compose.ui.graphics.Color
 import androidx.activity.compose.BackHandler
 
@@ -72,12 +75,13 @@ fun NionApp() {
     val context = LocalContext.current
     val app = context.applicationContext as Application
     val core = app.core()
-    var colorTheme by remember {
-        val saved = try { core.getSetting("color_theme") } catch (_: Exception) { null }
-        val initial = saved?.let { name ->
-            NionColorTheme.entries.find { it.name == name }
-        } ?: NionColorTheme.CORAL
-        mutableStateOf(initial)
+    // 当前主题色板：预设主题通过 palette() 获取，自定义主题从 JSON 反序列化
+    var themePalette by remember {
+        mutableStateOf(loadThemePalette(core))
+    }
+    // 当前激活的预设名称（null 表示使用自定义主题），用于 SettingsScreen 高亮预设卡片
+    var currentPresetName by remember {
+        mutableStateOf(loadPresetName(core))
     }
 
     val dualState = remember { DualPanelState() }
@@ -92,6 +96,16 @@ fun NionApp() {
     var preselectedFocusDuration by remember { mutableStateOf<Int?>(null) }
     /** 从任务详情跳转时是否自动启动计时器 */
     var autoStartFocus by remember { mutableStateOf(false) }
+
+    // 监听 SETTINGS 数据变更事件（AI 伴伴工具修改主题时触发），实时刷新色板
+    LaunchedEffect(Unit) {
+        (app as NionApp).dataEvents.collect { event ->
+            if (DataType.SETTINGS in event.types) {
+                themePalette = loadThemePalette(core)
+                currentPresetName = loadPresetName(core)
+            }
+        }
+    }
 
     // ── 处理来自通知栏的 Intent ──
     val activity = context as? MainActivity
@@ -128,7 +142,7 @@ fun NionApp() {
         }
     }
 
-    NionTheme(colorTheme = colorTheme) {
+    NionTheme(palette = themePalette) {
         // 用 Box 包裹，让悬浮卡片能覆盖在 Scaffold 上方
         Box {
             val navBackStackEntry by navController.currentBackStackEntryAsState()
@@ -223,6 +237,7 @@ fun NionApp() {
                             onSidebarDrag = onDrag,
                             onSidebarDragStopped = onDragStopped,
                             isVisible = dualState.isRightOpen,
+                            currentRoute = currentRoute,
                             modifier = modifier,
                         )
                     },
@@ -318,10 +333,16 @@ fun NionApp() {
                         }
                         composable("settings") {
                             SettingsScreen(
-                                currentTheme = colorTheme,
+                                currentPresetName = currentPresetName,
+                                themePalette = themePalette,
                                 onThemeChange = {
-                                    colorTheme = it
-                                    try { core.setSetting("color_theme", it.name) } catch (_: Exception) {}
+                                    themePalette = it.palette()
+                                    currentPresetName = it.name
+                                    try {
+                                        core.setSetting("theme_mode", "preset")
+                                        core.setSetting("color_theme", it.name)
+                                        core.setSetting("custom_theme", "")
+                                    } catch (_: Exception) {}
                                 },
                                 onOpenCompanion = { dualState.openRight() },
                             )
@@ -352,5 +373,52 @@ fun NionApp() {
             // 全局问候悬浮卡片，放在 Scaffold 之后（Z 轴上层），确保浮在所有界面之上
             GreetingOverlay(app = app)
         }
+    }
+}
+
+/**
+ * 从 NionCore 设置中加载当前主题色板。
+ *
+ * 读取顺序：
+ * 1. `theme_mode` — "preset" 或 "custom"
+ * 2. 如果是 preset：读取 `color_theme` 获取预设名称，通过枚举的 palette() 返回
+ * 3. 如果是 custom：读取 `custom_theme` JSON 反序列化为 ThemePalette
+ *
+ * @param core NionCore 单例
+ * @return 当前主题色板，读取失败时回退到 CORAL 预设
+ */
+private fun loadThemePalette(core: uniffi.nion_core.NionCore): ThemePalette {
+    return try {
+        val mode = core.getSetting("theme_mode") ?: "preset"
+        when (mode) {
+            "custom" -> {
+                val json = core.getSetting("custom_theme") ?: return NionColorTheme.CORAL.palette()
+                if (json.isBlank()) return NionColorTheme.CORAL.palette()
+                ThemePalette.fromJson(org.json.JSONObject(json))
+            }
+            else -> {
+                val name = core.getSetting("color_theme") ?: "CORAL"
+                val preset = NionColorTheme.entries.find { it.name == name } ?: NionColorTheme.CORAL
+                preset.palette()
+            }
+        }
+    } catch (_: Exception) {
+        NionColorTheme.CORAL.palette()
+    }
+}
+
+/**
+ * 从 NionCore 设置中读取当前预设主题名称。
+ *
+ * @param core NionCore 单例
+ * @return 预设名称（如 "CORAL"），使用自定义主题时返回 null
+ */
+private fun loadPresetName(core: uniffi.nion_core.NionCore): String? {
+    return try {
+        val mode = core.getSetting("theme_mode") ?: "preset"
+        if (mode == "custom") null
+        else core.getSetting("color_theme") ?: "CORAL"
+    } catch (_: Exception) {
+        "CORAL"
     }
 }
