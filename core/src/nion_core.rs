@@ -1,9 +1,24 @@
 use std::sync::Mutex;
 
 use rusqlite::params;
-use uuid::Uuid;
 
 use crate::models::*;
+
+/// 查询指定表中的最大数字 ID，返回 +1 的字符串形式。
+/// 旧 UUID 记录经 CAST(id AS INTEGER) 结果为 0，不会干扰新 ID 计数。
+/// 必须在 Mutex 锁内调用以保证线程安全。
+fn next_id(db: &rusqlite::Connection, table: &str) -> Result<String, NionError> {
+    let sql = format!(
+        "SELECT COALESCE(MAX(CAST(id AS INTEGER)), 0) + 1 FROM {}",
+        table
+    );
+    let next: i64 = db
+        .query_row(&sql, [], |row| row.get(0))
+        .map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+    Ok(next.to_string())
+}
 
 #[derive(uniffi::Object)]
 pub struct NionCore {
@@ -27,7 +42,7 @@ impl NionCore {
             );
             CREATE TABLE IF NOT EXISTS tasks (
                 id TEXT PRIMARY KEY,
-                title TEXT NOT NULL,
+                name TEXT NOT NULL,
                 description TEXT,
                 priority TEXT NOT NULL DEFAULT 'medium',
                 status TEXT NOT NULL DEFAULT 'todo',
@@ -111,6 +126,18 @@ impl NionCore {
         // 每日循环字段迁移
         conn.execute_batch("ALTER TABLE tasks ADD COLUMN recurrence_rule TEXT").ok();
         conn.execute_batch("ALTER TABLE tasks ADD COLUMN recurrence_reminder_time TEXT").ok();
+        // 任务名称字段迁移：title → name
+        conn.execute_batch("ALTER TABLE tasks RENAME COLUMN title TO name").ok();
+
+        // 每日任务实例化迁移：将旧模板（recurrence_rule='daily' 且 reminder IS NULL）
+        // 的 reminder 锚定为今天的日期，使其成为当天的实例
+        {
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            conn.execute_batch(&format!(
+                "UPDATE tasks SET reminder = '{today}' || COALESCE('T' || recurrence_reminder_time, '') \
+                 WHERE recurrence_rule = 'daily' AND reminder IS NULL"
+            )).ok();
+        }
 
         Ok(Self {
             db: Mutex::new(conn),
@@ -131,7 +158,7 @@ impl NionCore {
         })?;
         let mut stmt = db
             .prepare(
-                "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks ORDER BY sort_order ASC, created_at DESC"
+                "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks ORDER BY sort_order ASC, created_at DESC"
             )
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
 
@@ -172,7 +199,7 @@ impl NionCore {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
         })?;
-        let id = Uuid::new_v4().to_string();
+        let id = next_id(&db, "checklists")?;
         let now = chrono::Utc::now().to_rfc3339();
         db.execute(
             "INSERT INTO checklists (id, name, created_at) VALUES (?1, ?2, ?3)",
@@ -224,7 +251,7 @@ impl NionCore {
         }
 
         let sql = format!(
-            "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE {} ORDER BY sort_order ASC, created_at DESC",
+            "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE {} ORDER BY sort_order ASC, created_at DESC",
             conditions.join(" AND ")
         );
         let mut stmt = db.prepare(&sql).map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
@@ -250,24 +277,10 @@ impl NionCore {
             msg: e.to_string(),
         })?;
 
-        // 先查出当天有完成记录的 (task_id, completed_at) 映射
-        let mut comp_stmt = db
-            .prepare("SELECT task_id, completed_at FROM daily_completions WHERE date = ?1")
-            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
-        let completions: std::collections::HashMap<String, String> = comp_stmt
-            .query_map(params![date], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        // 查询条件：
-        // 1. reminder 日期部分 = date 的普通任务
-        // 2. 所有每日循环模板任务
-        // 排序：按时间从早到晚 → 手动排序 → 创建时间倒序
-        // COALESCE 取优先级：reminder 的时间部分 > recurrence_reminder_time > '99:99'(排最后)
-        let sql = "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY COALESCE(SUBSTR(reminder, 12, 5), recurrence_reminder_time, '99:99') ASC, sort_order ASC, created_at DESC";
+        // 新模型：每日任务是独立实例（每天一个任务行），直接通过 reminder 日期匹配。
+        // 不再查 daily_completions 表，每日任务的完成状态由 tasks.status 决定。
+        // 兼容：仍包含 reminder IS NULL 的旧模板任务（迁移后应不再出现）
+        let sql = "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY COALESCE(SUBSTR(reminder, 12, 5), recurrence_reminder_time, '99:99') ASC, sort_order ASC, created_at DESC";
         let mut stmt = db.prepare(sql)
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
 
@@ -278,18 +291,11 @@ impl NionCore {
         let mut result = Vec::new();
         for row in rows {
             let task = row.map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
-            // 判断完成状态：每日任务查 completions 表，普通任务看 status
-            let (completed, completion_date) = if task.recurrence_rule.as_deref() == Some("daily") {
-                match completions.get(&task.id) {
-                    Some(at) => (true, Some(at.clone())),
-                    None => (false, None),
-                }
+            // 新模型：所有任务的完成状态统一看 status
+            let (completed, completion_date) = if task.status == "done" {
+                (true, task.completed_at.clone())
             } else {
-                if task.status == "done" {
-                    (true, task.completed_at.clone())
-                } else {
-                    (false, None)
-                }
+                (false, None)
             };
             result.push(DailyTaskStatus {
                 task,
@@ -306,7 +312,7 @@ impl NionCore {
         })?;
         let mut stmt = db
             .prepare(
-                "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id = ?1 ORDER BY sort_order ASC, created_at ASC"
+                "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id = ?1 ORDER BY sort_order ASC, created_at ASC"
             )
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         let rows = stmt
@@ -321,7 +327,7 @@ impl NionCore {
 
     pub fn create_task(
         &self,
-        title: String,
+        name: String,
         description: Option<String>,
         priority: String,
         category_id: Option<String>,
@@ -336,9 +342,20 @@ impl NionCore {
         let id = Uuid::new_v4().to_string();
         let now = chrono::Utc::now().to_rfc3339();
 
+        // 新模型：每日任务自动设置 reminder 为今天的日期 + 提醒时间
+        let auto_reminder = if recurrence_rule.as_deref() == Some("daily") {
+            let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+            Some(match &recurrence_reminder_time {
+                Some(t) => format!("{}T{}", today, t),
+                None => today,
+            })
+        } else {
+            None
+        };
+
         db.execute(
-            "INSERT INTO tasks (id, title, description, priority, status, category_id, parent_id, group_id, recurrence_rule, recurrence_reminder_time, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'todo', ?5, ?6, ?7, ?8, ?9, ?10, ?11)",
-            params![id, title, description, priority, category_id, parent_id, group_id, recurrence_rule, recurrence_reminder_time, now, now],
+            "INSERT INTO tasks (id, name, description, priority, status, category_id, parent_id, group_id, reminder, recurrence_rule, recurrence_reminder_time, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, 'todo', ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
+            params![id, name, description, priority, category_id, parent_id, group_id, auto_reminder, recurrence_rule, recurrence_reminder_time, now, now],
         )
         .map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
@@ -346,11 +363,11 @@ impl NionCore {
 
         Ok(TaskData {
             id,
-            title,
+            name,
             description,
             priority,
             status: "todo".to_string(),
-            reminder: None,
+            reminder: auto_reminder,
             parent_id,
             category_id,
             group_id,
@@ -366,7 +383,7 @@ impl NionCore {
     pub fn update_task(
         &self,
         id: String,
-        title: Option<String>,
+        name: Option<String>,
         description: Option<String>,
         priority: Option<String>,
         status: Option<String>,
@@ -384,8 +401,8 @@ impl NionCore {
         let mut sets = Vec::new();
         let mut param_values: Vec<Box<dyn rusqlite::types::ToSql>> = Vec::new();
 
-        if let Some(ref v) = title {
-            sets.push(format!("title = ?{}", param_values.len() + 1));
+        if let Some(ref v) = name {
+            sets.push(format!("name = ?{}", param_values.len() + 1));
             param_values.push(Box::new(v.clone()));
         }
         if let Some(ref v) = description {
@@ -818,7 +835,7 @@ impl NionCore {
         // 任务分布：按任务聚合
         let mut task_stmt = db
             .prepare(
-                "SELECT s.task_id, COALESCE(t.title, '(已删除)') as title, SUM(s.seconds) as total
+                "SELECT s.task_id, COALESCE(t.name, '(已删除)') as name, SUM(s.seconds) as total
                  FROM focus_sessions s
                  LEFT JOIN tasks t ON t.id = s.task_id
                  WHERE s.created_at >= date('now', ?1)
@@ -830,7 +847,7 @@ impl NionCore {
             .query_map(params![days_param], |row| {
                 Ok(TaskFocusStat {
                     task_id: row.get(0)?,
-                    task_title: row.get(1)?,
+                    task_name: row.get(1)?,
                     seconds: row.get(2)?,
                 })
             })
@@ -1151,7 +1168,7 @@ impl NionCore {
     ) -> Result<TaskData, NionError> {
         self.update_task(
             task_id,
-            None,       // title
+            None,       // name
             None,       // description
             None,       // priority
             None,       // status
@@ -1217,6 +1234,172 @@ impl NionCore {
         Ok(rows > 0)
     }
 
+    // ==================== 每日任务实例化（新模型） ====================
+
+    /// 完成每日任务实例：将任务标记为 done，并自动创建下一天的实例。
+    ///
+    /// 新模型逻辑：
+    /// 1. 将当前任务的 status 设为 "done"，completed_at 设为当前时间
+    /// 2. 根据 task_date 计算下一天（task_date + 1 天）
+    /// 3. 检查下一天是否已存在同标题、同清单、同分组的每日任务实例（防重复）
+    /// 4. 不存在则创建新实例，携带相同的 recurrence_rule、recurrence_reminder_time 等属性
+    ///
+    /// 返回 DailyInstanceResult（完成的任务 + 可选的新建任务）
+    pub fn complete_daily_task_instance(
+        &self,
+        task_id: String,
+    ) -> Result<DailyInstanceResult, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+
+        // 1. 查出原任务，提取日期部分
+        let original = query_task(&db, &task_id)?;
+        let task_date_str = original.reminder.as_deref()
+            .map(|r| &r[..10])
+            .ok_or_else(|| NionError::ValidationError {
+                msg: format!("每日任务 {} 没有 reminder 日期，无法计算下一天", task_id),
+            })?;
+        let task_date = chrono::NaiveDate::parse_from_str(task_date_str, "%Y-%m-%d")
+            .map_err(|e| NionError::ValidationError {
+                msg: format!("无法解析日期 '{}': {}", task_date_str, e),
+            })?;
+
+        // 2. 标记完成
+        let now = chrono::Utc::now().to_rfc3339();
+        db.execute(
+            "UPDATE tasks SET status = 'done', completed_at = ?1, updated_at = ?1 WHERE id = ?2",
+            params![now, task_id],
+        ).map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let completed_task = query_task(&db, &task_id)?;
+
+        // 3. 计算下一天
+        let next_date = task_date + chrono::Duration::days(1);
+        let next_date_str = next_date.format("%Y-%m-%d").to_string();
+
+        // 4. 构建下一天的 reminder：保持原时间部分（如果有）
+        let next_reminder = if let Some(ref rem) = original.reminder {
+            if rem.len() > 10 {
+                // 原 reminder 有时间部分（如 "2026-05-30T09:00"），替换日期
+                Some(format!("{}{}", next_date_str, &rem[10..]))
+            } else {
+                // 只有日期
+                Some(next_date_str.clone())
+            }
+        } else {
+            // 不应该到这里（前面已校验），但保险起见
+            Some(next_date_str.clone())
+        };
+
+        // 5. 检查是否已存在同名、同清单、同分组、同 reminder 日期的每日任务
+        let next_date_prefix = next_date_str.clone();
+        let existing: Option<String> = db.query_row(
+            "SELECT id FROM tasks WHERE name = ?1 \
+             AND recurrence_rule = 'daily' \
+             AND SUBSTR(reminder, 1, 10) = ?2 \
+             AND (category_id = ?3 OR (category_id IS NULL AND ?3 IS NULL)) \
+             AND (group_id = ?4 OR (group_id IS NULL AND ?4 IS NULL)) \
+             AND parent_id IS NULL \
+             LIMIT 1",
+            params![
+                original.name,
+                next_date_prefix,
+                original.category_id,
+                original.group_id,
+            ],
+            |row| row.get(0),
+        ).ok();
+
+        // 6. 不存在则创建
+        let new_task = if existing.is_none() {
+            let new_id = Uuid::new_v4().to_string();
+            let new_now = chrono::Utc::now().to_rfc3339();
+            db.execute(
+                "INSERT INTO tasks (id, name, description, priority, status, category_id, parent_id, group_id, reminder, recurrence_rule, recurrence_reminder_time, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, 'todo', ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?10)",
+                params![
+                    new_id,
+                    original.name,
+                    original.description,
+                    original.priority,
+                    original.category_id,
+                    original.group_id,
+                    next_reminder,
+                    original.recurrence_rule,
+                    original.recurrence_reminder_time,
+                    new_now,
+                ],
+            ).map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+            Some(query_task(&db, &new_id)?)
+        } else {
+            None
+        };
+
+        Ok(DailyInstanceResult {
+            completed_task: completed_task,
+            new_task: new_task,
+        })
+    }
+
+    /// 取消完成每日任务实例：将任务恢复为 todo，并自动删除之前生成的下一天实例。
+    ///
+    /// 逻辑：
+    /// 1. 将任务 status 设回 "todo"，清空 completed_at
+    /// 2. 查找并删除下一天自动生成的实例（同标题、同清单、同分组、reminder 日期 = task_date + 1）
+    pub fn uncomplete_daily_task_instance(
+        &self,
+        task_id: String,
+    ) -> Result<TaskData, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+
+        // 1. 查出原任务
+        let original = query_task(&db, &task_id)?;
+        let task_date_str = original.reminder.as_deref()
+            .map(|r| &r[..10])
+            .ok_or_else(|| NionError::ValidationError {
+                msg: format!("每日任务 {} 没有 reminder 日期", task_id),
+            })?;
+        let task_date = chrono::NaiveDate::parse_from_str(task_date_str, "%Y-%m-%d")
+            .map_err(|e| NionError::ValidationError {
+                msg: format!("无法解析日期 '{}': {}", task_date_str, e),
+            })?;
+
+        // 2. 恢复为 todo
+        let now = chrono::Utc::now().to_rfc3339();
+        db.execute(
+            "UPDATE tasks SET status = 'todo', completed_at = NULL, updated_at = ?1 WHERE id = ?2",
+            params![now, task_id],
+        ).map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let restored_task = query_task(&db, &task_id)?;
+
+        // 3. 查找并删除下一天的自动生成实例
+        let next_date = task_date + chrono::Duration::days(1);
+        let next_date_str = next_date.format("%Y-%m-%d").to_string();
+
+        // 找到同名、同清单、同分组、reminder 日期 = 下一天、status = todo 的每日任务
+        db.execute(
+            "DELETE FROM tasks WHERE name = ?1 \
+             AND recurrence_rule = 'daily' \
+             AND status = 'todo' \
+             AND SUBSTR(reminder, 1, 10) = ?2 \
+             AND (category_id = ?3 OR (category_id IS NULL AND ?3 IS NULL)) \
+             AND (group_id = ?4 OR (group_id IS NULL AND ?4 IS NULL)) \
+             AND parent_id IS NULL \
+             AND id != ?5",
+            params![
+                original.name,
+                next_date_str,
+                original.category_id,
+                original.group_id,
+                task_id,
+            ],
+        ).map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+
+        Ok(restored_task)
+    }
+
     /// 查询某个每日任务在日期范围内的完成记录
     /// 用于统计、日历标记等
     pub fn get_daily_completions(
@@ -1249,108 +1432,53 @@ impl NionCore {
         Ok(result)
     }
 
-    /// 获取所有过期的每日任务
-    /// 对每个 recurrence_rule='daily' 的模板任务，查找其 created_at 日期到 before_date 之间
-    /// 没有 daily_completions 记录的日期，每缺一天返回一条 OverdueDailyTask
-    /// 最多回溯 365 天，避免性能问题
+    /// 获取所有过期的每日任务实例
+    /// 新模型：查找 recurrence_rule='daily'、status='todo'、reminder 日期 < before_date 的任务
+    /// 这些是未完成的每日任务实例（被跳过的日期），按过期日期降序排列
     pub fn get_overdue_daily_tasks(&self, before_date: String) -> Result<Vec<OverdueDailyTask>, NionError> {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
         })?;
 
-        // 查出所有每日循环模板任务
         let mut stmt = db
             .prepare(
-                "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE recurrence_rule = 'daily' AND parent_id IS NULL",
+                "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time \
+                 FROM tasks WHERE recurrence_rule = 'daily' AND status = 'todo' AND parent_id IS NULL \
+                 AND reminder IS NOT NULL AND SUBSTR(reminder, 1, 10) < ?1 \
+                 ORDER BY SUBSTR(reminder, 1, 10) DESC",
             )
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
-        let daily_tasks: Vec<TaskData> = stmt
-            .query_map([], |row| map_task_row(row))
-            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        // 解析 before_date
-        let before = chrono::NaiveDate::parse_from_str(&before_date, "%Y-%m-%d")
-            .map_err(|e| NionError::ValidationError {
-                msg: format!("Invalid date format '{}': {}", before_date, e),
-            })?;
+        let rows = stmt
+            .query_map(params![before_date], |row| map_task_row(row))
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
 
         let mut result = Vec::new();
-
-        for task in daily_tasks {
-            // 计算生效起始日：取 created_at 的日期部分
-            let created_date = chrono::NaiveDateTime::parse_from_str(&task.created_at, "%+")
-                .map(|dt| dt.date())
-                .or_else(|_| {
-                    // 尝试只解析日期部分
-                    chrono::NaiveDate::parse_from_str(&task.created_at[..10], "%Y-%m-%d")
-                })
-                .unwrap_or_else(|_| before);
-
-            // 起始日 = max(created_date, before - 365天)
-            let earliest = (before - chrono::Duration::days(365)).max(created_date);
-
-            // 查出这个任务的所有完成记录
-            let earliest_str = earliest.format("%Y-%m-%d").to_string();
-            let before_str = before.format("%Y-%m-%d").to_string();
-            let mut comp_stmt = db
-                .prepare(
-                    "SELECT date FROM daily_completions WHERE task_id = ?1 AND date >= ?2 AND date < ?3",
-                )
-                .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
-            let completion_dates: std::collections::HashSet<String> = comp_stmt
-                .query_map(params![task.id, earliest_str, before_str], |row| {
-                    row.get::<_, String>(0)
-                })
-                .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?
-                .filter_map(|r| r.ok())
-                .collect();
-
-            // 遍历 [earliest, before) 的每一天，找出缺失的
-            let mut d = earliest;
-            while d < before {
-                let ds = d.format("%Y-%m-%d").to_string();
-                if !completion_dates.contains(&ds) {
-                    result.push(OverdueDailyTask {
-                        task: task.clone(),
-                        overdue_date: ds,
-                    });
-                }
-                d += chrono::Duration::days(1);
+        for row in rows {
+            let task = row.map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+            // 提取 reminder 的日期部分作为过期日期
+            let overdue_date = task.reminder.as_deref()
+                .map(|r| r[..10].to_string())
+                .unwrap_or_default();
+            if !overdue_date.is_empty() {
+                result.push(OverdueDailyTask {
+                    task,
+                    overdue_date,
+                });
             }
         }
 
-        // 按过期日期降序排列（最近的过期排在前面）
-        result.sort_by(|a, b| b.overdue_date.cmp(&a.overdue_date));
         Ok(result)
     }
 
-    /// 获取指定日期的所有任务（含每日任务的完成状态）
-    /// 用于日程页面：返回 reminder 日期 = date 的普通任务 + 所有每日模板（附带该日完成状态）
+    /// 获取指定日期的所有任务（含每日任务实例的完成状态）
+    /// 新模型：每日任务是独立实例，完成状态由 tasks.status 决定
     pub fn get_tasks_for_date(&self, date: String) -> Result<Vec<DailyTaskStatus>, NionError> {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
         })?;
 
-        // 先查出当天有完成记录的 (task_id, completed_at) 映射
-        let mut comp_stmt = db
-            .prepare("SELECT task_id, completed_at FROM daily_completions WHERE date = ?1")
-            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
-        let completions: std::collections::HashMap<String, String> = comp_stmt
-            .query_map(params![date], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-            })
-            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        // 查询条件：
-        // 1. reminder 日期部分 = date 的普通任务（非每日循环）
-        // 2. 所有每日循环模板任务
-        // 排序：按时间从早到晚 → 手动排序 → 创建时间倒序
-        // COALESCE 取优先级：reminder 的时间部分 > recurrence_reminder_time > '99:99'(排最后)
-        let sql = "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY COALESCE(SUBSTR(reminder, 12, 5), recurrence_reminder_time, '99:99') ASC, sort_order ASC, created_at DESC";
+        // 新模型：直接通过 reminder 日期匹配，完成状态看 tasks.status
+        let sql = "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY COALESCE(SUBSTR(reminder, 12, 5), recurrence_reminder_time, '99:99') ASC, sort_order ASC, created_at DESC";
         let mut stmt = db.prepare(sql).map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
         })?;
@@ -1361,19 +1489,10 @@ impl NionCore {
         let mut result = Vec::new();
         for row in rows {
             let task = row.map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
-            let (completed, completion_date) = if task.recurrence_rule.as_deref() == Some("daily") {
-                // 每日任务：查 completions 表
-                match completions.get(&task.id) {
-                    Some(at) => (true, Some(at.clone())),
-                    None => (false, None),
-                }
+            let (completed, completion_date) = if task.status == "done" {
+                (true, task.completed_at.clone())
             } else {
-                // 普通任务：看 status
-                if task.status == "done" {
-                    (true, task.completed_at.clone())
-                } else {
-                    (false, None)
-                }
+                (false, None)
             };
             result.push(DailyTaskStatus {
                 task,
@@ -1385,7 +1504,7 @@ impl NionCore {
     }
 
     /// 获取日历日期标记 —— 用于日程页面的日历标记
-    /// 返回 start_date..=end_date 范围内每个日期的任务统计
+    /// 新模型：统计每个日期的任务实例状态（含每日任务实例）
     pub fn get_calendar_date_markers(
         &self,
         start_date: String,
@@ -1399,27 +1518,18 @@ impl NionCore {
             .map_err(|e| NionError::ValidationError {
                 msg: format!("Invalid start_date '{}': {}", start_date, e),
             })?;
-        let end = chrono::NaiveDate::parse_from_str(&end_date, "%Y-%m-%d")
+        let _end = chrono::NaiveDate::parse_from_str(&end_date, "%Y-%m-%d")
             .map_err(|e| NionError::ValidationError {
                 msg: format!("Invalid end_date '{}': {}", end_date, e),
             })?;
 
-        // 收集范围内每天的所有完成记录
-        let mut comp_stmt = db
-            .prepare("SELECT date, COUNT(*) FROM daily_completions WHERE date >= ?1 AND date <= ?2 GROUP BY date")
-            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
-        let daily_comp_counts: std::collections::HashMap<String, i32> = comp_stmt
-            .query_map(params![start_date, end_date], |row| {
-                Ok((row.get::<_, String>(0)?, row.get::<_, i32>(1)?))
-            })
-            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?
-            .filter_map(|r| r.ok())
-            .collect();
-
-        // 收集范围内 reminder 日期部分落在各天的普通任务统计
+        // 收集范围内 reminder 日期部分落在各天的任务统计（含每日任务实例和普通任务）
         let mut due_stmt = db
             .prepare(
-                "SELECT SUBSTR(reminder, 1, 10) as rd, COUNT(*), SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) FROM tasks WHERE SUBSTR(reminder, 1, 10) >= ?1 AND SUBSTR(reminder, 1, 10) <= ?2 AND (recurrence_rule IS NULL OR recurrence_rule = 'none') AND parent_id IS NULL GROUP BY SUBSTR(reminder, 1, 10)",
+                "SELECT SUBSTR(reminder, 1, 10) as rd, COUNT(*), SUM(CASE WHEN status='done' THEN 1 ELSE 0 END) \
+                 FROM tasks WHERE SUBSTR(reminder, 1, 10) >= ?1 AND SUBSTR(reminder, 1, 10) <= ?2 \
+                 AND parent_id IS NULL \
+                 GROUP BY SUBSTR(reminder, 1, 10)",
             )
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         let due_stats: std::collections::HashMap<String, (i32, i32)> = due_stmt
@@ -1433,26 +1543,30 @@ impl NionCore {
             .filter_map(|r| r.ok())
             .collect();
 
-        // 获取所有活跃的每日模板任务数量
-        let daily_template_count: i32 = db
-            .query_row(
-                "SELECT COUNT(*) FROM tasks WHERE recurrence_rule = 'daily' AND parent_id IS NULL",
-                params![],
-                |row| row.get(0),
+        // 查找范围内有过期每日任务（未完成且日期 < 今天）的日期
+        let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
+        let mut overdue_stmt = db
+            .prepare(
+                "SELECT DISTINCT SUBSTR(reminder, 1, 10) FROM tasks \
+                 WHERE recurrence_rule = 'daily' AND status = 'todo' AND parent_id IS NULL \
+                 AND reminder IS NOT NULL AND SUBSTR(reminder, 1, 10) < ?1 \
+                 AND SUBSTR(reminder, 1, 10) >= ?2 AND SUBSTR(reminder, 1, 10) <= ?3",
             )
-            .unwrap_or(0);
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let overdue_dates: std::collections::HashSet<String> = overdue_stmt
+            .query_map(params![today_str, start_date, end_date], |row| {
+                row.get::<_, String>(0)
+            })
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?
+            .filter_map(|r| r.ok())
+            .collect();
 
         let mut result = Vec::new();
         let mut d = start;
-        while d <= end {
+        while d <= _end {
             let ds = d.format("%Y-%m-%d").to_string();
-            let (due_count, due_done) = due_stats.get(&ds).copied().unwrap_or((0, 0));
-            let daily_done = daily_comp_counts.get(&ds).copied().unwrap_or(0);
-            let task_count = due_count + daily_template_count;
-            let completed_count = due_done + daily_done;
-            // has_overdue: 如果当天的每日模板没有全部完成且日期 < 今天
-            let today_str = chrono::Local::now().format("%Y-%m-%d").to_string();
-            let has_overdue = ds.as_str() < today_str.as_str() && daily_done < daily_template_count;
+            let (task_count, completed_count) = due_stats.get(&ds).copied().unwrap_or((0, 0));
+            let has_overdue = overdue_dates.contains(&ds);
             result.push(CalendarDateMarker {
                 date: ds,
                 task_count,
@@ -1600,7 +1714,7 @@ fn cascade_to_descendants(
 fn map_task_row(row: &rusqlite::Row) -> rusqlite::Result<TaskData> {
     Ok(TaskData {
         id: row.get(0)?,
-        title: row.get(1)?,
+        name: row.get(1)?,
         description: row.get(2)?,
         priority: row.get(3)?,
         status: row.get(4)?,
@@ -1619,7 +1733,7 @@ fn map_task_row(row: &rusqlite::Row) -> rusqlite::Result<TaskData> {
 
 fn query_task(db: &rusqlite::Connection, id: &str) -> Result<TaskData, NionError> {
     db.query_row(
-        "SELECT id, title, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE id = ?1",
+        "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE id = ?1",
         params![id],
         |row| map_task_row(row),
     )
@@ -1651,7 +1765,7 @@ mod tests {
             None,
         ).unwrap();
 
-        assert_eq!(task.title, "Test task");
+        assert_eq!(task.name, "Test task");
         assert_eq!(task.priority, "high");
         assert_eq!(task.status, "todo");
 
@@ -1687,7 +1801,7 @@ mod tests {
             None,
         ).unwrap();
 
-        assert_eq!(updated.title, "Updated");
+        assert_eq!(updated.name, "Updated");
         assert_eq!(updated.priority, "high");
         assert_eq!(updated.status, "in_progress");
         assert!(updated.completed_at.is_none());
@@ -1772,7 +1886,7 @@ mod tests {
 
         let no_cl = core.get_tasks_by_category(None, None).unwrap();
         assert_eq!(no_cl.len(), 1);
-        assert_eq!(no_cl[0].title, "Task B");
+        assert_eq!(no_cl[0].name, "Task B");
     }
 
     #[test]
@@ -1784,12 +1898,12 @@ mod tests {
 
         let top = core.get_tasks_by_category(None, None).unwrap();
         assert_eq!(top.len(), 1);
-        assert_eq!(top[0].title, "Parent");
+        assert_eq!(top[0].name, "Parent");
 
         let subs = core.get_subtasks(parent.id.clone()).unwrap();
         assert_eq!(subs.len(), 2);
-        assert_eq!(subs[0].title, "Child 1");
-        assert_eq!(subs[1].title, "Child 2");
+        assert_eq!(subs[0].name, "Child 1");
+        assert_eq!(subs[1].name, "Child 2");
     }
 
     #[test]
@@ -1845,7 +1959,7 @@ mod tests {
         // 通过 ID 查询单个任务
         let found = core.get_task(task.id.clone()).unwrap();
         assert_eq!(found.id, task.id);
-        assert_eq!(found.title, "Single task");
+        assert_eq!(found.name, "Single task");
         assert_eq!(found.reminder, Some("2026-06-01T09:00".to_string()));
 
         // 不存在的 ID 应返回错误
@@ -1956,7 +2070,7 @@ mod tests {
         // 获取英语分组的任务
         let english_tasks = core.get_tasks_by_category(Some(cl.id.clone()), Some(g2.id.clone())).unwrap();
         assert_eq!(english_tasks.len(), 1);
-        assert_eq!(english_tasks[0].title, "听力练习");
+        assert_eq!(english_tasks[0].name, "听力练习");
 
         // 获取未分组的任务（group_id = None 时不按分组过滤，返回所有）
         let all_tasks = core.get_tasks_by_category(Some(cl.id.clone()), None).unwrap();
@@ -2053,12 +2167,12 @@ mod tests {
 
         let today_tasks = core.get_tasks_due_today(today.clone()).unwrap();
         assert_eq!(today_tasks.len(), 2);
-        // 返回类型改为 DailyTaskStatus，取 .task.title
-        let titles: Vec<&str> = today_tasks.iter().map(|t| t.task.title.as_str()).collect();
+        // 返回类型改为 DailyTaskStatus，取 .task.name
+        let titles: Vec<&str> = today_tasks.iter().map(|t| t.task.name.as_str()).collect();
         assert!(titles.contains(&"Task A"));
         assert!(titles.contains(&"Task C"));
         // 每日任务初始状态：未完成
-        let task_c = today_tasks.iter().find(|t| t.task.title == "Task C").unwrap();
+        let task_c = today_tasks.iter().find(|t| t.task.name == "Task C").unwrap();
         assert!(!task_c.completed_for_date);
     }
 
@@ -2074,7 +2188,7 @@ mod tests {
 
         let today_tasks = core.get_tasks_due_today(today).unwrap();
         assert_eq!(today_tasks.len(), 1);
-        assert_eq!(today_tasks[0].task.title, "Parent");
+        assert_eq!(today_tasks[0].task.name, "Parent");
     }
 
     // ==================== 每日任务完成记录测试 ====================
@@ -2083,23 +2197,42 @@ mod tests {
     fn test_complete_and_uncomplete_daily_task() {
         let core = make_in_memory();
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-        // 创建每日任务
+        let tomorrow = chrono::Local::now().checked_add_days(chrono::Days::new(1)).unwrap().format("%Y-%m-%d").to_string();
+
+        // 创建每日任务，带 reminder 日期
         let task = core.create_task("背单词".to_string(), None, "high".to_string(), None, None, None, Some("daily".to_string()), Some("09:00".to_string())).unwrap();
+        // 迁移逻辑会把 reminder 设为今天 + "T09:00"
+        // 手动确认 reminder 不为 null
+        let task = core.get_task(task.id.clone()).unwrap();
+        assert!(task.reminder.is_some());
 
-        // 完成今日
-        let comp = core.complete_daily_task(task.id.clone(), today.clone()).unwrap();
-        assert_eq!(comp.task_id, task.id);
-        assert_eq!(comp.date, today);
+        // 用新模型完成
+        let result = core.complete_daily_task_instance(task.id.clone()).unwrap();
+        assert_eq!(result.completed_task.id, task.id);
+        // 应该自动创建明天的实例
+        assert!(result.new_task.is_some());
+        let new_task = result.new_task.unwrap();
+        assert_eq!(new_task.name, "背单词");
+        assert_eq!(new_task.recurrence_rule, Some("daily".to_string()));
+        // 明天的 reminder 应该是明天 + T09:00
+        assert!(new_task.reminder.is_some());
+        assert!(new_task.reminder.unwrap().starts_with(&tomorrow));
+        assert_eq!(new_task.status, "todo");
 
-        // 查今日任务，应该显示已完成
+        // 查今日任务，完成的任务应显示为已完成
         let today_tasks = core.get_tasks_due_today(today.clone()).unwrap();
         let found = today_tasks.iter().find(|t| t.task.id == task.id).unwrap();
         assert!(found.completed_for_date);
         assert!(found.completion_date.is_some());
 
         // 取消完成
-        let removed = core.uncomplete_daily_task(task.id.clone(), today.clone()).unwrap();
-        assert!(removed);
+        let restored = core.uncomplete_daily_task_instance(task.id.clone()).unwrap();
+        assert_eq!(restored.status, "todo");
+
+        // 明天的自动生成实例应该被删除了
+        let tomorrow_tasks = core.get_tasks_due_today(tomorrow.clone()).unwrap();
+        let tomorrow_found: Vec<_> = tomorrow_tasks.iter().filter(|t| t.task.name == "背单词").collect();
+        assert!(tomorrow_found.is_empty());
 
         // 再次查今日任务，应该显示未完成
         let today_tasks = core.get_tasks_due_today(today.clone()).unwrap();
@@ -2131,25 +2264,29 @@ mod tests {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let yesterday = chrono::Local::now().checked_sub_days(chrono::Days::new(1)).unwrap().format("%Y-%m-%d").to_string();
         let two_days_ago = chrono::Local::now().checked_sub_days(chrono::Days::new(2)).unwrap().format("%Y-%m-%d").to_string();
-        let three_days_ago = chrono::Local::now().checked_sub_days(chrono::Days::new(3)).unwrap().format("%Y-%m-%d").to_string();
 
-        // 创建每日任务（created_at = now，但我们手动把 created_at 改到 3 天前）
-        let task = core.create_task("冥想".to_string(), None, "low".to_string(), None, None, None, Some("daily".to_string()), None).unwrap();
-
-        // 手动更新 created_at 到 3 天前，让过期检测能覆盖更多天
+        // 新模型：过期任务是 status='todo'、reminder 日期 < 今天的每日任务实例
+        // 创建 2 天前的过期实例
+        let overdue1 = core.create_task("冥想".to_string(), None, "low".to_string(), None, None, None, Some("daily".to_string()), None).unwrap();
+        // 迁移会把 reminder 设为今天，手动改为 2 天前
         {
             let db = core.db.lock().unwrap();
-            let past_created = chrono::Local::now().checked_sub_days(chrono::Days::new(3)).unwrap().format("%Y-%m-%dT00:00:00Z").to_string();
-            db.execute("UPDATE tasks SET created_at = ?1 WHERE id = ?2", params![past_created, task.id]).unwrap();
+            db.execute("UPDATE tasks SET reminder = ?1 WHERE id = ?2", params![two_days_ago, overdue1.id]).unwrap();
         }
 
-        // 完成 3 天前和今天
-        core.complete_daily_task(task.id.clone(), three_days_ago.clone()).unwrap();
-        core.complete_daily_task(task.id.clone(), today.clone()).unwrap();
+        // 创建昨天的过期实例
+        let overdue2 = core.create_task("跑步".to_string(), None, "medium".to_string(), None, None, None, Some("daily".to_string()), None).unwrap();
+        {
+            let db = core.db.lock().unwrap();
+            db.execute("UPDATE tasks SET reminder = ?1 WHERE id = ?2", params![yesterday, overdue2.id]).unwrap();
+        }
 
-        // 查 today 之前的过期任务（before_date = today，不包括 today）
+        // 创建今天的实例（不过期）
+        let today_task = core.create_task("今天的事".to_string(), None, "medium".to_string(), None, None, None, Some("daily".to_string()), None).unwrap();
+        // reminder 已被迁移设为今天
+
+        // 查 today 之前的过期任务
         let overdue = core.get_overdue_daily_tasks(today.clone()).unwrap();
-        // 3 天前 ✅、2 天前 ❌、昨天 ❌ → 2 条过期
         assert_eq!(overdue.len(), 2);
         let overdue_dates: Vec<&str> = overdue.iter().map(|o| o.overdue_date.as_str()).collect();
         assert!(overdue_dates.contains(&two_days_ago.as_str()));
@@ -2165,23 +2302,24 @@ mod tests {
         // 普通任务，reminder = 今天
         let normal = core.create_task("普通任务".to_string(), None, "high".to_string(), None, None, None, None, None).unwrap();
         core.update_task(normal.id.clone(), None, None, None, None, None, Some(format!("{}T09:00", today)), None, None, None).unwrap();
-        // 每日任务
+        // 每日任务（迁移会设 reminder = 今天）
         let daily = core.create_task("每日任务".to_string(), None, "low".to_string(), None, None, None, Some("daily".to_string()), None).unwrap();
         // 未来任务（不应出现在今天）
         let future_task = core.create_task("未来任务".to_string(), None, "medium".to_string(), None, None, None, None, None).unwrap();
         core.update_task(future_task.id.clone(), None, None, None, None, None, Some(format!("{}T09:00", future)), None, None, None).unwrap();
 
-        // 完成每日任务今天
-        core.complete_daily_task(daily.id.clone(), today.clone()).unwrap();
+        // 用新模型完成每日任务
+        let result = core.complete_daily_task_instance(daily.id.clone()).unwrap();
+        assert!(result.new_task.is_some()); // 自动创建明天的实例
 
         let tasks = core.get_tasks_for_date(today.clone()).unwrap();
         assert_eq!(tasks.len(), 2);
-        let titles: Vec<&str> = tasks.iter().map(|t| t.task.title.as_str()).collect();
+        let titles: Vec<&str> = tasks.iter().map(|t| t.task.name.as_str()).collect();
         assert!(titles.contains(&"普通任务"));
         assert!(titles.contains(&"每日任务"));
 
-        // 每日任务应标记为已完成
-        let daily_status = tasks.iter().find(|t| t.task.title == "每日任务").unwrap();
+        // 每日任务应标记为已完成（status = done）
+        let daily_status = tasks.iter().find(|t| t.task.name == "每日任务").unwrap();
         assert!(daily_status.completed_for_date);
     }
 
@@ -2191,27 +2329,27 @@ mod tests {
         let today = chrono::Local::now().format("%Y-%m-%d").to_string();
         let yesterday = chrono::Local::now().checked_sub_days(chrono::Days::new(1)).unwrap().format("%Y-%m-%d").to_string();
 
-        // 每日任务
+        // 每日任务（迁移会设 reminder = 今天）
         let daily = core.create_task("每天阅读".to_string(), None, "medium".to_string(), None, None, None, Some("daily".to_string()), None).unwrap();
         // 普通任务，reminder = 今天
         let today_task = core.create_task("今天到期".to_string(), None, "high".to_string(), None, None, None, None, None).unwrap();
         core.update_task(today_task.id.clone(), None, None, None, None, None, Some(format!("{}T09:00", today)), None, None, None).unwrap();
 
-        // 完成今天的每日任务
-        core.complete_daily_task(daily.id.clone(), today.clone()).unwrap();
+        // 用新模型完成今天的每日任务
+        core.complete_daily_task_instance(daily.id.clone()).unwrap();
 
         let markers = core.get_calendar_date_markers(yesterday.clone(), today.clone()).unwrap();
         assert_eq!(markers.len(), 2);
 
-        // 今天：1 每日任务（已完成）+ 1 普通任务 = 2 任务，1 完成
+        // 今天：1 每日任务实例（已完成）+ 1 普通任务 = 2 任务，1 完成
         let today_marker = markers.iter().find(|m| m.date == today).unwrap();
         assert_eq!(today_marker.task_count, 2);
         assert_eq!(today_marker.completed_count, 1);
 
-        // 昨天：1 每日任务（未完成）= 有过期
+        // 昨天：没有任何 reminder 落在这一天（每日任务的 reminder 是今天不是昨天）
         let yd_marker = markers.iter().find(|m| m.date == yesterday).unwrap();
-        assert_eq!(yd_marker.task_count, 1);
-        assert!(yd_marker.has_overdue);
+        assert_eq!(yd_marker.task_count, 0);
+        assert!(!yd_marker.has_overdue);
     }
 
     #[test]

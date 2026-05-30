@@ -18,7 +18,7 @@ pub struct ChecklistData {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
 pub struct TaskData {
     pub id: String,
-    pub title: String,
+    pub name: String,
     pub description: Option<String>,
     pub priority: String,
     pub status: String,
@@ -59,7 +59,7 @@ pub struct DailyFocusStat {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
 pub struct TaskFocusStat {
     pub task_id: String,
-    pub task_title: String,
+    pub task_name: String,
     pub seconds: i64,
 }
 
@@ -152,6 +152,15 @@ pub struct StickerData {
     pub file_size: i64,
     /// 创建时间，RFC 3339 格式
     pub created_at: String,
+}
+
+/// 每日任务实例化结果 —— 完成每日任务后的返回值
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct DailyInstanceResult {
+    /// 已完成的任务数据（status 已变为 "done"）
+    pub completed_task: TaskData,
+    /// 自动创建的下一天任务实例（如果已存在则不创建，返回 None）
+    pub new_task: Option<TaskData>,
 }
 
 /// 对话记录 —— 存储一次完整的聊天会话
