@@ -7,6 +7,8 @@
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <!-- 悬浮窗权限：在 App 后台时显示提醒悬浮卡片 -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+    <!-- 电池优化白名单权限：跳转系统电池优化设置页，避免省电策略杀后台导致闹钟丢失 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <!-- 前台 Service 权限：Android 9+ 保活悬浮窗 Service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- Android 14+ specialUse 前台 Service 必须声明此权限，否则 startForeground 会抛 SecurityException -->

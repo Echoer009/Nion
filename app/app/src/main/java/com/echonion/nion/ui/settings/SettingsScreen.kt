@@ -1,8 +1,10 @@
 package com.echonion.nion.ui.settings
 
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.PowerManager
 import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,6 +28,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
+import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -283,6 +286,91 @@ fun SettingsScreen(
                         Icon(
                             Icons.Default.Check,
                             contentDescription = "已授权",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                }
+            }
+
+            // 后台提醒（电池优化白名单）权限开关
+            // 部分厂商（vivo/小米/华为等）的省电策略会杀后台 App 导致 AlarmManager 闹钟丢失，
+            // 需要加入电池优化白名单 + 厂商专属后台管理白名单才能确保提醒正常触发
+            Surface(
+                modifier = Modifier.fillMaxWidth(),
+                shape = MaterialTheme.shapes.medium,
+                color = MaterialTheme.colorScheme.surfaceContainerLowest,
+            ) {
+                // 权限状态：查询是否已加入电池优化白名单
+                var batteryOptimized by remember {
+                    mutableStateOf(
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                            !(context.getSystemService(Context.POWER_SERVICE) as PowerManager)
+                                .isIgnoringBatteryOptimizations(context.packageName)
+                        } else {
+                            // Android 6.0 以下没有电池优化机制，默认视为已优化
+                            false
+                        }
+                    )
+                }
+                // 监听 Activity 生命周期：每次 ON_RESUME（包括从系统设置页返回）时重新检查权限
+                val lifecycleOwner2 = LocalLifecycleOwner.current
+                DisposableEffect(lifecycleOwner2) {
+                    val observer = LifecycleEventObserver { _, event ->
+                        if (event == Lifecycle.Event.ON_RESUME) {
+                            batteryOptimized = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                                !(context.getSystemService(Context.POWER_SERVICE) as PowerManager)
+                                    .isIgnoringBatteryOptimizations(context.packageName)
+                            } else {
+                                false
+                            }
+                        }
+                    }
+                    lifecycleOwner2.lifecycle.addObserver(observer)
+                    onDispose {
+                        lifecycleOwner2.lifecycle.removeObserver(observer)
+                    }
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 14.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Icon(
+                        Icons.Default.BatteryAlert,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp),
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "后台提醒",
+                            style = MaterialTheme.typography.bodyLarge,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                        Text(
+                            if (!batteryOptimized) "已设置，定时提醒闹钟可正常触发"
+                            else "未设置，定时提醒可能被系统省电策略拦截",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = if (!batteryOptimized) MaterialTheme.colorScheme.onSurfaceVariant
+                            else MaterialTheme.colorScheme.error,
+                        )
+                    }
+                    if (batteryOptimized) {
+                        TextButton(onClick = {
+                            // 通过 VendorBatteryHelper 按厂商优先级跳转电池管理设置页：
+                            // 厂商专属页 → Android 标准弹窗 → 应用详情页
+                            com.echonion.nion.reminder.VendorBatteryHelper.openBatterySettings(context)
+                        }) {
+                            Text("去设置")
+                        }
+                    } else {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = "已设置",
                             tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp),
                         )
