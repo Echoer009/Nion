@@ -41,7 +41,20 @@ object ToolValidator {
         val properties = schema.optJSONObject("properties") ?: JSONObject()
         val required = schema.optJSONArray("required")
 
-        // 第一步：检查 required 字段是否存在
+        // 第一步：检查 params 中是否存在 schema 未定义的额外字段
+        // 防止 AI 编造不存在的参数名（如 new_checklist），导致静默忽略
+        val knownFields = (0 until properties.length())
+            .map { properties.names().getString(it) }
+            .toSet()
+        val paramKeys = params.keys()
+        while (paramKeys.hasNext()) {
+            val key = paramKeys.next()
+            if (!knownFields.contains(key)) {
+                errors.add("$key: 未知参数，schema 中未定义。可用参数: ${knownFields.sorted().joinToString(", ")}")
+            }
+        }
+
+        // 第二步：检查 required 字段是否存在
         if (required != null) {
             for (i in 0 until required.length()) {
                 val field = required.getString(i)
@@ -51,7 +64,7 @@ object ToolValidator {
             }
         }
 
-        // 第二步：逐字段检查类型和 enum 约束
+        // 第三步：逐字段检查类型和 enum 约束
         val propKeys = properties.keys()
         while (propKeys.hasNext()) {
             val field = propKeys.next()

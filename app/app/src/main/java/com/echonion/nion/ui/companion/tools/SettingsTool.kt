@@ -101,9 +101,8 @@ object SettingsTool : Tool {
                     put("type", "string")
                     put("enum", JSONArray().apply {
                         put("CORAL")
-                        put("AMBER")
                     })
-                    put("description", "预设主题名称（switch_theme 切换预设时使用）：CORAL=珊瑚暖橘色, AMBER=琥珀暖黄色")
+                    put("description", "预设主题名称（switch_theme 切换预设时使用）：CORAL=珊瑚暖橘色")
                 })
                 put("theme_id", JSONObject().apply {
                     put("type", "string")

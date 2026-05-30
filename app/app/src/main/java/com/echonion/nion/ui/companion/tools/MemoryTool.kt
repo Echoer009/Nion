@@ -33,8 +33,8 @@ import uniffi.nion_core.NionCore
 object MemoryTool : Tool {
     override val name = "memory"
     override val affectsData = setOf(DataType.PREFERENCES, DataType.MEMORIES)
-    override val description = "记忆工具。scope=preference: AI行为偏好(如不用emoji)；scope=fact: 用户事实(如大三学生)。" +
-        "action=add(需content+category)/list/update(仅fact)/remove(需id)。" +
+    override val description = "记忆工具。scope=preference: AI行为偏好；scope=fact: 用户事实。" +
+        "action=add需content+category/list/update仅fact/remove需id。" +
         "preference分类: style/behavior/format/other；fact分类: identity/study/work/hobby/habit/health/emotion/goal/schedule/social/location/pet/context/other。"
 
     /** preference scope 的 setting key，用于在 Rust 层 settings 表中读写偏好数据 */

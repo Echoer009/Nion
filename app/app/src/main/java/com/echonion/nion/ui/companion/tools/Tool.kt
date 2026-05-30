@@ -193,12 +193,15 @@ class ToolExecutor(
 
     /**
      * 判断工具执行是否可能影响了提醒设置，需要重新调度闹钟。
+     * reminder 参数已合并为统一字段，只需检查 params 是否包含 "reminder" 即可。
      */
     private fun needsReschedule(toolName: String, params: JSONObject): Boolean {
         return when (toolName) {
-            "update" -> params.has("reminder") || params.has("recurrence_rule") || params.has("recurrence_reminder_time")
-            "create" -> params.has("reminder") || params.has("recurrence_rule") || params.has("recurrence_reminder_time")
-            "delete" -> true // 删除任务需要取消闹钟
+            // create/update 含 reminder 参数时需要调度闹钟
+            "create" -> params.has("reminder")
+            "update" -> params.has("reminder")
+            // 删除任务需要取消闹钟
+            "delete" -> true
             else -> false
         }
     }
@@ -212,8 +215,11 @@ class ToolExecutor(
             ?: params.optString("task_id", "").takeIf { it.isNotEmpty() }
         if (paramId != null) return paramId
 
-        // create 工具的 ID 在返回结果中
-        if (toolName == "create") {
+        // create/update/delete 工具的 ID 在返回结果中
+        // create: 创建后返回的 task 对象中包含新 ID
+        // update: 名称制定位后返回的 task 对象中包含 ID（参数中不再有 id 字段）
+        // delete: 名称制定位后在结果中返回解析后的 ID（用于取消闹钟）
+        if (toolName == "create" || toolName == "update" || toolName == "delete") {
             return try {
                 val json = JSONObject(result)
                 json.optString("id", "").takeIf { it.isNotEmpty() }
