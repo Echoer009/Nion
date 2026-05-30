@@ -60,7 +60,7 @@ private const val TAG = "MarkdownText"
  *
  * 支持的语法：
  * - 标题：`#` ~ `######`（以不同字号 + 加粗展示）
- * - 粗体：`**text**`、斜体：`*text*`、内联代码：`` `code` ``、链接 `[text](url)`
+ * - 粗体：`**text**`、斜体：`*text*`、高亮：`==text==`、内联代码：`` `code` ``、链接 `[text](url)`
  * - 代码块：``` ``` ``` 包裹的多行代码块
  * - 无序列表：`- ` / `* `、有序列表：`1. `
  * - 任务列表：`- [ ]` / `- [x]`（带勾选框样式）
@@ -87,6 +87,8 @@ fun MarkdownText(
     stickers: List<StickerData> = emptyList(),
 ) {
     val textColor = style.color
+    // 高亮背景色：primary 色 12% 透明度，跟随主题变化
+    val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.BG_HIGHLIGHT)
     // 构建标签名 → 表情包的映射表，供 parseInline 和渲染使用
     val stickerMap = remember(stickers) { stickers.associateBy { it.tag } }
 
@@ -101,13 +103,13 @@ fun MarkdownText(
     Column(modifier = modifier) {
         for ((index, block) in blocks.withIndex()) {
             when (block) {
-                is MdBlock.Header -> HeaderBlock(block, textColor, stickerMap)
+                is MdBlock.Header -> HeaderBlock(block, textColor, stickerMap, highlightColor)
                 is MdBlock.CodeBlock -> CodeBlockBlock(block, textColor)
-                is MdBlock.ListBlock -> ListBlockBlock(block, style, textColor, stickerMap)
-                is MdBlock.TaskListBlock -> TaskListBlockBlock(block, style, textColor, stickerMap)
-                is MdBlock.Blockquote -> BlockquoteBlock(block, style, textColor, stickerMap)
-                is MdBlock.TableBlock -> TableBlockBlock(block, style, textColor, stickerMap)
-                is MdBlock.Paragraph -> ParagraphBlock(block, style, textColor, stickerMap)
+                is MdBlock.ListBlock -> ListBlockBlock(block, style, textColor, stickerMap, highlightColor)
+                is MdBlock.TaskListBlock -> TaskListBlockBlock(block, style, textColor, stickerMap, highlightColor)
+                is MdBlock.Blockquote -> BlockquoteBlock(block, style, textColor, stickerMap, highlightColor)
+                is MdBlock.TableBlock -> TableBlockBlock(block, style, textColor, stickerMap, highlightColor)
+                is MdBlock.Paragraph -> ParagraphBlock(block, style, textColor, stickerMap, highlightColor)
                 is MdBlock.HorizontalRule -> HorizontalRuleBlock()
             }
             if (index < blocks.size - 1) Spacer(modifier = Modifier.height(8.dp))
@@ -120,11 +122,11 @@ fun MarkdownText(
 /** 标题行正则：`# ` ~ `###### ` */
 private val HEADER_REGEX = Regex("""^(#{1,6})\s+(.+)$""")
 
-/** 任务列表行正则：`- [ ]` 或 `- [x]` */
-private val TASK_LIST_REGEX = Regex("""^[-*]\s+\[[ xX]\]\s+.*""")
+/** 任务列表行正则：`- []`、`- [ ]` 或 `- [x]`（方括号内字符可选） */
+private val TASK_LIST_REGEX = Regex("""^[-*]\s+\[[ xX]?\]\s+.*""")
 
 /** 任务列表前缀剥离正则 */
-private val TASK_PREFIX_REGEX = Regex("""^[-*]\s+\[[ xX]\]\s+""")
+private val TASK_PREFIX_REGEX = Regex("""^[-*]\s+\[[ xX]?\]\s+""")
 
 /** 无序列表行正则：`- ` 或 `* ` */
 private val UNORDERED_LIST_REGEX = Regex("""^[-*]\s+.+""")
@@ -426,6 +428,7 @@ private fun HeaderBlock(
     block: MdBlock.Header,
     textColor: androidx.compose.ui.graphics.Color,
     stickerMap: Map<String, StickerData> = emptyMap(),
+    highlightColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Transparent,
 ) {
     val fontSize = when (block.level) {
         1 -> 20.sp
@@ -437,7 +440,7 @@ private fun HeaderBlock(
     }
     val fontWeight = if (block.level <= 4) FontWeight.Bold else FontWeight.SemiBold
     val style = MaterialTheme.typography.bodyMedium.copy(fontSize = fontSize, fontWeight = fontWeight)
-    val parsed = parseInline(block.text, style, textColor, stickerMap)
+    val parsed = parseInline(block.text, style, textColor, stickerMap, highlightColor)
     StickerAwareText(parsed, style, textColor, stickerMap)
 }
 
@@ -479,6 +482,7 @@ private fun ListBlockBlock(
     baseStyle: TextStyle,
     textColor: androidx.compose.ui.graphics.Color,
     stickerMap: Map<String, StickerData> = emptyMap(),
+    highlightColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Transparent,
 ) {
     Column {
         for ((index, item) in block.items.withIndex()) {
@@ -486,7 +490,7 @@ private fun ListBlockBlock(
                 val marker = if (block.ordered) "${index + 1}. " else "\u2022  "
                 Text(text = marker, style = baseStyle, color = textColor)
                 Spacer(modifier = Modifier.width(4.dp))
-                val parsed = parseInline(item, baseStyle, textColor, stickerMap)
+                val parsed = parseInline(item, baseStyle, textColor, stickerMap, highlightColor)
                 StickerAwareText(parsed, baseStyle, textColor, stickerMap)
             }
             if (index < block.items.size - 1) {
@@ -507,6 +511,7 @@ private fun TaskListBlockBlock(
     baseStyle: TextStyle,
     textColor: androidx.compose.ui.graphics.Color,
     stickerMap: Map<String, StickerData> = emptyMap(),
+    highlightColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Transparent,
 ) {
     Column {
         for ((index, item) in block.items.withIndex()) {
@@ -524,7 +529,7 @@ private fun TaskListBlockBlock(
                     tint = itemColor,
                 )
                 Spacer(modifier = Modifier.width(6.dp))
-                val parsed = parseInline(item.text, baseStyle, itemColor, stickerMap)
+                val parsed = parseInline(item.text, baseStyle, itemColor, stickerMap, highlightColor)
                 StickerAwareText(parsed, baseStyle, itemColor, stickerMap)
             }
             if (index < block.items.size - 1) {
@@ -546,6 +551,7 @@ private fun BlockquoteBlock(
     baseStyle: TextStyle,
     textColor: androidx.compose.ui.graphics.Color,
     stickerMap: Map<String, StickerData> = emptyMap(),
+    highlightColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Transparent,
 ) {
     Row(
         modifier = Modifier
@@ -567,7 +573,7 @@ private fun BlockquoteBlock(
             for ((index, line) in block.lines.withIndex()) {
                 if (line.isNotBlank()) {
                     val quoteColor = textColor.copy(alpha = NionAlpha.TEXT_HIGH)
-                    val parsed = parseInline(line, baseStyle, quoteColor, stickerMap)
+                    val parsed = parseInline(line, baseStyle, quoteColor, stickerMap, highlightColor)
                     StickerAwareText(parsed, baseStyle.copy(color = quoteColor), quoteColor, stickerMap)
                 }
                 if (index < block.lines.size - 1) {
@@ -589,6 +595,7 @@ private fun TableBlockBlock(
     baseStyle: TextStyle,
     textColor: androidx.compose.ui.graphics.Color,
     stickerMap: Map<String, StickerData> = emptyMap(),
+    highlightColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Transparent,
 ) {
     val header = block.header
     val rows = block.rows
@@ -635,7 +642,7 @@ private fun TableBlockBlock(
                 Row(modifier = Modifier.fillMaxWidth()) {
                     for (colIndex in header.indices) {
                         val cellText = row.getOrElse(colIndex) { "" }
-                        val parsed = parseInline(cellText, baseStyle, textColor, stickerMap)
+                        val parsed = parseInline(cellText, baseStyle, textColor, stickerMap, highlightColor)
                         StickerAwareText(
                             parsed, baseStyle, textColor, stickerMap,
                             modifier = Modifier
@@ -674,8 +681,9 @@ private fun ParagraphBlock(
     baseStyle: TextStyle,
     textColor: androidx.compose.ui.graphics.Color,
     stickerMap: Map<String, StickerData> = emptyMap(),
+    highlightColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Transparent,
 ) {
-    val parsed = parseInline(block.text, baseStyle, textColor, stickerMap)
+    val parsed = parseInline(block.text, baseStyle, textColor, stickerMap, highlightColor)
     StickerAwareText(parsed, baseStyle, textColor, stickerMap)
 }
 
@@ -810,14 +818,17 @@ private fun StickerAwareText(
 /**
  * 字符级扫描器，解析段落内内联 Markdown 并构建 AnnotatedString。
  *
- * 支持：**粗体**、*斜体*、`代码`、~~删除线~~、[链接](url)、<表情包标签>
+ * 支持：**粗体**、*斜体*、==高亮==、`代码`、~~删除线~~、[链接](url)、<表情包标签>
  * 注意：本函数非 @Composable，不可调用 MaterialTheme 等 Composable API。
+ *
+ * @param highlightColor ==高亮== 语法的背景色，由调用方从 MaterialTheme 主题获取
  */
 private fun parseInline(
     raw: String,
     style: TextStyle,
     color: androidx.compose.ui.graphics.Color,
     stickerMap: Map<String, StickerData> = emptyMap(),
+    highlightColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Transparent,
 ): InlineParseResult {
     // 预扫描所有 <tag> 匹配位置，用于字符级扫描器快速判断
     val tagMatches = STICKER_TAG_REGEX.findAll(raw).toList()
@@ -879,6 +890,19 @@ private fun parseInline(
                         if (end != -1) {
                             withStyle(SpanStyle(
                                 textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough,
+                            )) {
+                                append(raw.substring(i + 2, end))
+                            }
+                            i = end + 2
+                        } else { append(raw[i]); i++ }
+                    }
+
+                    // ==高亮==（primary 色半透明背景，像荧光笔效果）
+                    raw.startsWith("==", i) -> {
+                        val end = raw.indexOf("==", i + 2)
+                        if (end != -1) {
+                            withStyle(SpanStyle(
+                                background = highlightColor,
                             )) {
                                 append(raw.substring(i + 2, end))
                             }

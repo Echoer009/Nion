@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -172,7 +173,10 @@ fun ApiProviderSetup(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clickable { dropdownExpanded = !dropdownExpanded }
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { dropdownExpanded = !dropdownExpanded }
                         .padding(horizontal = 16.dp, vertical = 14.dp),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically,
@@ -217,7 +221,10 @@ fun ApiProviderSetup(
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .clickable {
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                    ) {
                                         selectedProviderIndex = index
                                         dropdownExpanded = false
                                         // 切换 provider 时重置模型列表
@@ -397,7 +404,10 @@ fun ApiProviderSetup(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clickable { modelDropdownExpanded = !modelDropdownExpanded }
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                ) { modelDropdownExpanded = !modelDropdownExpanded }
                                 .padding(horizontal = 16.dp, vertical = 14.dp),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
@@ -431,7 +441,10 @@ fun ApiProviderSetup(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clickable {
+                                            .clickable(
+                                                interactionSource = remember { MutableInteractionSource() },
+                                                indication = null,
+                                            ) {
                                                 selectedModelName = model
                                                 modelDropdownExpanded = false
                                             }

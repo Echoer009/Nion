@@ -363,7 +363,8 @@ private fun AddStickerDialog(
                     Text(
                         "预览：<$tag>",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.primary,
+                        // 预览文字使用 tertiary（装饰性信息）
+                        color = MaterialTheme.colorScheme.tertiary,
                     )
                 }
             }

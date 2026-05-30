@@ -8,13 +8,16 @@ import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
@@ -39,6 +42,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
@@ -50,6 +55,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -86,6 +92,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -616,7 +624,10 @@ private fun ProfileContent(
                     shape = RoundedCornerShape(16.dp),
                     color = if (isSelected) MaterialTheme.colorScheme.primary
                     else MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.clickable { viewModel.updateCompanionStyle(key) },
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) { viewModel.updateCompanionStyle(key) },
                 ) {
                     Text(
                         label,
@@ -809,7 +820,8 @@ private fun SectionHeader(title: String) {
         title,
         style = MaterialTheme.typography.titleMedium,
         fontWeight = FontWeight.Bold,
-        color = MaterialTheme.colorScheme.primary,
+        // 区域标题使用 secondary，与主操作 primary 区分
+        color = MaterialTheme.colorScheme.secondary,
     )
 }
 
@@ -885,7 +897,10 @@ private fun ExpandablePromptCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onToggleExpand() }
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) { onToggleExpand() }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -1051,7 +1066,10 @@ private fun ExpandableReminderCard(
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .clickable { onToggleExpand() }
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) { onToggleExpand() }
                             .padding(horizontal = 16.dp, vertical = 12.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
@@ -1310,7 +1328,10 @@ private fun AddPreferenceDialog(
                             shape = RoundedCornerShape(16.dp),
                             color = if (isSelected) MaterialTheme.colorScheme.primary
                             else MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier.clickable { selectedCategory = key },
+                            modifier = Modifier.clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                            ) { selectedCategory = key },
                         ) {
                             Text(
                                 label,
@@ -1369,6 +1390,11 @@ private fun ChatContent(
     val isLoading = viewModel.isLoading
     val streamingText = viewModel.displayedStreamingText
     val streamingTimestamp = viewModel.streamingMessageTimestamp
+
+    // 长按选中的消息 ID，null 表示未选中（操作栏不显示）
+    var selectedMessageId by remember { mutableStateOf<String?>(null) }
+    // 剪贴板管理器，用于复制消息文本
+    val clipboardManager = LocalClipboardManager.current
 
     // 面板被移出组合时保存滚动位置（打开左侧清单、切换子面板等场景）
     // DisposableEffect.onDispose 在 composable 被移除时必定调用，比 LaunchedEffect 更可靠
@@ -1489,6 +1515,8 @@ private fun ChatContent(
                 }
             }
             items(messages, key = { it.id }) { message ->
+                // 当前消息是否被长按选中
+                val isSelected = selectedMessageId == message.id
                 // 消息入场动画：淡入 + 缩放
                 androidx.compose.animation.AnimatedVisibility(
                     visible = true,
@@ -1497,7 +1525,30 @@ private fun ChatContent(
                         animationSpec = tween(350),
                     ),
                 ) {
-                    MessageBubble(message, stickers = viewModel.stickers)
+                    MessageBubble(
+                        message,
+                        stickers = viewModel.stickers,
+                        isSelected = isSelected,
+                        // 长按回调：记录选中消息 ID
+                        onLongClick = { selectedMessageId = message.id },
+                        // 复制回调：将消息文本写入剪贴板，然后收起操作栏
+                        onCopy = {
+                            viewModel.getMessageText(message.id)?.let { text ->
+                                clipboardManager.setText(AnnotatedString(text))
+                            }
+                            selectedMessageId = null
+                        },
+                        // 重试回调：调用 ViewModel 重新生成 AI 回复，然后收起操作栏
+                        onRetry = {
+                            viewModel.rerollMessage(message.id)
+                            selectedMessageId = null
+                        },
+                        // 删除回调：调用 ViewModel 删除消息，然后收起操作栏
+                        onDelete = {
+                            viewModel.deleteMessage(message.id)
+                            selectedMessageId = null
+                        },
+                    )
                 }
             }
             // 流式输出气泡 —— 有流式文本时实时展示正在生成的 AI 回复
@@ -1524,7 +1575,8 @@ private fun ChatContent(
                         CircularProgressIndicator(
                             modifier = Modifier.size(18.dp),
                             strokeWidth = 2.dp,
-                            color = MaterialTheme.colorScheme.primary,
+                            // 加载指示器使用 secondary（信息性，非主操作）
+                            color = MaterialTheme.colorScheme.secondary,
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
@@ -1613,13 +1665,30 @@ private fun ChatContent(
  * AI 消息使用 [MarkdownText] 渲染 Markdown 格式（粗体/斜体/代码/列表/标题等）。
  * 用户消息使用纯文本渲染。
  *
+ * 长按气泡时，气泡通过 [animateContentSize] 弹簧变形"长出"操作栏，
+ * 操作栏在气泡内部底部展开，包含复制/重试/删除三个按钮。
+ * 气泡容器始终为单一的 Box+background，避免 AnimatedContent 叠层导致的黑色遮罩。
+ *
  * @param message 要渲染的消息数据
  * @param stickers 表情包列表，用于在 AI 回复中渲染 <标签名> 为行内图片
+ * @param isSelected 当前气泡是否被长按选中（决定操作栏是否展开）
+ * @param onLongClick 长按气泡时触发，通知外部记录选中消息 ID
+ * @param onCopy 点击复制按钮时触发，传入消息 ID
+ * @param onRetry 点击重试按钮时触发，传入消息 ID（仅 AI 消息有效）
+ * @param onDelete 点击删除按钮时触发，传入消息 ID
  */
 @Composable
-private fun MessageBubble(message: ChatMessage, stickers: List<StickerData> = emptyList()) {
+private fun MessageBubble(
+    message: ChatMessage,
+    stickers: List<StickerData> = emptyList(),
+    isSelected: Boolean = false,
+    onLongClick: () -> Unit = {},
+    onCopy: () -> Unit = {},
+    onRetry: () -> Unit = {},
+    onDelete: () -> Unit = {},
+) {
     val isUser = message.isFromUser
-    // 工具消息：简洁状态行（小字、灰色、左侧图标），不渲染气泡
+    // 工具消息：简洁状态行（小字、灰色、左侧图标），不渲染气泡，不支持长按操作
     if (message.isToolMessage) {
         Row(
             modifier = Modifier
@@ -1654,55 +1723,135 @@ private fun MessageBubble(message: ChatMessage, stickers: List<StickerData> = em
 
     // 用户消息右对齐，AI 消息左对齐
     val alignment = if (isUser) Alignment.End else Alignment.Start
+    // 气泡背景色
+    val bubbleColor = if (isUser)
+        MaterialTheme.colorScheme.primary
+    else
+        MaterialTheme.colorScheme.surfaceContainerHigh
+    val textColor = if (isUser)
+        MaterialTheme.colorScheme.onPrimary
+    else
+        MaterialTheme.colorScheme.onSurface
+    // 气泡圆角：选中时底部改为全圆角（操作栏在气泡内部），未选中时模仿微信尖角
+    val bubbleShape = if (isSelected) {
+        RoundedCornerShape(16.dp)
+    } else {
+        RoundedCornerShape(
+            topStart = 20.dp,
+            topEnd = 20.dp,
+            bottomStart = if (isUser) 20.dp else 4.dp,
+            bottomEnd = if (isUser) 4.dp else 20.dp,
+        )
+    }
 
     Column(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = alignment,
     ) {
-        Surface(
-            // 气泡圆角：用户右下直角，AI 左下直角（模仿微信气泡风格）
-            shape = RoundedCornerShape(
-                topStart = 20.dp,
-                topEnd = 20.dp,
-                bottomStart = if (isUser) 20.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 20.dp,
-            ),
-            color = if (isUser)
-                MaterialTheme.colorScheme.primary
-            else
-                MaterialTheme.colorScheme.surfaceContainerHigh,
-            tonalElevation = if (!isUser) 1.dp else 0.dp,
-        ) {
-            val bubbleModifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
-            val textColor = if (isUser)
-                MaterialTheme.colorScheme.onPrimary
-            else
-                MaterialTheme.colorScheme.onSurface
-
-            if (isUser) {
-                // 用户消息：纯文本
-                Text(
-                    message.text,
-                    modifier = bubbleModifier,
-                    style = MaterialTheme.typography.bodyMedium.copy(
-                        fontSize = 15.sp,
-                        lineHeight = 22.sp,
+        // 气泡容器：单一 Box + clip 保证圆角裁剪
+        // animateContentSize 让气泡在操作栏出现/消失时弹簧变形
+        Box(
+            modifier = Modifier
+                .clip(bubbleShape)
+                .background(bubbleColor)
+                .animateContentSize(
+                    animationSpec = spring(
+                        dampingRatio = 0.75f,
+                        stiffness = Spring.StiffnessMediumLow,
                     ),
-                    color = textColor,
                 )
-            } else {
-                // AI 消息：使用 MarkdownText 渲染 Markdown 格式
-                Log.d("MarkdownText", "MessageBubble AI msg(${message.text.take(50)}...) length=${message.text.length}")
-                Box(modifier = bubbleModifier) {
-                    MarkdownText(
-                        content = message.text,
+                .combinedClickable(
+                    onLongClick = onLongClick,
+                    onClick = {},
+                ),
+        ) {
+            // 不使用 fillMaxWidth —— 气泡宽度由文本内容决定，短消息不再撑满整行
+            Column {
+                // ── 消息正文 ──
+                val bubbleModifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                if (isUser) {
+                    Text(
+                        message.text,
+                        modifier = bubbleModifier,
                         style = MaterialTheme.typography.bodyMedium.copy(
                             fontSize = 15.sp,
                             lineHeight = 22.sp,
-                            color = textColor,
                         ),
-                        stickers = stickers,
+                        color = textColor,
                     )
+                } else {
+                    Log.d("MarkdownText", "MessageBubble AI msg(${message.text.take(50)}...) length=${message.text.length}")
+                    Box(modifier = bubbleModifier) {
+                        MarkdownText(
+                            content = message.text,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 15.sp,
+                                lineHeight = 22.sp,
+                                color = textColor,
+                            ),
+                            stickers = stickers,
+                        )
+                    }
+                }
+                // ── 操作栏（选中时显示，嵌入气泡内部底部）──
+                // 使用 AnimatedVisibility 实现淡入淡出 + 高度展开/收起
+                AnimatedVisibility(
+                    visible = isSelected,
+                    enter = fadeIn(tween(200)) + expandVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium)),
+                    exit = fadeOut(tween(150)) + shrinkVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium)),
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 8.dp, end = 4.dp, bottom = 4.dp),
+                        horizontalArrangement = Arrangement.End,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        // 复制按钮
+                        IconButton(
+                            onClick = onCopy,
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.ContentCopy,
+                                contentDescription = "复制",
+                                modifier = Modifier.size(16.dp),
+                                tint = if (isUser)
+                                    MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                                else
+                                    MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        // 重试按钮：仅 AI 消息
+                        if (!isUser) {
+                            IconButton(
+                                onClick = onRetry,
+                                modifier = Modifier.size(32.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Refresh,
+                                    contentDescription = "重试",
+                                    modifier = Modifier.size(16.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        // 删除按钮
+                        IconButton(
+                            onClick = onDelete,
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Delete,
+                                contentDescription = "删除",
+                                modifier = Modifier.size(16.dp),
+                                tint = if (isUser)
+                                    MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f)
+                                else
+                                    MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                            )
+                        }
+                    }
                 }
             }
         }
@@ -1769,12 +1918,12 @@ private fun StreamingMessageBubble(
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
             )
             Spacer(modifier = Modifier.width(6.dp))
-            // 打字指示点：一个微小的圆点
+            // 打字指示点：使用 tertiary 作为微弱装饰色
             Box(
                 modifier = Modifier
                     .size(6.dp)
                     .background(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.TEXT_SECONDARY),
+                        color = MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_SECONDARY),
                         shape = CircleShape,
                     ),
             )
@@ -1926,11 +2075,12 @@ private fun ConversationItem(
             )
         }
         if (isActive) {
+            // 当前对话确认标记（信息性状态使用 secondary）
             Icon(
                 Icons.Default.Check,
                 contentDescription = "当前对话",
                 modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.primary,
+                tint = MaterialTheme.colorScheme.secondary,
             )
             Spacer(modifier = Modifier.width(6.dp))
         }
@@ -2098,11 +2248,12 @@ private fun ConfigItem(
             )
         }
         if (isActive) {
+            // 当前配置确认标记（信息性状态使用 secondary）
             Icon(
                 Icons.Default.Check,
                 contentDescription = "当前使用",
                 modifier = Modifier.size(18.dp),
-                tint = MaterialTheme.colorScheme.primary,
+                tint = MaterialTheme.colorScheme.secondary,
             )
             Spacer(modifier = Modifier.width(6.dp))
         }
@@ -2216,7 +2367,10 @@ private fun PreferencesPanel(
                 shape = RoundedCornerShape(16.dp),
                 color = if (isAll) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.clickable { filterCategory = null },
+                modifier = Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { filterCategory = null },
             ) {
                 Text(
                     "全部",
@@ -2242,7 +2396,10 @@ private fun PreferencesPanel(
                         shape = RoundedCornerShape(16.dp),
                         color = if (isSelected) color
                         else MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.clickable { filterCategory = key },
+                        modifier = Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { filterCategory = key },
                     ) {
                         Text(
                             "$label ($count)",
@@ -2408,7 +2565,10 @@ private fun MemoriesPanel(
                 shape = RoundedCornerShape(16.dp),
                 color = if (isAll) MaterialTheme.colorScheme.primary
                 else MaterialTheme.colorScheme.surfaceVariant,
-                modifier = Modifier.clickable { filterCategory = null },
+                modifier = Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { filterCategory = null },
             ) {
                 Text(
                     "全部",
@@ -2425,9 +2585,13 @@ private fun MemoriesPanel(
                     val isSelected = filterCategory == key
                     Surface(
                         shape = RoundedCornerShape(16.dp),
-                        color = if (isSelected) MemoryItemColors[key] ?: MaterialTheme.colorScheme.primary
+                        // 记忆分类标签选中色：有专属色用专属色，否则 fallback 到 secondary
+                        color = if (isSelected) MemoryItemColors[key] ?: MaterialTheme.colorScheme.secondary
                         else MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.clickable { filterCategory = key },
+                        modifier = Modifier.clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                        ) { filterCategory = key },
                     ) {
                         Text(
                             "$label ($count)",

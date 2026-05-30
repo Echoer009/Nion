@@ -327,7 +327,7 @@ class CompanionViewModel(
      * Agent Loop 的最大迭代次数，防止 LLM 无限循环调用工具。
      * 正常场景下 2-3 次即可完成，10 次是非常安全的上限。
      */
-     private val maxAgentIterations = 10
+     private val maxAgentIterations = 25
 
     /**
      * 数据加载状态，true 表示正在从数据库加载（settings、消息、对话列表）。
@@ -1326,8 +1326,9 @@ class CompanionViewModel(
         isLoading = true
 
         // 首次发送消息时分配对话 ID，后续消息自动关联
+        // 由 Rust 核心生成纯数字递增 ID，替代 UUID 以减少 LLM 上下文 token 消耗
         if (currentConversationId == null) {
-            currentConversationId = UUID.randomUUID().toString()
+            currentConversationId = try { core.nextConversationId() } catch (_: Exception) { System.currentTimeMillis().toString() }
             try {
                 core.setSetting("current_conversation_id", currentConversationId!!)
             } catch (_: Exception) {}

@@ -119,8 +119,8 @@ fun GreetingOverlay(
             // 根据问候类型获取显示标题
             val title = GreetingEvent.getTitle(event.greetingType)
 
-            // 强调色固定 primary（温暖友好），无紧迫度渐变
-            val accentColor = MaterialTheme.colorScheme.primary
+            // 问候卡片强调色使用 tertiary（温暖友好的装饰色）
+            val accentColor = MaterialTheme.colorScheme.tertiary
             val cardColor = MaterialTheme.colorScheme.surface
             val onCardColor = MaterialTheme.colorScheme.onSurface
 
