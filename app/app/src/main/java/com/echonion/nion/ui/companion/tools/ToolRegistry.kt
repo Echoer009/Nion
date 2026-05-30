@@ -8,19 +8,25 @@ import org.json.JSONObject
  * 工具注册中心 —— 自动加载并管理所有 Agent 可用工具。
  *
  * 设计原则：
- * - **统一接口**：6 个工具按操作维度划分
+ * - **按页面注入**：不同导航页注入不同工具集，减少无关工具的 token 消耗
+ * - **统一接口**：基础工具按操作维度划分
  *   - query：查询（task/checklist/group/weather）
  *   - create：创建（task/checklist/group，支持批量）
  *   - update：更新（task/checklist/group，支持批量）
  *   - delete：删除（task/checklist/group，支持批量）
  *   - manage：结构性操作（move 移动 + reorder 排序）
  *   - memory：记忆（scope=preference 偏好规则 / scope=fact 事实记忆）
+ *   - settings：设置（主题配色控制，仅在设置页注入）
  * - **多格式适配**：自动将内部 Schema 转换为 OpenAI 和 Anthropic 的 tools 格式
+ * - **Per-route 缓存**：每个路由的工具集独立缓存，切换路由时使用对应缓存，命中 API 前缀缓存
  *
  * 使用方式：
  * ```
- * // 获取 OpenAI 格式的 tools 参数
- * val tools = ToolRegistry.toOpenAITools()
+ * // 按路由获取工具 JSON
+ * val tools = ToolRegistry.toOpenAITools("settings")
+ *
+ * // 获取所有工具（兼容旧接口）
+ * val allTools = ToolRegistry.toOpenAITools()
  *
  * // 根据名称查找工具
  * val tool = ToolRegistry.get("query")
@@ -29,10 +35,10 @@ import org.json.JSONObject
 object ToolRegistry {
 
     /**
-     * 所有已注册的工具列表。
-     * 6 个工具按操作维度划分，每个工具通过 entity_type/action/scope 等参数路由到具体操作。
+     * 所有页面共享的基础工具列表。
+     * 任务/清单/分组的 CRUD、移动排序、记忆管理。
      */
-    val all: List<Tool> = listOf(
+    val baseTools: List<Tool> = listOf(
         QueryTool,
         CreateTool,
         UpdateTool,
@@ -41,23 +47,49 @@ object ToolRegistry {
         MemoryTool,
     )
 
+    /**
+     * 各导航页额外注入的工具。
+     * key = 路由名（与 NavHost 中的 composable route 一致），
+     * value = 该页面额外注入的工具列表（叠加 baseTools）。
+     *
+     * 扩展新页面的专属工具只需在此 map 中添加一行。
+     */
+    private val pageTools: Map<String, List<Tool>> = mapOf(
+        "settings" to listOf(SettingsTool),
+    )
+
+    /**
+     * 所有已注册的工具列表（全部页面合集）。
+     * 用于按名称查找和向后兼容。
+     */
+    val all: List<Tool> = baseTools + pageTools.values.flatten().distinctBy { it.name }
+
     /** 按名称索引的查找表，O(1) 查询 */
     private val index: Map<String, Tool> = all.associateBy { it.name }
 
     /**
-     * 缓存的 OpenAI 格式 tools JSON 字符串。
-     * 工具列表在运行时不变，序列化结果可安全缓存，避免 JSONObject.toString() 的 key 顺序不稳定导致缓存失效。
+     * Per-route 缓存的 OpenAI 格式 tools JSON。
+     * key = 工具名称列表的逗号连接（如 "query,create,update,delete,manage,memory,settings"），
+     * value = 规范化序列化后的稳定 JSON 字符串。
+     * 每种工具组合只构建一次，后续直接从缓存取。
      */
-    private val cachedOpenAIToolsJson: String by lazy {
-        buildStableOpenAITools()
-    }
+    private val openAIToolsCache = mutableMapOf<String, String>()
 
     /**
-     * 缓存的 Anthropic 格式 tools JSON 字符串。
-     * 同理，运行时不变，缓存后保证每次请求的 tools 序列化完全一致。
+     * Per-route 缓存的 Anthropic 格式 tools JSON。
+     * 同理，每种工具组合缓存一份。
      */
-    private val cachedAnthropicToolsJson: String by lazy {
-        buildStableAnthropicTools()
+    private val anthropicToolsCache = mutableMapOf<String, String>()
+
+    /**
+     * 根据当前导航路由返回对应的工具列表。
+     *
+     * @param route 当前页面路由（如 "tasks"、"settings"），null 时返回基础工具
+     * @return 该页面可用的工具列表
+     */
+    fun toolsForRoute(route: String?): List<Tool> {
+        val extras = if (route != null) pageTools[route].orEmpty() else emptyList()
+        return baseTools + extras
     }
 
     /**
@@ -69,59 +101,45 @@ object ToolRegistry {
     fun get(name: String): Tool? = index[name]
 
     /**
-     * 生成 OpenAI 格式的 tools 参数数组。
+     * 生成指定路由的 OpenAI 格式 tools 参数数组。
      *
-     * 使用缓存的稳定 JSON 字符串重新解析为 JSONArray，保证每次调用的序列化结果完全一致。
-     * 这对于 DeepSeek Prefix Caching 等 API 级缓存至关重要 —— tools 是请求前缀的一部分，
-     * 如果 tools 的 JSON 字符串在请求间不一致，整个前缀缓存就会失效。
+     * 使用 per-route 缓存保证同一路由的 tools JSON 完全一致，命中 API 前缀缓存。
+     * 路由切换时命中不同的缓存条目，仅首次请求未缓存时需要重新构建。
      *
-     * 格式为 OpenAI Chat Completions API 要求的 tools 字段：
-     * ```json
-     * [
-     *   {
-     *     "type": "function",
-     *     "function": {
-     *       "name": "query",
-     *       "description": "查询数据...",
-     *       "parameters": { ... JSON Schema ... }
-     *     }
-     *   }
-     * ]
-     * ```
-     *
+     * @param route 当前页面路由，null 时返回基础工具
      * @return OpenAI 格式的工具定义数组
      */
-    fun toOpenAITools(): JSONArray = JSONArray(cachedOpenAIToolsJson)
+    fun toOpenAITools(route: String? = null): JSONArray {
+        val tools = toolsForRoute(route)
+        val cacheKey = tools.joinToString(",") { it.name }
+        val json = openAIToolsCache.getOrPut(cacheKey) {
+            buildStableOpenAITools(tools)
+        }
+        return JSONArray(json)
+    }
 
     /**
-     * 生成 Anthropic 格式的 tools 参数数组。
+     * 生成指定路由的 Anthropic 格式 tools 参数数组。
      *
-     * 使用缓存的稳定 JSON 字符串重新解析，保证序列化一致性。
-     *
-     * 格式为 Anthropic Messages API 要求的 tools 字段：
-     * ```json
-     * [
-     *   {
-     *     "name": "query",
-     *     "description": "查询数据...",
-     *     "input_schema": { ... JSON Schema ... }
-     *   }
-     * ]
-     * ```
-     *
+     * @param route 当前页面路由，null 时返回基础工具
      * @return Anthropic 格式的工具定义数组
      */
-    fun toAnthropicTools(): JSONArray = JSONArray(cachedAnthropicToolsJson)
+    fun toAnthropicTools(route: String? = null): JSONArray {
+        val tools = toolsForRoute(route)
+        val cacheKey = tools.joinToString(",") { it.name }
+        val json = anthropicToolsCache.getOrPut(cacheKey) {
+            buildStableAnthropicTools(tools)
+        }
+        return JSONArray(json)
+    }
 
     /**
      * 构建稳定的 OpenAI 格式 tools JSON 字符串。
-     * 所有工具的 schema 原始字符串（从 trimIndent 解析）在运行时是固定的。
-     * 使用 [JsonCanonicalizer] 对每个工具对象做 key 排序序列化，
-     * 保证 tools JSON 跨进程、跨调用完全一致，命中 DeepSeek Prefix Caching。
+     * 使用 [JsonCanonicalizer] 保证 key 排序一致性，命中 API 前缀缓存。
      */
-    private fun buildStableOpenAITools(): String {
+    private fun buildStableOpenAITools(tools: List<Tool>): String {
         val arr = JSONArray()
-        for (tool in all) {
+        for (tool in tools) {
             arr.put(JSONObject().apply {
                 put("type", "function")
                 put("function", JSONObject().apply {
@@ -131,17 +149,15 @@ object ToolRegistry {
                 })
             })
         }
-        // 使用规范化序列化替代 arr.toString()，避免 JSONObject 内部 HashMap 顺序不确定
         return JsonCanonicalizer.canonicalize(arr)
     }
 
     /**
      * 构建稳定的 Anthropic 格式 tools JSON 字符串。
-     * 同理使用 [JsonCanonicalizer] 保证 key 排序一致性。
      */
-    private fun buildStableAnthropicTools(): String {
+    private fun buildStableAnthropicTools(tools: List<Tool>): String {
         val arr = JSONArray()
-        for (tool in all) {
+        for (tool in tools) {
             arr.put(JSONObject().apply {
                 put("name", tool.name)
                 put("description", tool.description)

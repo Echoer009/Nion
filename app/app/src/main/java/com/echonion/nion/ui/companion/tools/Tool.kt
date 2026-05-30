@@ -18,6 +18,8 @@ enum class DataType {
     PREFERENCES,
     /** 用户记忆变更（memory 工具的 add/update/remove） → CompanionViewModel.refreshMemories() */
     MEMORIES,
+    /** 应用设置变更（主题配色切换/自定义） → NionApp 重新加载 ThemePalette */
+    SETTINGS,
 }
 
 /**

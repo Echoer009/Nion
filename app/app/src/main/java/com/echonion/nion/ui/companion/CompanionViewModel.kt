@@ -78,6 +78,13 @@ class CompanionViewModel(
 
     private val TAG = "NionAgent"
 
+    /**
+     * 当前导航路由（如 "tasks"、"settings"），决定注入哪些工具。
+     * 由 CompanionSidebar 从 NionApp 传入，每次路由切换时更新。
+     * null 时使用基础工具集（无页面专属工具）。
+     */
+    var currentRoute by mutableStateOf<String?>(null)
+
     /** 聊天消息列表，UI 通过 LazyColumn 渲染（仅包含用户可见的文本消息） */
     var messages by mutableStateOf<List<ChatMessage>>(emptyList())
         private set
@@ -1335,7 +1342,7 @@ class CompanionViewModel(
         // Turn N+1 的前缀 = Turn N 的完整消息 → DeepSeek Prefix Caching 命中率最大化
         conversationHistory.add(JSONObject().apply {
             put("role", "user")
-            put("content", "$text\n\n[当前时间：${java.time.LocalDateTime.now()}]")
+            put("content", "$text\n\n[时间：${java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))}]")
         })
 
         Log.d(TAG, "[sendMessage] 启动 AgentLoop → msgCount=${messages.size}")
@@ -1392,6 +1399,16 @@ class CompanionViewModel(
             "memory" -> {
                 val scope = try { JSONObject(argumentsJson).optString("scope", "fact") } catch (_: Exception) { "fact" }
                 if (scope == "preference") "正在记录偏好..." else "$companionName 记住了一些事情..."
+            }
+            "settings" -> {
+                val action = try { JSONObject(argumentsJson).optString("action", "") } catch (_: Exception) { "" }
+                when (action) {
+                    "get_theme" -> "正在查看配色..."
+                    "switch_theme" -> "正在切换主题..."
+                    "update_colors" -> "正在调整配色..."
+                    "reset_theme" -> "正在恢复默认..."
+                    else -> "正在调整设置..."
+                }
             }
             else -> "正在执行操作..."
         }
@@ -1489,6 +1506,7 @@ class CompanionViewModel(
                     if (scope == "preference") ToolPhrasePool.pick(companionStyle, "remember")
                     else ToolPhrasePool.pick(companionStyle, "memory")
                 }
+                "settings" -> ToolPhrasePool.pick(companionStyle, "settings")
                 else -> ToolPhrasePool.pick(companionStyle, "create_generic")
             }
         } catch (_: Exception) {
@@ -1526,6 +1544,7 @@ class CompanionViewModel(
                 apiKey = apiKey,
                 model = model,
                 messages = apiMessages,
+                currentRoute = currentRoute,
                 onTextDelta = { delta ->
                     // 追加到 StringBuilder（O(1) 均摊），替代 O(n) 的字符串拼接
                     synchronized(streamingBuilderLock) { streamingBuilder.append(delta) }
@@ -1777,19 +1796,12 @@ class CompanionViewModel(
             timestamp = now,
         )
         requestSave()
-        // 同步追加到 API 对话历史，优先使用原始消息（保留 reasoning_content 等）
-        if (rawMessage != null) {
-            conversationHistory.add(rawMessage)
-        } else {
-            conversationHistory.add(JSONObject().apply {
-                put("role", "assistant")
-                put("content", text)
-                // DeepSeek 推理模型要求回传 reasoning_content
-                if (!reasoningContent.isNullOrEmpty()) {
-                    put("reasoning_content", reasoningContent)
-                }
-            })
-        }
+        // 追加到 API 对话历史，不回传 reasoning_content 以节省上下文
+        // V4 等非推理模型不需要回传；R1 等推理模型的思考内容回传会占用大量 token
+        conversationHistory.add(JSONObject().apply {
+            put("role", "assistant")
+            put("content", text)
+        })
     }
 
     /**
@@ -1820,12 +1832,9 @@ class CompanionViewModel(
         }
         conversationHistory.add(JSONObject().apply {
             put("role", "assistant")
-            put("content", null) // 有 tool_calls 时 content 通常为 null
+            put("content", null)
             put("tool_calls", toolCallsJson)
-            // DeepSeek 推理模型要求回传 reasoning_content
-            if (!reasoningContent.isNullOrEmpty()) {
-                put("reasoning_content", reasoningContent)
-            }
+            // 不回传 reasoning_content，节省上下文 token
         })
     }
 
@@ -1852,7 +1861,7 @@ class CompanionViewModel(
      * 结构（适配 DeepSeek Prefix Caching）：
      * 1. system 消息（系统提示词 + 用户偏好）—— 稳定前缀，可被缓存
      * 2. conversationHistory 中的所有消息（user / assistant / tool）
-     * 3. system 消息（当前时间）—— 可变部分放在末尾，不影响前缀缓存
+     *    - 已过去的 tool result 会被压缩为简短摘要，减少上下文占用
      *
      * @return 完整的 API 消息列表，每个元素是 JSONObject
      */
@@ -1907,13 +1916,137 @@ class CompanionViewModel(
             put("content", stableContent)
         })
 
-        // 追加完整的对话历史（包含工具调用和结果）
-        // 对话历史保持连续增长：[user1, assistant1, user2, assistant2, ...]
-        // 当前时间已注入到每条 user 消息的 content 中，无需额外的 system 消息
-        // 这样 Turn N+1 的消息前缀完整匹配 Turn N 的全部消息，最大化 DeepSeek Prefix Caching 命中率
-        apiMessages.addAll(conversationHistory)
+        // 追加对话历史，对旧的 tool result 进行压缩以节省上下文
+        // 压缩规则：如果 tool result 后面跟着 assistant 回复，说明 AI 已经处理完该结果，
+        // 后续请求只需要知道操作是否成功，不需要完整数据
+        val compressedHistory = compressToolResults(conversationHistory)
+        apiMessages.addAll(compressedHistory)
 
         return apiMessages
+    }
+
+    /**
+     * 压缩对话历史中的旧工具结果，减少上下文 token 消耗。
+     *
+     * AI 在 agent loop 中拿到工具结果后会生成回复。回复一旦生成，
+     * 历史中的完整工具结果数据对后续对话就不再有价值——AI 的回复已经包含了关键信息。
+     * 将旧的 tool result content 替换为简短摘要，可大幅减少 token。
+     *
+     * 判断"旧"的逻辑：从后往前扫描，最后一个 tool result 保留完整（可能是当前 agent loop 的），
+     * 更早的 tool result 全部压缩。
+     *
+     * 不修改原始 conversationHistory，返回新的列表。
+     */
+    private fun compressToolResults(history: List<JSONObject>): List<JSONObject> {
+        if (history.size <= 3) return history
+
+        // 找到最后一个 tool 消息的位置
+        // 从该位置往前的所有 tool 消息都压缩（AI 已处理过）
+        // 该位置及之后的 tool 消息保留完整（可能是当前 agent loop 的）
+        var lastToolIndex = -1
+        for (i in history.lastIndex downTo 0) {
+            if (history[i].optString("role") == "tool") {
+                lastToolIndex = i
+                break
+            }
+        }
+
+        // 没有工具结果或只有一个，不需要压缩
+        if (lastToolIndex <= 0) return history
+
+        return history.mapIndexed { index, msg ->
+            // 只压缩最后一个 tool 之前的旧 tool result
+            if (index < lastToolIndex && msg.optString("role") == "tool") {
+                val compressed = compressToolContent(msg.optString("content", ""))
+                JSONObject().apply {
+                    put("role", "tool")
+                    put("tool_call_id", msg.optString("tool_call_id", ""))
+                    put("content", compressed)
+                }
+            } else {
+                msg
+            }
+        }
+    }
+
+    /**
+     * 将工具结果的 JSON 内容压缩为简短摘要。
+     *
+     * 保留 success/error 状态和关键信息（如创建的实体 ID/名称），
+     * 去掉大块数据（如完整的任务列表、色板数据）。
+     *
+     * @param content 原始工具结果 JSON 字符串
+     * @return 压缩后的简短字符串
+     */
+    private fun compressToolContent(content: String): String {
+        return try {
+            val json = JSONObject(content)
+            // 如果本身就很短（<100字符），不需要压缩
+            if (content.length < 100) return content
+
+            val success = json.optBoolean("success", true)
+            if (!success) {
+                // 错误结果保留错误信息
+                val error = json.optString("error", "unknown error")
+                return """{"success":false,"error":"$error"}"""
+            }
+
+            // 成功结果：提取实体类型和数量，去掉大数据
+            val sb = StringBuilder("{\"success\":true")
+            val entityType = json.optString("entity_type", "")
+            if (entityType.isNotEmpty()) sb.append(",\"entity_type\":\"$entityType\"")
+
+            // 提取数量信息
+            val count = json.optInt("count", -1)
+            if (count >= 0) sb.append(",\"count\":$count")
+            val successCount = json.optInt("success_count", -1)
+            if (successCount >= 0) sb.append(",\"success_count\":$successCount")
+
+            // 提取 message（通常包含简短的操作描述）
+            val message = json.optString("message", "")
+            if (message.isNotEmpty()) sb.append(",\"message\":\"$message\"")
+
+            // 提取创建/更新返回的实体 ID（方便后续引用）
+            val taskObj = json.optJSONObject("task")
+            if (taskObj != null) {
+                sb.append(",\"id\":\"${taskObj.optString("id", "")}\"")
+                sb.append(",\"title\":\"${taskObj.optString("title", "")}\"")
+            }
+            val checklistObj = json.optJSONObject("checklist")
+            if (checklistObj != null) {
+                sb.append(",\"id\":\"${checklistObj.optString("id", "")}\"")
+                sb.append(",\"name\":\"${checklistObj.optString("name", "")}\"")
+            }
+            val groupObj = json.optJSONObject("group")
+            if (groupObj != null) {
+                sb.append(",\"id\":\"${groupObj.optString("id", "")}\"")
+                sb.append(",\"name\":\"${groupObj.optString("name", "")}\"")
+            }
+
+            // 记忆工具：保留 scope 和 item 摘要
+            val scope = json.optString("scope", "")
+            if (scope.isNotEmpty()) sb.append(",\"scope\":\"$scope\"")
+            val item = json.optJSONObject("item")
+            if (item != null) {
+                sb.append(",\"item_id\":\"${item.optString("id", "")}\"")
+            }
+
+            // 设置工具：只保留更新了几个槽位
+            val updatedKeys = json.optJSONArray("updated_keys")
+            if (updatedKeys != null) {
+                sb.append(",\"updated_count\":${updatedKeys.length()}")
+            }
+            val updated = json.optJSONObject("updated")
+            if (updated != null) {
+                sb.append(",\"updated_count\":${updated.length()}")
+            }
+
+            sb.append("}")
+            sb.toString()
+        } catch (_: Exception) {
+            // JSON 解析失败，截断原始内容
+            if (content.length > 80) content.take(80) + "..." else content
+        }
     }
 
     companion object {

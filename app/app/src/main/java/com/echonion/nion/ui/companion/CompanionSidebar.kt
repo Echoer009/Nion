@@ -106,6 +106,7 @@ import com.echonion.nion.ui.companion.sticker.StickersPanel
 import com.echonion.nion.ui.companion.tools.MemoryTool
 import com.echonion.nion.ui.companion.tools.ToolPhrasePool
 import com.echonion.nion.ui.task.WheelSpinner
+import com.echonion.nion.ui.theme.NionAlpha
 import com.echonion.nion.ui.theme.NionColors
 import com.echonion.nion.util.BitmapUtils
 import androidx.compose.ui.platform.LocalDensity
@@ -147,9 +148,15 @@ fun CompanionSidebar(
     onSidebarDrag: (Float) -> Unit,
     onSidebarDragStopped: () -> Unit,
     isVisible: Boolean = false,
+    currentRoute: String? = null,
     viewModel: CompanionViewModel = viewModel(factory = CompanionViewModel.Factory),
     modifier: Modifier = Modifier,
 ) {
+
+    // 同步当前路由到 ViewModel，ViewModel 据此决定注入哪些工具给 AI
+    LaunchedEffect(currentRoute) {
+        viewModel.currentRoute = currentRoute
+    }
 
     // 面板当前模式：null=自动根据 API 配置决定，其余为手动切换的面板
     var panelMode by remember { mutableStateOf<String?>(null) }
@@ -575,7 +582,7 @@ private fun ProfileContent(
             Text(
                 "点击更换头像",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
             )
         }
 
@@ -1061,7 +1068,7 @@ private fun ExpandableReminderCard(
                                 description,
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant
-                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                             )
                         }
                         // 开关（点击开关不触发展开，只切换开关）
@@ -1200,7 +1207,7 @@ private fun PreferenceItem(
 
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
@@ -1212,7 +1219,7 @@ private fun PreferenceItem(
             // 分类标签 —— 圆角小色块
             Surface(
                 shape = RoundedCornerShape(4.dp),
-                color = color.copy(alpha = 0.15f),
+                color = color.copy(alpha = NionAlpha.BG_DECORATION),
                 modifier = Modifier.padding(end = 8.dp),
             ) {
                 Text(
@@ -1239,7 +1246,7 @@ private fun PreferenceItem(
                     Icons.Default.Close,
                     contentDescription = "删除偏好",
                     modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                 )
             }
         }
@@ -1476,7 +1483,7 @@ private fun ChatContent(
                         Text(
                             "和 ${viewModel.companionName} 说点什么吧",
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                         )
                     }
                 }
@@ -1523,7 +1530,7 @@ private fun ChatContent(
                         Text(
                             statusText,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
                         )
                     }
                 }
@@ -1573,7 +1580,7 @@ private fun ChatContent(
                             if (inputText.isEmpty()) {
                                 Text(
                                     "说点什么...",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                                 )
                             }
                             innerTextField()
@@ -1591,7 +1598,7 @@ private fun ChatContent(
                         tint = if (inputText.isNotBlank() && !isLoading)
                             MaterialTheme.colorScheme.primary
                         else
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
                         modifier = Modifier.size(20.dp),
                     )
                 }
@@ -1625,21 +1632,21 @@ private fun MessageBubble(message: ChatMessage, stickers: List<StickerData> = em
                 Text(
                     "→",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                 )
             } else {
                 // 执行中：显示加载指示器
                 CircularProgressIndicator(
                     modifier = Modifier.size(12.dp),
                     strokeWidth = 1.5.dp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                 )
             }
             Spacer(modifier = Modifier.width(8.dp))
             Text(
                 message.text,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
             )
         }
         return
@@ -1704,7 +1711,7 @@ private fun MessageBubble(message: ChatMessage, stickers: List<StickerData> = em
         Text(
             message.timestamp,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
         )
     }
 }
@@ -1759,7 +1766,7 @@ private fun StreamingMessageBubble(
             Text(
                 timestamp,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
             )
             Spacer(modifier = Modifier.width(6.dp))
             // 打字指示点：一个微小的圆点
@@ -1767,7 +1774,7 @@ private fun StreamingMessageBubble(
                 modifier = Modifier
                     .size(6.dp)
                     .background(
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f),
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.TEXT_SECONDARY),
                         shape = CircleShape,
                     ),
             )
@@ -1842,13 +1849,13 @@ private fun HistoryPanel(
                     Text(
                         "暂无历史记录",
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
                         "点击聊天界面的 + 按钮开始新对话，\n当前对话会自动保存到历史记录。",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTLE),
                         textAlign = TextAlign.Center,
                         modifier = Modifier.padding(horizontal = 16.dp),
                     )
@@ -1888,8 +1895,8 @@ private fun ConversationItem(
             .fillMaxWidth()
             .clickable { onSelect() }
             .background(
-                if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-                else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f),
+                if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = NionAlpha.BG_TAB_ACTIVE)
+                else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = NionAlpha.TEXT_HINT),
                 shape = RoundedCornerShape(12.dp),
             )
             .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -1915,7 +1922,7 @@ private fun ConversationItem(
             Text(
                 "$roundCount 轮对话 · ${conversation.updatedAt.take(10)}",
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
             )
         }
         if (isActive) {
@@ -1935,7 +1942,7 @@ private fun ConversationItem(
                 Icons.Default.Delete,
                 contentDescription = "删除对话",
                 modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTLE),
             )
         }
     }
@@ -2007,7 +2014,7 @@ private fun SwitchProviderPanel(
                 Text(
                     "暂无已保存配置",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                 )
             }
         } else {
@@ -2029,7 +2036,7 @@ private fun SwitchProviderPanel(
             // 底部新增按钮 —— 全宽，分割线上方
             Spacer(modifier = Modifier.height(12.dp))
             HorizontalDivider(
-                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = NionAlpha.BG_SUBTLE),
             )
             Row(
                 modifier = Modifier
@@ -2070,8 +2077,8 @@ private fun ConfigItem(
             .fillMaxWidth()
             .clickable { onSelect() }
             .background(
-                if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.25f)
-                else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.4f),
+                if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = NionAlpha.BG_TAB_ACTIVE)
+                else MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = NionAlpha.TEXT_HINT),
                 shape = RoundedCornerShape(12.dp),
             )
             .padding(horizontal = 14.dp, vertical = 12.dp),
@@ -2087,7 +2094,7 @@ private fun ConfigItem(
             Text(
                 config.model,
                 style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
             )
         }
         if (isActive) {
@@ -2104,10 +2111,10 @@ private fun ConfigItem(
             modifier = Modifier.size(28.dp),
         ) {
             Icon(
-                Icons.Default.Delete,
-                contentDescription = "删除配置",
-                modifier = Modifier.size(16.dp),
-                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f),
+                    Icons.Default.Delete,
+                    contentDescription = "删除配置",
+                    modifier = Modifier.size(16.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTLE),
             )
         }
     }
@@ -2171,7 +2178,7 @@ private fun PreferencesPanel(
                 Text(
                     if (totalCount == 0) "暂无偏好" else "共 $totalCount 条偏好",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                 )
             }
             // 右上角添加偏好按钮
@@ -2191,7 +2198,7 @@ private fun PreferencesPanel(
         Text(
             "AI 会自动记住你表达的偏好，你也可以手动添加",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
         )
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -2265,19 +2272,19 @@ private fun PreferencesPanel(
                     Icons.Outlined.Bookmarks,
                     contentDescription = null,
                     modifier = Modifier.size(48.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.BG_VERY_SUBTLE),
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     "还没有任何偏好",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     "和 ${viewModel.companionName} 聊天时，AI 会自动记住你的偏好",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.BG_SUBTLE),
                 )
             }
         } else {
@@ -2288,7 +2295,7 @@ private fun PreferencesPanel(
                 Text(
                     "该分类下暂无偏好",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
                     modifier = Modifier.padding(vertical = 16.dp),
                 )
             } else {
@@ -2372,7 +2379,7 @@ private fun MemoriesPanel(
                 Text(
                     if (totalCount == 0) "暂无记忆" else "共 $totalCount 条记忆",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                 )
             }
         }
@@ -2383,7 +2390,7 @@ private fun MemoriesPanel(
         Text(
             "AI 会在对话中主动记录关于你的信息，你也可以在这里管理这些记忆",
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
         )
 
         Spacer(modifier = Modifier.height(12.dp))
@@ -2450,19 +2457,19 @@ private fun MemoriesPanel(
                     Icons.Outlined.AutoAwesome,
                     contentDescription = null,
                     modifier = Modifier.size(48.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.2f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.BG_VERY_SUBTLE),
                 )
                 Spacer(modifier = Modifier.height(12.dp))
                 Text(
                     "还没有任何记忆",
                     style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
                     "和 ${viewModel.companionName} 聊天时，AI 会自动记住关于你的信息",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.BG_SUBTLE),
                 )
             }
         } else {
@@ -2473,7 +2480,7 @@ private fun MemoriesPanel(
                 Text(
                     "该分类下暂无记忆",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
                     modifier = Modifier.padding(vertical = 16.dp),
                 )
             } else {
@@ -2531,7 +2538,7 @@ private fun MemoryItem(
 
     Surface(
         shape = RoundedCornerShape(8.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
         modifier = Modifier.fillMaxWidth(),
     ) {
         Row(
@@ -2543,7 +2550,7 @@ private fun MemoryItem(
             // 分类标签 —— 圆角小色块
             Surface(
                 shape = RoundedCornerShape(4.dp),
-                color = color.copy(alpha = 0.15f),
+                color = color.copy(alpha = NionAlpha.BG_DECORATION),
                 modifier = Modifier.padding(end = 8.dp),
             ) {
                 Text(
@@ -2566,7 +2573,7 @@ private fun MemoryItem(
                     Text(
                         "预期至 $expiresHint",
                         style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
                     )
                 }
             }
@@ -2580,7 +2587,7 @@ private fun MemoryItem(
                     Icons.Default.Close,
                     contentDescription = "删除记忆",
                     modifier = Modifier.size(14.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                 )
             }
         }

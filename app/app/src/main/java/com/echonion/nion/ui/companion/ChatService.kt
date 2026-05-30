@@ -65,21 +65,38 @@ val builtInProviders = listOf(
 object ChatService {
 
     /**
-     * 缓存的 OpenAI tools JSON 字符串片段。
-     * 从 ToolRegistry 获取后缓存，保证每次请求的 tools 部分完全一致。
-     * 这是 API Prefix Caching 的关键 —— 请求前缀中的 tools 如果每次不同，缓存就无法命中。
+     * Per-route 缓存的 OpenAI tools JSON 字符串。
+     * key = 工具名称列表的逗号连接，value = 规范化序列化后的稳定 JSON。
+     * 每种工具组合（即每个路由）只构建一次，后续直接从缓存取，命中 API 前缀缓存。
      */
-    private val cachedOpenAIToolsJson: String by lazy {
-        // 使用规范化序列化，保证 tools JSON 的 key 顺序跨进程一致
-        JsonCanonicalizer.canonicalize(ToolRegistry.toOpenAITools())
+    private val cachedOpenAIToolsJson: MutableMap<String, String> = mutableMapOf()
+
+    /**
+     * Per-route 缓存的 Anthropic tools JSON 字符串。
+     */
+    private val cachedAnthropicToolsJson: MutableMap<String, String> = mutableMapOf()
+
+    /**
+     * 获取指定路由的 OpenAI tools JSON 缓存。
+     * 从 ToolRegistry 获取对应路由的工具集后缓存，保证同一路由的 tools 序列化完全一致。
+     */
+    private fun getOpenAIToolsJson(route: String?): String {
+        val tools = ToolRegistry.toolsForRoute(route)
+        val key = tools.joinToString(",") { it.name }
+        return cachedOpenAIToolsJson.getOrPut(key) {
+            JsonCanonicalizer.canonicalize(ToolRegistry.toOpenAITools(route))
+        }
     }
 
     /**
-     * 缓存的 Anthropic tools JSON 字符串片段。
-     * 同理，缓存后保证每次请求的 tools 序列化完全一致。
+     * 获取指定路由的 Anthropic tools JSON 缓存。
      */
-    private val cachedAnthropicToolsJson: String by lazy {
-        JsonCanonicalizer.canonicalize(ToolRegistry.toAnthropicTools())
+    private fun getAnthropicToolsJson(route: String?): String {
+        val tools = ToolRegistry.toolsForRoute(route)
+        val key = tools.joinToString(",") { it.name }
+        return cachedAnthropicToolsJson.getOrPut(key) {
+            JsonCanonicalizer.canonicalize(ToolRegistry.toAnthropicTools(route))
+        }
     }
 
     /**
@@ -300,11 +317,12 @@ object ChatService {
         apiKey: String,
         model: String,
         messages: List<JSONObject>,
+        currentRoute: String? = null,
     ): Result<ChatResponse> = withContext(Dispatchers.IO) {
         try {
             when (provider.apiType) {
-                ApiType.OPENAI_COMPATIBLE -> chatOpenAIWithTools(provider.baseUrl, apiKey, model, messages)
-                ApiType.ANTHROPIC -> chatAnthropicWithTools(provider.baseUrl, apiKey, model, messages)
+                ApiType.OPENAI_COMPATIBLE -> chatOpenAIWithTools(provider.baseUrl, apiKey, model, messages, currentRoute)
+                ApiType.ANTHROPIC -> chatAnthropicWithTools(provider.baseUrl, apiKey, model, messages, currentRoute)
             }
         } catch (e: Exception) {
             Result.failure(Exception("网络请求异常: ${e.message}", e))
@@ -324,6 +342,7 @@ object ChatService {
      * @param apiKey      API 密钥
      * @param model       模型名称
      * @param messages    消息列表
+     * @param currentRoute 当前导航路由，决定注入哪些工具（null=基础工具）
      * @param onTextDelta 每次收到文本增量时的回调（运行在 IO 线程，调用方自行切换线程）
      * @return 流式完成后的完整 [ChatResponse]
      */
@@ -332,12 +351,13 @@ object ChatService {
         apiKey: String,
         model: String,
         messages: List<JSONObject>,
+        currentRoute: String? = null,
         onTextDelta: (String) -> Unit,
     ): Result<ChatResponse> = withContext(Dispatchers.IO) {
         try {
             when (provider.apiType) {
-                ApiType.OPENAI_COMPATIBLE -> chatStreamOpenAI(provider.baseUrl, apiKey, model, messages, onTextDelta)
-                ApiType.ANTHROPIC -> chatStreamAnthropic(provider.baseUrl, apiKey, model, messages, onTextDelta)
+                ApiType.OPENAI_COMPATIBLE -> chatStreamOpenAI(provider.baseUrl, apiKey, model, messages, currentRoute, onTextDelta)
+                ApiType.ANTHROPIC -> chatStreamAnthropic(provider.baseUrl, apiKey, model, messages, currentRoute, onTextDelta)
             }
         } catch (e: Exception) {
             Result.failure(Exception("流式网络请求异常: ${e.message}", e))
@@ -370,6 +390,7 @@ object ChatService {
         apiKey: String,
         model: String,
         messages: List<JSONObject>,
+        currentRoute: String? = null,
         onTextDelta: (String) -> Unit,
     ): Result<ChatResponse> {
         val url = "$baseUrl/chat/completions"
@@ -379,7 +400,7 @@ object ChatService {
         val messagesArray = JSONArray().apply {
             for (msg in messages) put(msg)
         }
-        val bodyStr = buildStableOpenAIBody(model, messagesArray, cachedOpenAIToolsJson, stream = true)
+        val bodyStr = buildStableOpenAIBody(model, messagesArray, getOpenAIToolsJson(currentRoute), stream = true)
 
         Log.d("ChatService", "OpenAI stream request: ${bodyStr.take(500)}")
 
@@ -544,6 +565,7 @@ object ChatService {
         apiKey: String,
         model: String,
         messages: List<JSONObject>,
+        currentRoute: String? = null,
         onTextDelta: (String) -> Unit,
     ): Result<ChatResponse> {
         val url = "$baseUrl/messages"
@@ -566,7 +588,7 @@ object ChatService {
             model = model,
             systemPrompt = systemPrompt,
             messages = conversationMessages,
-            toolsJson = cachedAnthropicToolsJson,
+            toolsJson = getAnthropicToolsJson(currentRoute),
             stream = true,
             enableCacheControl = true,
         )
@@ -741,6 +763,7 @@ object ChatService {
         apiKey: String,
         model: String,
         messages: List<JSONObject>,
+        currentRoute: String? = null,
     ): Result<ChatResponse> {
         val url = URL("$baseUrl/chat/completions")
         val connection = (url.openConnection() as HttpURLConnection).apply {
@@ -756,7 +779,7 @@ object ChatService {
         val messagesArray = JSONArray().apply {
             for (msg in messages) put(msg)
         }
-        val bodyStr = buildStableOpenAIBody(model, messagesArray, cachedOpenAIToolsJson, stream = false)
+        val bodyStr = buildStableOpenAIBody(model, messagesArray, getOpenAIToolsJson(currentRoute), stream = false)
 
         Log.d("ChatService", "OpenAI request body: ${bodyStr.take(2000)}")
 
@@ -830,6 +853,7 @@ object ChatService {
         apiKey: String,
         model: String,
         messages: List<JSONObject>,
+        currentRoute: String? = null,
     ): Result<ChatResponse> {
         val url = URL("$baseUrl/messages")
         val connection = (url.openConnection() as HttpURLConnection).apply {
@@ -863,7 +887,7 @@ object ChatService {
             model = model,
             systemPrompt = systemPrompt,
             messages = conversationMessages,
-            toolsJson = cachedAnthropicToolsJson,
+            toolsJson = getAnthropicToolsJson(currentRoute),
             stream = false,
             enableCacheControl = true,
         )

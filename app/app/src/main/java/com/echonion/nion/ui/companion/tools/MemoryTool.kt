@@ -33,14 +33,9 @@ import uniffi.nion_core.NionCore
 object MemoryTool : Tool {
     override val name = "memory"
     override val affectsData = setOf(DataType.PREFERENCES, DataType.MEMORIES)
-    override val description = "统一记忆工具，记住用户的偏好规则和事实性信息。" +
-        "scope=preference 时记录 AI 行为偏好，如不要使用 emoji。" +
-        "scope=fact 时记录关于用户的事实性信息，如用户是大三学生。" +
-        "action=add 添加记忆需传 content 和 category，action=list 列出记忆可按 category 筛选，" +
-        "action=update 更新记忆内容需传 id 和 content 且仅 fact 支持，action=remove 删除记忆需传 id。" +
-        "preference 分类：style/behavior/format/other；" +
-        "fact 分类：identity/study/work/hobby/habit/health/emotion/goal/schedule/social/location/pet/context/other。" +
-        "用户表达不满或提出习惯性要求时用 preference，对话中透露个人信息或当前状态时主动用 fact 记录。"
+    override val description = "记忆工具。scope=preference: AI行为偏好(如不用emoji)；scope=fact: 用户事实(如大三学生)。" +
+        "action=add(需content+category)/list/update(仅fact)/remove(需id)。" +
+        "preference分类: style/behavior/format/other；fact分类: identity/study/work/hobby/habit/health/emotion/goal/schedule/social/location/pet/context/other。"
 
     /** preference scope 的 setting key，用于在 Rust 层 settings 表中读写偏好数据 */
     const val PREFS_SETTING_KEY = "companion_user_preferences"
@@ -100,34 +95,17 @@ object MemoryTool : Tool {
         "properties": {
             "scope": {
                 "type": "string",
-                "enum": ["preference", "fact"],
-                "description": "记忆类型：preference=AI 行为偏好如不要用 emoji，fact=关于用户的事实如用户是大三学生"
+                "enum": ["preference", "fact"]
             },
             "action": {
                 "type": "string",
-                "enum": ["add", "list", "remove", "update"],
-                "description": "操作类型：add=添加, list=列出, update=更新内容仅 fact 支持, remove=删除"
+                "enum": ["add", "list", "remove", "update"]
             },
-            "content": {
-                "type": "string",
-                "description": "记忆或偏好内容"
-            },
-            "category": {
-                "type": "string",
-                "description": "分类。preference 可选 style/behavior/format/other，fact 可选 identity/study/work/hobby/habit/health/emotion/goal/schedule/social/location/pet/context/other"
-            },
-            "id": {
-                "type": "string",
-                "description": "记忆或偏好的 ID，指定要操作的条目"
-            },
-            "expires_hint": {
-                "type": "string",
-                "description": "记忆的预期过期时间，格式为日期字符串如 2026-06-10，适用于 context 等短期记忆，长期记忆不需要此字段"
-            },
-            "filter_category": {
-                "type": "string",
-                "description": "按分类筛选，不传则返回所有条目"
-            }
+            "content": { "type": "string" },
+            "category": { "type": "string" },
+            "id": { "type": "string" },
+            "expires_hint": { "type": "string" },
+            "filter_category": { "type": "string" }
         },
         "required": ["scope", "action"]
     }

@@ -3,6 +3,7 @@ package com.echonion.nion.ui.companion.tools
 import com.echonion.nion.NionApp
 import com.echonion.nion.ui.companion.weather.FullWeatherData
 import com.echonion.nion.ui.companion.weather.WeatherService
+import com.echonion.nion.ui.companion.weather.aqiDescription
 import com.echonion.nion.ui.companion.weather.weatherDescription
 import org.json.JSONArray
 import org.json.JSONObject
@@ -18,27 +19,31 @@ import uniffi.nion_core.TaskData
 
 /**
  * 将 [TaskData] 序列化为 JSON 对象。
- * 所有字段都包含在内，Optional 字段为 null 时输出 JSON null。
+ * 只输出非空字段，跳过 null 值和默认值以减少 token 消耗。
  *
  * @param task UniFFI 生成的任务数据记录
- * @return 包含完整任务信息的 JSON 对象
+ * @return 包含任务关键信息的 JSON 对象（null 字段已省略）
  */
 fun taskToJson(task: TaskData): JSONObject = JSONObject().apply {
     put("id", task.id)
     put("title", task.title)
-    put("description", task.description ?: JSONObject.NULL)
-    put("priority", task.priority)
     put("status", task.status)
-    put("reminder", task.reminder ?: JSONObject.NULL)
-    put("parent_id", task.parentId ?: JSONObject.NULL)
-    put("category_id", task.categoryId ?: JSONObject.NULL)
-    put("group_id", task.groupId ?: JSONObject.NULL)
-    put("created_at", task.createdAt)
-    put("updated_at", task.updatedAt)
-    put("completed_at", task.completedAt ?: JSONObject.NULL)
-    put("focus_seconds", task.focusSeconds)
-    put("recurrence_rule", task.recurrenceRule ?: JSONObject.NULL)
-    put("recurrence_reminder_time", task.recurrenceReminderTime ?: JSONObject.NULL)
+    put("priority", task.priority)
+    // description: 非空时才输出
+    if (task.description != null) put("description", task.description)
+    // reminder: 非空时才输出
+    if (task.reminder != null) put("reminder", task.reminder)
+    // 关联 ID: 非空时才输出
+    if (task.parentId != null) put("parent_id", task.parentId)
+    if (task.categoryId != null) put("category_id", task.categoryId)
+    if (task.groupId != null) put("group_id", task.groupId)
+    // focus_seconds: 仅非零时输出（0 是默认值）
+    if (task.focusSeconds > 0) put("focus_seconds", task.focusSeconds)
+    // 循环相关: 非空时才输出
+    if (task.recurrenceRule != null) put("recurrence_rule", task.recurrenceRule)
+    if (task.recurrenceReminderTime != null) put("recurrence_reminder_time", task.recurrenceReminderTime)
+    // completed_at: 仅已完成时输出
+    if (task.completedAt != null) put("completed_at", task.completedAt)
 }
 
 /**
@@ -87,9 +92,7 @@ fun groupToJson(group: GroupData): JSONObject = JSONObject().apply {
     put("id", group.id)
     put("name", group.name)
     put("checklist_id", group.checklistId)
-    put("color", group.color ?: JSONObject.NULL)
-    put("sort_order", group.sortOrder)
-    put("created_at", group.createdAt)
+    if (group.color != null) put("color", group.color)
 }
 
 /**
@@ -128,10 +131,8 @@ fun groupListToJson(groups: List<GroupData>): JSONArray = JSONArray().apply {
 object QueryTool : Tool {
     override val name = "query"
     override val affectsData = emptySet<DataType>()
-    override val description = "查询数据。通过 entity_type 指定查询类型：task=任务, checklist=清单, group=分组, weather=天气。" +
-        "task 支持 id 查单个、category_id 按清单筛选、parent_id 查子任务；" +
-        "checklist 返回所有清单；group 需传 checklist_id 查询指定清单下的分组；" +
-        "weather 通过 type 指定 current 当前实况或 forecast 未来预报，需要 GPS 定位权限。"
+    override val description = "查询数据。entity_type: task/checklist/group/weather。" +
+        "task 可按 id/category_id/parent_id 筛选；group 需 checklist_id；weather 需定位权限，type=current|forecast。"
 
     private val schema = """
     {
@@ -139,29 +140,15 @@ object QueryTool : Tool {
         "properties": {
             "entity_type": {
                 "type": "string",
-                "enum": ["task", "checklist", "group", "weather"],
-                "description": "查询的实体类型：task=任务, checklist=清单, group=分组, weather=天气"
+                "enum": ["task", "checklist", "group", "weather"]
             },
-            "id": {
-                "type": "string",
-                "description": "按指定 ID 查询单个任务"
-            },
-            "category_id": {
-                "type": "string",
-                "description": "按清单 ID 筛选任务，不传则返回全部"
-            },
-            "checklist_id": {
-                "type": "string",
-                "description": "指定清单 ID，查询该清单下的分组"
-            },
-            "parent_id": {
-                "type": "string",
-                "description": "指定父任务 ID，查询其子任务"
-            },
+            "id": { "type": "string" },
+            "category_id": { "type": "string" },
+            "checklist_id": { "type": "string" },
+            "parent_id": { "type": "string" },
             "type": {
                 "type": "string",
-                "enum": ["current", "forecast"],
-                "description": "天气查询模式：current=当前实况, forecast=未来预报"
+                "enum": ["current", "forecast"]
             }
         },
         "required": ["entity_type"]
@@ -249,7 +236,7 @@ object QueryTool : Tool {
      * @param core   NionCore 单例（用于读取位置缓存和天气缓存）
      * @return 格式化的天气信息文本
      */
-    private fun executeWeatherQuery(params: JSONObject, core: NionCore): String {
+    private suspend fun executeWeatherQuery(params: JSONObject, core: NionCore): String {
         val type = params.optString("type", "current")
 
         val app = NionApp.instance
@@ -268,18 +255,18 @@ object QueryTool : Tool {
     /**
      * 格式化当前天气实况为 LLM 可理解的文本。
      *
-     * 输出格式示例：
-     * ```
-     * 当前天气：晴
-     * 温度：22°C
-     * 湿度：65%
-     * 风速：12 km/h
-     * 降水量：0 mm
-     * ```
+     * 输出格式包含：
+     * - 天气描述（含白天/夜间标识）
+     * - 实际温度 + 体感温度
+     * - 湿度、风速、降水量
+     * - 云量、能见度
+     * - 空气质量（PM2.5、AQI）
+     * - 今日温度范围
      */
     private fun formatCurrentWeather(data: FullWeatherData): String {
         val current = data.current
         val desc = weatherDescription(current.weatherCode)
+        val dayNight = if (current.isDay) "" else "（夜间）"
 
         val todayRange = if (data.daily.days.isNotEmpty()) {
             val today = data.daily.days[0]
@@ -287,11 +274,30 @@ object QueryTool : Tool {
         } else ""
 
         return buildString {
-            append("当前天气：$desc\n")
-            append("温度：${"%.1f".format(current.temperature)}°C\n")
+            append("当前天气：$desc$dayNight\n")
+            append("温度：${"%.1f".format(current.temperature)}°C")
+            // 体感温度与实际温度差异超过 1°C 时显示
+            if (kotlin.math.abs(current.apparentTemperature - current.temperature) > 1.0) {
+                append("（体感 ${"%.1f".format(current.apparentTemperature)}°C）")
+            }
+            append("\n")
             append("湿度：${current.humidity}%\n")
             append("风速：${"%.1f".format(current.windSpeed)} km/h\n")
-            append("降水量：${"%.1f".format(current.precipitation)} mm")
+            append("降水量：${"%.1f".format(current.precipitation)} mm\n")
+            append("云量：${current.cloudCover}%\n")
+            // 能见度低于 5km 时特别标注（大雾/霾预警）
+            val visKm = current.visibility / 1000.0
+            if (visKm < 5.0) {
+                append("能见度：${"%.1f".format(visKm)} km ⚠ 能见度较低\n")
+            } else {
+                append("能见度：${"%.1f".format(visKm)} km\n")
+            }
+
+            // 空气质量信息
+            data.airQuality?.let { aq ->
+                append("空气质量：AQI ${aq.aqi}（${aqiDescription(aq.aqi)}），PM2.5 ${"%.0f".format(aq.pm25)} μg/m³\n")
+            }
+
             append(todayRange)
         }
     }
@@ -344,10 +350,7 @@ object QueryTool : Tool {
 object CreateTool : Tool {
     override val name = "create"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "创建新实体，支持批量。通过 entity_type 指定类型：task=任务, checklist=清单, group=分组。" +
-        "单个创建传 title/name 等字段，批量创建传 items 数组。" +
-        "task 需 title，支持 reminder 一次性提醒、recurrence_rule 循环规则传 daily 表示每天循环、recurrence_reminder_time 每日提醒时间。" +
-        "checklist 需 name，group 需 name 和 checklist_id。"
+    override val description = "创建实体，支持批量(items数组)。entity_type: task需title, checklist需name, group需name+checklist_id。"
 
     private val schema = """
     {
@@ -355,66 +358,29 @@ object CreateTool : Tool {
         "properties": {
             "entity_type": {
                 "type": "string",
-                "enum": ["task", "checklist", "group"],
-                "description": "创建的实体类型"
+                "enum": ["task", "checklist", "group"]
             },
-            "title": {
-                "type": "string",
-                "description": "任务标题"
-            },
-            "description": {
-                "type": "string",
-                "description": "任务描述"
-            },
+            "title": { "type": "string" },
+            "description": { "type": "string" },
             "priority": {
                 "type": "string",
-                "enum": ["low", "medium", "high"],
-                "description": "任务优先级：low=低, medium=中, high=高，默认 medium"
+                "enum": ["low", "medium", "high"]
             },
-            "category_id": {
-                "type": "string",
-                "description": "任务所属清单 ID"
-            },
-            "parent_id": {
-                "type": "string",
-                "description": "父任务 ID，用于创建子任务"
-            },
-            "group_id": {
-                "type": "string",
-                "description": "任务所属分组 ID"
-            },
+            "category_id": { "type": "string" },
+            "parent_id": { "type": "string" },
+            "group_id": { "type": "string" },
             "recurrence_rule": {
                 "type": "string",
-                "enum": ["daily"],
-                "description": "循环规则，传 daily 表示每天循环，不传表示不循环"
+                "enum": ["daily"]
             },
-            "recurrence_reminder_time": {
-                "type": "string",
-                "description": "每日循环提醒时间，格式 HH:MM 如 09:00，需搭配 recurrence_rule"
-            },
-            "reminder": {
-                "type": "string",
-                "description": "一次性提醒时间，ISO 8601 格式如 2026-06-01T15:00，设置后 Nion 会在该时间主动提醒用户"
-            },
-            "name": {
-                "type": "string",
-                "description": "清单或分组的名称"
-            },
-            "checklist_id": {
-                "type": "string",
-                "description": "分组所属的清单 ID"
-            },
-            "color": {
-                "type": "string",
-                "description": "分组颜色，十六进制格式如 #FF5722"
-            },
+            "recurrence_reminder_time": { "type": "string" },
+            "reminder": { "type": "string" },
+            "name": { "type": "string" },
+            "checklist_id": { "type": "string" },
+            "color": { "type": "string" },
             "items": {
                 "type": "array",
-                "description": "批量创建的实体列表，每项包含该实体类型所需字段。task 需 title，checklist 需 name，group 需 name + checklist_id",
-                "items": {
-                    "type": "object",
-                    "description": "单个实体的创建参数"
-                }
+                "items": { "type": "object" }
             }
         },
         "required": ["entity_type"]
@@ -606,10 +572,7 @@ object CreateTool : Tool {
 object UpdateTool : Tool {
     override val name = "update"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "更新实体信息，支持批量。通过 entity_type 指定类型，只传需要修改的字段。" +
-        "单个更新传 id，批量更新传 ids 数组，所有实体应用相同变更。" +
-        "task 可修改 title/description/priority/status/category_id/reminder/group_id/recurrence_rule/recurrence_reminder_time；" +
-        "checklist 可修改 name；group 可修改 name/color。"
+    override val description = "更新实体，支持批量(ids数组)。只传需修改的字段。task可改title/status/priority/reminder等；checklist改name；group改name/color。"
 
     private val schema = """
     {
@@ -617,65 +580,33 @@ object UpdateTool : Tool {
         "properties": {
             "entity_type": {
                 "type": "string",
-                "enum": ["task", "checklist", "group"],
-                "description": "更新的实体类型"
+                "enum": ["task", "checklist", "group"]
             },
-            "id": {
-                "type": "string",
-                "description": "单个更新时的实体 ID"
-            },
+            "id": { "type": "string" },
             "ids": {
                 "type": "array",
-                "description": "批量更新时的实体 ID 列表，所有实体应用相同变更",
                 "items": { "type": "string" }
             },
-            "title": {
-                "type": "string",
-                "description": "任务新标题"
-            },
-            "description": {
-                "type": "string",
-                "description": "任务新描述"
-            },
+            "title": { "type": "string" },
+            "description": { "type": "string" },
             "priority": {
                 "type": "string",
-                "enum": ["low", "medium", "high"],
-                "description": "任务新优先级"
+                "enum": ["low", "medium", "high"]
             },
             "status": {
                 "type": "string",
-                "enum": ["todo", "in_progress", "done"],
-                "description": "任务新状态：todo=待办, in_progress=进行中, done=已完成"
+                "enum": ["todo", "in_progress", "done"]
             },
-            "category_id": {
-                "type": "string",
-                "description": "任务新所属清单 ID。移动任务到其他清单请用 manage 工具的 move 操作"
-            },
-            "reminder": {
-                "type": "string",
-                "description": "任务新提醒时间，ISO 8601 格式"
-            },
-            "group_id": {
-                "type": "string",
-                "description": "任务新分组 ID。移动任务到其他分组请用 manage 工具的 move 操作"
-            },
+            "category_id": { "type": "string" },
+            "reminder": { "type": "string" },
+            "group_id": { "type": "string" },
             "recurrence_rule": {
                 "type": "string",
-                "enum": ["daily"],
-                "description": "循环规则，传 daily 表示每天循环，传 null 表示取消循环"
+                "enum": ["daily"]
             },
-            "recurrence_reminder_time": {
-                "type": "string",
-                "description": "每日循环提醒时间，格式 HH:MM 如 09:00"
-            },
-            "name": {
-                "type": "string",
-                "description": "清单或分组的新名称"
-            },
-            "color": {
-                "type": "string",
-                "description": "分组新颜色，十六进制格式如 #4CAF50"
-            }
+            "recurrence_reminder_time": { "type": "string" },
+            "name": { "type": "string" },
+            "color": { "type": "string" }
         },
         "required": ["entity_type"]
     }
@@ -841,9 +772,7 @@ object UpdateTool : Tool {
 object DeleteTool : Tool {
     override val name = "delete"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "永久删除实体，支持批量，不可撤销。" +
-        "单个删除传 id，批量删除传 ids 数组。" +
-        "删除清单时其中的任务不会被删除而是变为未分类，删除分组时组内任务不会被删除而是移至未分组。"
+    override val description = "删除实体，支持批量(ids数组)，不可撤销。删清单时任务保留(变未分类)，删分组时任务保留(变未分组)。"
 
     private val schema = """
     {
@@ -851,16 +780,11 @@ object DeleteTool : Tool {
         "properties": {
             "entity_type": {
                 "type": "string",
-                "enum": ["task", "checklist", "group"],
-                "description": "删除的实体类型"
+                "enum": ["task", "checklist", "group"]
             },
-            "id": {
-                "type": "string",
-                "description": "单个删除时的实体 ID"
-            },
+            "id": { "type": "string" },
             "ids": {
                 "type": "array",
-                "description": "批量删除时的实体 ID 列表",
                 "items": { "type": "string" }
             }
         },
@@ -966,11 +890,8 @@ object DeleteTool : Tool {
 object ManageTool : Tool {
     override val name = "manage"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "结构性操作：移动和排序实体。" +
-        "action=move 时移动实体到新容器，保留所有数据如专注时长，支持批量。" +
-        "支持 task 移到 checklist/group/task/root，group 移到 checklist 且组内任务跟随移动。" +
-        "单个移动传 id，批量移动传 ids 数组。" +
-        "action=reorder 时自由排序，传入 ordered_ids 按期望顺序排列，支持 task/checklist/group 三种实体。"
+    override val description = "结构性操作。action=move: 移动实体(task→checklist/group/task/root, group→checklist)，支持批量(ids)。" +
+        "action=reorder: 按 ordered_ids 排列顺序，支持 task/checklist/group。"
 
     private val schema = """
     {
@@ -978,35 +899,24 @@ object ManageTool : Tool {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["move", "reorder"],
-                "description": "操作类型：move=移动实体, reorder=自由排序"
+                "enum": ["move", "reorder"]
             },
             "entity_type": {
                 "type": "string",
-                "enum": ["task", "checklist", "group"],
-                "description": "实体类型。move 时为要移动的实体类型 task 或 group，reorder 时为要排序的实体类型"
+                "enum": ["task", "checklist", "group"]
             },
-            "id": {
-                "type": "string",
-                "description": "单个操作时的实体 ID"
-            },
+            "id": { "type": "string" },
             "ids": {
                 "type": "array",
-                "description": "批量操作时的实体 ID 列表，仅 move 支持批量",
                 "items": { "type": "string" }
             },
             "target_type": {
                 "type": "string",
-                "enum": ["checklist", "group", "task", "root"],
-                "description": "移动目标类型：checklist=清单, group=分组, task=成为目标任务的子任务, root=提升为独立主任务"
+                "enum": ["checklist", "group", "task", "root"]
             },
-            "target_id": {
-                "type": "string",
-                "description": "目标容器或任务的 ID，root 类型不需要此字段"
-            },
+            "target_id": { "type": "string" },
             "ordered_ids": {
                 "type": "array",
-                "description": "按期望顺序排列的 ID 列表，第一个排在最前，最后一个排在最后",
                 "items": { "type": "string" }
             }
         },

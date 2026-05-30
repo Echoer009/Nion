@@ -50,7 +50,7 @@ object ToolPhrasePool {
     private val pools: Map<String, Map<String, List<String>>> = mapOf(
 
         // ── 元气少女 ─────────────────────────────────────────────────
-        "female_energetic" to mapOf(
+            "female_energetic" to mapOf(
             "create_named" to listOf(
                 "「{name}」记好啦！",
                 "帮你加上「{name}」了~",
@@ -128,6 +128,13 @@ object ToolPhrasePool {
                 "又靠近你一步了~",
                 "偷偷记在小本本上了~",
             ),
+            "settings" to listOf(
+                "配色换好啦，快看看效果~",
+                "颜色调整好了！焕然一新的感觉",
+                "搞定！新配色已经应用了~",
+                "好看吗？我帮你换了配色！",
+                "配色更新完毕，满意吗~",
+            ),
             "fail" to listOf(
                 "唔...好像出了点问题",
                 "啊，失败了...",
@@ -138,7 +145,7 @@ object ToolPhrasePool {
         ),
 
         // ── 温柔姐姐 ─────────────────────────────────────────────────
-        "female_gentle" to mapOf(
+            "female_gentle" to mapOf(
             "create_named" to listOf(
                 "「{name}」已经帮你记下了",
                 "好，帮你加好了「{name}」",
@@ -216,6 +223,13 @@ object ToolPhrasePool {
                 "我记住关于你的事了",
                 "偷偷记住了~",
             ),
+            "settings" to listOf(
+                "配色帮你调好了哦",
+                "换好了，看看喜欢吗",
+                "颜色已经更新了",
+                "嗯，配色改好了",
+                "调好了，希望你喜欢",
+            ),
             "fail" to listOf(
                 "嗯...好像没成功呢",
                 "抱歉，出了点问题",
@@ -226,7 +240,7 @@ object ToolPhrasePool {
         ),
 
         // ── 沉稳御姐 ─────────────────────────────────────────────────
-        "female_calm" to mapOf(
+                    "female_calm" to mapOf(
             "create_named" to listOf(
                 "「{name}」已记录",
                 "「{name}」加好了",
@@ -304,6 +318,13 @@ object ToolPhrasePool {
                 "我知道了",
                 "已存档",
             ),
+            "settings" to listOf(
+                "配色已更新",
+                "主题已切换，请查看效果",
+                "颜色配置已应用",
+                "配色调整完成",
+                "主题设置已生效",
+            ),
             "fail" to listOf(
                 "失败了",
                 "出了点问题",
@@ -314,7 +335,7 @@ object ToolPhrasePool {
         ),
 
         // ── 阳光男孩 ─────────────────────────────────────────────────
-        "male_energetic" to mapOf(
+            "male_energetic" to mapOf(
             "create_named" to listOf(
                 "「{name}」搞定！",
                 "帮你加上了「{name}」！",
@@ -392,6 +413,13 @@ object ToolPhrasePool {
                 "偷偷记住了！",
                 "又靠近你了！",
             ),
+            "settings" to listOf(
+                "配色换好了！酷不酷",
+                "搞定！新配色帅不帅",
+                "颜色调好了，看看效果！",
+                "换好配色了！",
+                "配色更新完毕，感觉不错",
+            ),
             "fail" to listOf(
                 "啊...没搞定",
                 "失败了...",
@@ -402,7 +430,7 @@ object ToolPhrasePool {
         ),
 
         // ── 温柔学长 ─────────────────────────────────────────────────
-        "male_gentle" to mapOf(
+            "male_gentle" to mapOf(
             "create_named" to listOf(
                 "「{name}」帮你记下了",
                 "好，「{name}」加好了",
@@ -480,6 +508,13 @@ object ToolPhrasePool {
                 "我记住了",
                 "记在心里了",
             ),
+            "settings" to listOf(
+                "配色换好了，看看满意吗",
+                "颜色调好了",
+                "嗯，配色更新了",
+                "主题换好了，希望你喜欢",
+                "配色改好了",
+            ),
             "fail" to listOf(
                 "嗯...没成功",
                 "抱歉，出了点问题",
@@ -490,7 +525,7 @@ object ToolPhrasePool {
         ),
 
         // ── 沉稳大叔 ─────────────────────────────────────────────────
-        "male_calm" to mapOf(
+            "male_calm" to mapOf(
             "create_named" to listOf(
                 "「{name}」已记录",
                 "「{name}」加好了",
@@ -567,6 +602,13 @@ object ToolPhrasePool {
                 "知道了",
                 "已记录",
                 "存档了",
+            ),
+            "settings" to listOf(
+                "配色已更新",
+                "主题已切换",
+                "颜色配置已应用，请查看",
+                "配色调整完成",
+                "主题设置已生效",
             ),
             "fail" to listOf(
                 "失败了",
