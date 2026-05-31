@@ -76,6 +76,26 @@ class ScheduleViewModel(
     var dateMarkers by mutableStateOf<Map<String, CalendarDateMarker>>(emptyMap())
         private set
 
+    /** ViewModel 创建时加载今天的任务和当月日历标记，并订阅数据变更事件 */
+    init {
+        loadTasksForDate(LocalDate.now())
+        loadCalendarMarkers(LocalDate.now().year, LocalDate.now().monthValue)
+
+        // 监听数据变更事件（AI 工具、TaskViewModel 等外部操作），自动刷新当前日期任务和日历标记
+        // debounce(300)：合并 AI 连续调用多个工具时的连续事件，只触发一次刷新
+        viewModelScope.launch {
+            app.dataEvents()
+                .debounce(300)
+                .collect { event ->
+                    if (DataType.TASK_DATA in event.types) {
+                        Log.d("ScheduleViewModel", "收到数据变更事件: ${event.types}")
+                        loadTasksForDate(selectedDate)
+                        loadCalendarMarkers(selectedDate.year, selectedDate.monthValue)
+                    }
+                }
+        }
+    }
+
     /**
      * 选择日期并加载该日期的任务。
      * @param date 新的选中日期
@@ -276,26 +296,6 @@ class ScheduleViewModel(
             } catch (e: Exception) {
                 onError("加载日程失败: ${e.message}")
             }
-        }
-    }
-
-    /** ViewModel 创建时加载今天的任务和当月日历标记，并订阅数据变更事件 */
-    init {
-        loadTasksForDate(LocalDate.now())
-        loadCalendarMarkers(LocalDate.now().year, LocalDate.now().monthValue)
-
-        // 监听数据变更事件（AI 工具、TaskViewModel 等外部操作），自动刷新当前日期任务和日历标记
-        // debounce(300)：合并 AI 连续调用多个工具时的连续事件，只触发一次刷新
-        viewModelScope.launch {
-            app.dataEvents()
-                .debounce(300)
-                .collect { event ->
-                    if (DataType.TASK_DATA in event.types) {
-                        Log.d("ScheduleViewModel", "收到数据变更事件: ${event.types}")
-                        loadTasksForDate(selectedDate)
-                        loadCalendarMarkers(selectedDate.year, selectedDate.monthValue)
-                    }
-                }
         }
     }
 

@@ -335,7 +335,13 @@ private fun ScheduleContent(
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Text("暂无日程", style = MaterialTheme.typography.titleMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("好好休息吧", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY))
+                        Text(
+                            "好好休息吧",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(
+                                alpha = NionAlpha.TEXT_SECONDARY
+                            )
+                        )
                     }
                 }
             } else {
