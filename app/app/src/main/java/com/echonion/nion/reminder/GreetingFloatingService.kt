@@ -85,38 +85,6 @@ import uniffi.nion_core.StickerData
  */
 class GreetingFloatingService : Service() {
 
-    companion object {
-        private const val TAG = "GreetingFloating"
-        private const val CHANNEL_ID = "greeting_floating"
-        private const val NOTIFICATION_ID = 3001
-
-        // Intent Extra keys
-        const val EXTRA_GREETING_TYPE = "greeting_type"
-        const val EXTRA_MESSAGE = "message"
-
-        /**
-         * 启动问候悬浮窗 Service。
-         * 只有在拥有悬浮窗权限时才应调用。
-         *
-         * @param context 上下文
-         * @param greetingType 问候类型："morning" / "noon" / "evening"
-         * @param message 问候文案
-         */
-        fun start(context: Context, greetingType: String, message: String) {
-            val intent = Intent(context, GreetingFloatingService::class.java).apply {
-                putExtra(EXTRA_GREETING_TYPE, greetingType)
-                putExtra(EXTRA_MESSAGE, message)
-            }
-            // Android 12+ 后台启动 Service 需要前台 Service
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
-            Log.d(TAG, "启动问候悬浮窗 Service: type=$greetingType")
-        }
-    }
-
     // 悬浮窗相关
     private var windowManager: WindowManager? = null
     private var floatingView: android.view.View? = null
@@ -243,8 +211,9 @@ class GreetingFloatingService : Service() {
                     when (mode) {
                         "custom" -> {
                             val activeId = app.core.getSetting("active_custom_theme_id") ?: ""
-                            if (activeId.isBlank()) NionColorTheme.CORAL.palette()
-                            else {
+                            if (activeId.isBlank()) {
+                                NionColorTheme.CORAL.palette()
+                            } else {
                                 val themes = CustomThemeEntry.listFromJson(app.core.getSetting("custom_themes_list") ?: "[]")
                                 val entry = themes.find { it.id == activeId }
                                 entry?.palette ?: NionColorTheme.CORAL.palette()
@@ -357,6 +326,38 @@ class GreetingFloatingService : Service() {
     private fun handleDismiss() {
         Log.d(TAG, "关闭问候悬浮窗: type=$greetingType")
         removeFloatingWindow(animated = true)
+    }
+
+    companion object {
+        private const val TAG = "GreetingFloating"
+        private const val CHANNEL_ID = "greeting_floating"
+        private const val NOTIFICATION_ID = 3001
+
+        // Intent Extra keys
+        const val EXTRA_GREETING_TYPE = "greeting_type"
+        const val EXTRA_MESSAGE = "message"
+
+        /**
+         * 启动问候悬浮窗 Service。
+         * 只有在拥有悬浮窗权限时才应调用。
+         *
+         * @param context 上下文
+         * @param greetingType 问候类型："morning" / "noon" / "evening"
+         * @param message 问候文案
+         */
+        fun start(context: Context, greetingType: String, message: String) {
+            val intent = Intent(context, GreetingFloatingService::class.java).apply {
+                putExtra(EXTRA_GREETING_TYPE, greetingType)
+                putExtra(EXTRA_MESSAGE, message)
+            }
+            // Android 12+ 后台启动 Service 需要前台 Service
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            Log.d(TAG, "启动问候悬浮窗 Service: type=$greetingType")
+        }
     }
 }
 

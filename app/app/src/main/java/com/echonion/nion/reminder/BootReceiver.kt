@@ -17,10 +17,6 @@ import com.echonion.nion.NionApp
  */
 class BootReceiver : BroadcastReceiver() {
 
-    companion object {
-        private const val TAG = "BootReceiver"
-    }
-
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
 
@@ -57,5 +53,9 @@ class BootReceiver : BroadcastReceiver() {
         } catch (e: Exception) {
             Log.e(TAG, "天气预警调度恢复失败", e)
         }
+    }
+
+    companion object {
+        private const val TAG = "BootReceiver"
     }
 }

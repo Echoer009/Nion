@@ -19,22 +19,6 @@ import com.echonion.nion.NionApp
  */
 class ReminderActionReceiver : BroadcastReceiver() {
 
-    companion object {
-        private const val TAG = "ReminderAction"
-
-        /** Action：用户点击「开始做了」 */
-        const val ACTION_START = "com.echonion.nion.ACTION_REMINDER_START"
-        /** Action：用户点击「等5分钟」 */
-        const val ACTION_SNOOZE = "com.echonion.nion.ACTION_REMINDER_SNOOZE"
-        /** Action：用户点击「今天算了」 */
-        const val ACTION_DISMISS = "com.echonion.nion.ACTION_REMINDER_DISMISS"
-
-        /** Intent extra：任务 ID */
-        const val EXTRA_TASK_ID = "task_id"
-        /** Intent extra：任务标题（用于跳转专注页面时传递） */
-        const val EXTRA_TASK_TITLE = "task_title"
-    }
-
     override fun onReceive(context: Context, intent: Intent) {
         val taskId = intent.getStringExtra(EXTRA_TASK_ID) ?: return
         val action = intent.action ?: return
@@ -115,5 +99,21 @@ class ReminderActionReceiver : BroadcastReceiver() {
         NotificationHelper.dismissNotification(context, taskId)
 
         Log.d(TAG, "今天算了: taskId=$taskId, 提醒循环已终止")
+    }
+
+    companion object {
+        private const val TAG = "ReminderAction"
+
+        /** Action：用户点击「开始做了」 */
+        const val ACTION_START = "com.echonion.nion.ACTION_REMINDER_START"
+        /** Action：用户点击「等5分钟」 */
+        const val ACTION_SNOOZE = "com.echonion.nion.ACTION_REMINDER_SNOOZE"
+        /** Action：用户点击「今天算了」 */
+        const val ACTION_DISMISS = "com.echonion.nion.ACTION_REMINDER_DISMISS"
+
+        /** Intent extra：任务 ID */
+        const val EXTRA_TASK_ID = "task_id"
+        /** Intent extra：任务标题（用于跳转专注页面时传递） */
+        const val EXTRA_TASK_TITLE = "task_title"
     }
 }

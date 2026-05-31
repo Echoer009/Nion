@@ -13,10 +13,6 @@ import android.util.Log
  */
 class GreetingReceiver : BroadcastReceiver() {
 
-    companion object {
-        private const val TAG = "GreetingReceiver"
-    }
-
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != GreetingScheduler.ACTION_GREETING) return
 
@@ -26,5 +22,9 @@ class GreetingReceiver : BroadcastReceiver() {
 
         // 委托给 GreetingWorker 处理
         GreetingWorker.enqueue(context, type)
+    }
+
+    companion object {
+        private const val TAG = "GreetingReceiver"
     }
 }

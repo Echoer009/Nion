@@ -103,24 +103,17 @@ object ReminderMessageGenerator {
 
     /**
      * 构建 LLM system prompt。
-     * 自动注入人设（prompt_persona）作为前缀，然后拼接场景规则（提醒模板）。
-     * 这样用户修改人设后，所有后台 LLM 调用都会生效。
-     * 同时注入完整的表情包列表，让 LLM 知道所有可用标签。
+     * 使用 ReminderUtils.buildSystemPrompt() 构建与聊天对话完全一致的前缀，
+     * 场景模板（紧迫度 + 语气）作为最后一段追加。
      */
     private fun buildSystemPrompt(core: NionCore, triggerCount: Int): String {
         val level = triggerCount.coerceIn(1, 5)
         val tone = TONE_DESCRIPTIONS[level]
-        val companionName = core.getSetting("companion_name") ?: "Nion"
-        // 注入人设：读取 prompt_persona 并替换 {name}，拼在场景规则前面
-        val persona = (core.getSetting(PromptDefaults.KEY_PERSONA) ?: PromptDefaults.PERSONA)
-            .replace("{name}", companionName)
         val template = core.getSetting(PromptDefaults.KEY_REMINDER) ?: PromptDefaults.REMINDER
-        val rulePrompt = template
+        val scenePrompt = template
             .replace("{level}", level.toString())
             .replace("{tone}", tone)
-        // 注入完整表情包列表，让 LLM 使用正确的标签名
-        val stickerPrompt = ReminderUtils.buildStickerListPrompt(core)
-        return persona + "\n\n" + rulePrompt + stickerPrompt
+        return ReminderUtils.buildSystemPrompt(core, scenePrompt)
     }
 
     /**

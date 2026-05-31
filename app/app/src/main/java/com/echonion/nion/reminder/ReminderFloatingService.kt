@@ -93,51 +93,6 @@ import uniffi.nion_core.StickerData
  */
 class ReminderFloatingService : Service() {
 
-    companion object {
-        private const val TAG = "ReminderFloating"
-        private const val CHANNEL_ID = "floating_reminder"
-        private const val NOTIFICATION_ID = 2001
-
-        // Intent Extra keys
-        const val EXTRA_TASK_ID = "task_id"
-        const val EXTRA_TASK_TITLE = "task_title"
-        const val EXTRA_MESSAGE = "message"
-        const val EXTRA_TRIGGER_COUNT = "trigger_count"
-
-        /**
-         * 启动悬浮窗 Service。
-         * 只有在拥有悬浮窗权限时才应调用。
-         */
-        fun start(
-            context: Context,
-            taskId: String,
-            taskTitle: String,
-            message: String,
-            triggerCount: Int,
-        ) {
-            val intent = Intent(context, ReminderFloatingService::class.java).apply {
-                putExtra(EXTRA_TASK_ID, taskId)
-                putExtra(EXTRA_TASK_TITLE, taskTitle)
-                putExtra(EXTRA_MESSAGE, message)
-                putExtra(EXTRA_TRIGGER_COUNT, triggerCount)
-            }
-            // Android 12+ 后台启动 Service 需要前台 Service
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
-            Log.d(TAG, "启动悬浮窗 Service: taskId=$taskId")
-        }
-
-        /**
-         * 停止悬浮窗 Service 并移除悬浮窗。
-         */
-        fun stop(context: Context) {
-            context.stopService(Intent(context, ReminderFloatingService::class.java))
-        }
-    }
-
     // 悬浮窗相关
     private var windowManager: WindowManager? = null
     private var floatingView: android.view.View? = null
@@ -271,8 +226,9 @@ class ReminderFloatingService : Service() {
                     when (mode) {
                         "custom" -> {
                             val activeId = app.core.getSetting("active_custom_theme_id") ?: ""
-                            if (activeId.isBlank()) NionColorTheme.CORAL.palette()
-                            else {
+                            if (activeId.isBlank()) {
+                                NionColorTheme.CORAL.palette()
+                            } else {
                                 val themes = CustomThemeEntry.listFromJson(app.core.getSetting("custom_themes_list") ?: "[]")
                                 val entry = themes.find { it.id == activeId }
                                 entry?.palette ?: NionColorTheme.CORAL.palette()
@@ -452,6 +408,51 @@ class ReminderFloatingService : Service() {
         Log.d(TAG, "关闭悬浮窗: taskId=$taskId")
         // 播放收回动画，动画结束后自动 stopSelf()
         removeFloatingWindow(animated = true)
+    }
+
+    companion object {
+        private const val TAG = "ReminderFloating"
+        private const val CHANNEL_ID = "floating_reminder"
+        private const val NOTIFICATION_ID = 2001
+
+        // Intent Extra keys
+        const val EXTRA_TASK_ID = "task_id"
+        const val EXTRA_TASK_TITLE = "task_title"
+        const val EXTRA_MESSAGE = "message"
+        const val EXTRA_TRIGGER_COUNT = "trigger_count"
+
+        /**
+         * 启动悬浮窗 Service。
+         * 只有在拥有悬浮窗权限时才应调用。
+         */
+        fun start(
+            context: Context,
+            taskId: String,
+            taskTitle: String,
+            message: String,
+            triggerCount: Int,
+        ) {
+            val intent = Intent(context, ReminderFloatingService::class.java).apply {
+                putExtra(EXTRA_TASK_ID, taskId)
+                putExtra(EXTRA_TASK_TITLE, taskTitle)
+                putExtra(EXTRA_MESSAGE, message)
+                putExtra(EXTRA_TRIGGER_COUNT, triggerCount)
+            }
+            // Android 12+ 后台启动 Service 需要前台 Service
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            Log.d(TAG, "启动悬浮窗 Service: taskId=$taskId")
+        }
+
+        /**
+         * 停止悬浮窗 Service 并移除悬浮窗。
+         */
+        fun stop(context: Context) {
+            context.stopService(Intent(context, ReminderFloatingService::class.java))
+        }
     }
 }
 

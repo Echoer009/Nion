@@ -50,11 +50,6 @@
             android:name=".reminder.GreetingReceiver"
             android:exported="false" />
 
-        <!-- 批量提醒闹钟触发接收器 -->
-        <receiver
-            android:name=".reminder.BatchReminderTriggerReceiver"
-            android:exported="false" />
-
         <!-- 悬浮提醒 Service：在 App 后台时通过 WindowManager 显示悬浮卡片 -->
         <service
             android:name=".reminder.ReminderFloatingService"

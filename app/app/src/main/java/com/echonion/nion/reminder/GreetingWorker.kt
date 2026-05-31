@@ -32,27 +32,6 @@ class GreetingWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
 
-    companion object {
-        private const val TAG = "GreetingWorker"
-        const val KEY_GREETING_TYPE = "greeting_type"
-
-        /**
-         * 入队问候任务。
-         * @param context 上下文
-         * @param type 问候类型（"morning"/"noon"/"evening"）
-         */
-        fun enqueue(context: Context, type: String) {
-            val data = Data.Builder()
-                .putString(KEY_GREETING_TYPE, type)
-                .build()
-            val request = OneTimeWorkRequestBuilder<GreetingWorker>()
-                .setInputData(data)
-                .build()
-            WorkManager.getInstance(context).enqueue(request)
-            Log.d(TAG, "已入队问候 Worker: type=$type")
-        }
-    }
-
     override suspend fun doWork(): Result {
         val type = inputData.getString(KEY_GREETING_TYPE) ?: return Result.failure()
         Log.d(TAG, "开始生成问候: type=$type")
@@ -61,6 +40,11 @@ class GreetingWorker(
         val core = app.core
 
         try {
+            // ── 0. 立即显示"正在输入..."通知，让用户知道 Nion 在工作 ──
+            val companionName = core.getSetting("companion_name")
+                ?: com.echonion.nion.ui.companion.PromptDefaults.DEFAULT_COMPANION_NAME
+            NotificationHelper.showTypingNotification(applicationContext, "greeting_$type", companionName)
+
             // ── 1. 收集今日任务数据 ──
             val today = LocalDate.now().format(DateTimeFormatter.ISO_LOCAL_DATE)
 
@@ -70,29 +54,17 @@ class GreetingWorker(
             // 完成状态由 Rust 端正确判断（每日任务查 daily_completions 表，普通任务看 status）
             val todayScheduled = core.getTasksDueToday(today)
 
-            // 1b. 补充：没有 reminder、也没有 recurrence 的未完成顶层任务
-            // 这些任务不属于任何特定日期，但用户同样关心它们的存在
-            val unscheduledPending = core.getTasks().filter { task ->
-                task.reminder == null
-                    && (task.recurrenceRule == null || task.recurrenceRule == "none")
-                    && task.status != "done"
-                    && task.parentId == null
-            }
-
-            // 1c. 汇总统计
+            // 1b. 汇总统计（只统计今日日程，不包含无排期任务）
             // 今日日程中已完成的数量（含每日循环任务通过 daily_completions 判断的完成数）
             val completedToday = todayScheduled.count { it.completedForDate }
             // 今日日程中未完成的数量
-            val pendingScheduled = todayScheduled.count { !it.completedForDate }
-            // 总未完成 = 日程未完成 + 无排期的未完成
-            val pendingToday = pendingScheduled + unscheduledPending.size
-            // 高优先级未完成（日程 + 无排期）
+            val pendingToday = todayScheduled.count { !it.completedForDate }
+            // 高优先级未完成
             val highPriorityPending =
                 todayScheduled.count { !it.completedForDate && it.task.priority == "high" }
-                    + unscheduledPending.count { it.priority == "high" }
 
-            // 1d. 合并任务标题列表（给 LLM 和模板兜底用）
-            val todayTaskTitles = todayScheduled.map { it.task.name } + unscheduledPending.map { it.name }
+            // 1c. 任务标题列表（只传今日日程给 LLM 和模板）
+            val todayTaskTitles = todayScheduled.map { it.task.name }
 
             // ── 2. 生成问候文案（注入天气上下文） ──
             val weatherSummary = try {
@@ -133,6 +105,9 @@ class GreetingWorker(
                 },
             )
 
+            // "正在输入..."通知已完成使命，取消它
+            NotificationHelper.dismissTypingNotification(applicationContext, "greeting_$type")
+
             // 5. 调度明天的同类型问候
             val timeStr = getGreetingTime(core, type)
             GreetingScheduler.scheduleNextDay(applicationContext, type, timeStr)
@@ -141,6 +116,8 @@ class GreetingWorker(
             return Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "问候生成失败: type=$type", e)
+            // 异常时也要取消"正在输入"通知，避免残留
+            NotificationHelper.dismissTypingNotification(applicationContext, "greeting_$type")
             return Result.failure()
         }
     }
@@ -183,15 +160,9 @@ class GreetingWorker(
                 "evening" -> PromptDefaults.GREETING_EVENING
                 else -> PromptDefaults.GREETING_MORNING
             }
-            val companionName = core.getSetting("companion_name") ?: "Nion"
             val promptTemplate = core.getSetting(promptKey) ?: defaultPrompt
-            // 自动注入人设：先加载 prompt_persona 作为 system prompt 的前缀，
-            // 然后拼接场景规则（问候模板），确保所有后台 LLM 调用都带有人设
-            val persona = (core.getSetting(PromptDefaults.KEY_PERSONA) ?: PromptDefaults.PERSONA)
-                .replace("{name}", companionName)
-            // 注入完整表情包列表，让 LLM 使用正确的标签名
-            val stickerPrompt = ReminderUtils.buildStickerListPrompt(core)
-            val systemPrompt = persona + "\n\n" + promptTemplate + stickerPrompt
+            // 使用统一方法构建与聊天对话完全一致的 system prompt 前缀
+            val systemPrompt = ReminderUtils.buildSystemPrompt(core, promptTemplate)
 
             val taskList = if (taskTitles.isNotEmpty()) {
                 taskTitles.joinToString("\n") { "- $it" }
@@ -201,7 +172,9 @@ class GreetingWorker(
 
             val weatherLine = if (weatherSummary != null) {
                 "\n当前天气：$weatherSummary"
-            } else ""
+            } else {
+                ""
+            }
 
             val userMsg = """用户今日任务：
 $taskList
@@ -231,7 +204,9 @@ $taskList
     ): String {
         val weatherTip = if (weatherSummary != null) {
             " $weatherSummary。"
-        } else ""
+        } else {
+            ""
+        }
 
         return when (type) {
             "morning" -> {
@@ -312,6 +287,27 @@ $taskList
             "noon" -> core.getSetting("greeting_noon_time") ?: "12:00"
             "evening" -> core.getSetting("greeting_evening_time") ?: "21:00"
             else -> "08:00"
+        }
+    }
+
+    companion object {
+        private const val TAG = "GreetingWorker"
+        const val KEY_GREETING_TYPE = "greeting_type"
+
+        /**
+         * 入队问候任务。
+         * @param context 上下文
+         * @param type 问候类型（"morning"/"noon"/"evening"）
+         */
+        fun enqueue(context: Context, type: String) {
+            val data = Data.Builder()
+                .putString(KEY_GREETING_TYPE, type)
+                .build()
+            val request = OneTimeWorkRequestBuilder<GreetingWorker>()
+                .setInputData(data)
+                .build()
+            WorkManager.getInstance(context).enqueue(request)
+            Log.d(TAG, "已入队问候 Worker: type=$type")
         }
     }
 }

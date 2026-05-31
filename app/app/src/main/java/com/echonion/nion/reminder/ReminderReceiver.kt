@@ -16,10 +16,6 @@ import android.util.Log
  */
 class ReminderReceiver : BroadcastReceiver() {
 
-    companion object {
-        private const val TAG = "ReminderReceiver"
-    }
-
     override fun onReceive(context: Context, intent: Intent) {
         // 安全校验：只处理我们自己的 action
         if (intent.action != ReminderScheduler.ACTION_REMINDER) return
@@ -31,6 +27,10 @@ class ReminderReceiver : BroadcastReceiver() {
 
         // 将处理逻辑委托给 ReminderWorker
         ReminderWorker.enqueue(context, taskId, type)
+    }
+
+    companion object {
+        private const val TAG = "ReminderReceiver"
     }
 }
 

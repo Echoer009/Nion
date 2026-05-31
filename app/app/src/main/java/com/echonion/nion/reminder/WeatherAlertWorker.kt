@@ -34,16 +34,6 @@ class WeatherAlertWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
 
-    companion object {
-        private const val TAG = "WeatherAlertWorker"
-
-        /** 静默时段起始时间（22:00）—— 此时间之后不发天气预警 */
-        private val QUIET_START = LocalTime.of(22, 0)
-
-        /** 静默时段结束时间（07:00）—— 此时间之前不发天气预警 */
-        private val QUIET_END = LocalTime.of(7, 0)
-    }
-
     override suspend fun doWork(): Result {
         Log.d(TAG, "开始天气预警检查")
 
@@ -87,40 +77,55 @@ class WeatherAlertWorker(
 
         Log.d(TAG, "检测到天气预警: severity=${alertResult.severity}, reasons=${alertResult.reasons}")
 
-        // 4. 通过 LLM 生成个性化提醒文案
-        val message = generateAlertMessage(core, weather, alertResult)
+        // ── 立即显示"正在输入..."通知，让用户知道 Nion 在工作 ──
+        val companionName = core.getSetting("companion_name")
+            ?: com.echonion.nion.ui.companion.PromptDefaults.DEFAULT_COMPANION_NAME
+        NotificationHelper.showTypingNotification(applicationContext, "weather_alert", companionName)
 
-        // 5. 三模分发：前台悬浮卡 / 后台悬浮窗 / 系统通知兜底
-        // 先发系统通知作为兜底（前台/悬浮窗接管后会主动取消）
-        NotificationHelper.showWeatherAlertNotification(
-            applicationContext,
-            message,
-            alertResult.severity,
-        )
+        try {
+            // 4. 通过 LLM 生成个性化提醒文案
+            val message = generateAlertMessage(core, weather, alertResult)
 
-        val severity = alertResult.severity
-        OverlayDispatcher.dispatch(
-            context = applicationContext,
-            onForeground = {
-                // 前台：发 SharedFlow 事件 → WeatherAlertOverlay 弹 App 内悬浮卡片
-                app.postWeatherAlertEvent(WeatherAlertEvent(severity, message))
-                // 前台 Overlay 已接管，取消系统通知避免双重提醒
-                NotificationHelper.dismissWeatherAlertNotification(applicationContext)
-            },
-            onBackgroundOverlay = {
-                // 后台 + 有悬浮窗权限 → 启动天气预警悬浮窗 Service
-                WeatherAlertFloatingService.start(applicationContext, severity, message)
-                // 悬浮窗已接管，取消系统通知避免双重提醒
-                NotificationHelper.dismissWeatherAlertNotification(applicationContext)
-            },
-            onFallback = {
-                // 兜底：保留系统通知（上面已发送）
-                Log.d(TAG, "App 在后台且无悬浮窗权限，保留系统通知")
-            },
-        )
+            // 5. 三模分发：前台悬浮卡 / 后台悬浮窗 / 系统通知兜底
+            // 先发系统通知作为兜底（前台/悬浮窗接管后会主动取消）
+            NotificationHelper.showWeatherAlertNotification(
+                applicationContext,
+                message,
+                alertResult.severity,
+            )
 
-        Log.d(TAG, "天气预警已分发")
-        return Result.success()
+            val severity = alertResult.severity
+            OverlayDispatcher.dispatch(
+                context = applicationContext,
+                onForeground = {
+                    // 前台：发 SharedFlow 事件 → WeatherAlertOverlay 弹 App 内悬浮卡片
+                    app.postWeatherAlertEvent(WeatherAlertEvent(severity, message))
+                    // 前台 Overlay 已接管，取消系统通知避免双重提醒
+                    NotificationHelper.dismissWeatherAlertNotification(applicationContext)
+                },
+                onBackgroundOverlay = {
+                    // 后台 + 有悬浮窗权限 → 启动天气预警悬浮窗 Service
+                    WeatherAlertFloatingService.start(applicationContext, severity, message)
+                    // 悬浮窗已接管，取消系统通知避免双重提醒
+                    NotificationHelper.dismissWeatherAlertNotification(applicationContext)
+                },
+                onFallback = {
+                    // 兜底：保留系统通知（上面已发送）
+                    Log.d(TAG, "App 在后台且无悬浮窗权限，保留系统通知")
+                },
+            )
+
+            // "正在输入..."通知已完成使命，取消它
+            NotificationHelper.dismissTypingNotification(applicationContext, "weather_alert")
+
+            Log.d(TAG, "天气预警已分发")
+            return Result.success()
+        } catch (e: Exception) {
+            Log.e(TAG, "天气预警处理失败", e)
+            // 异常时也要取消"正在输入"通知，避免残留
+            NotificationHelper.dismissTypingNotification(applicationContext, "weather_alert")
+            return Result.failure()
+        }
     }
 
     /**
@@ -148,16 +153,10 @@ class WeatherAlertWorker(
                 else -> "提示"
             }
 
-            // 从 settings 读取用户自定义的天气预警提示词模板
-            val companionName = core.getSetting("companion_name") ?: "Nion"
-            // 自动注入人设：先加载 prompt_persona 作为前缀，再拼接天气预警场景规则
-            val persona = (core.getSetting(PromptDefaults.KEY_PERSONA) ?: PromptDefaults.PERSONA)
-                .replace("{name}", companionName)
             val template = core.getSetting(PromptDefaults.KEY_WEATHER_ALERT) ?: PromptDefaults.WEATHER_ALERT
-            val rulePrompt = template.replace("{severity}", severityDesc)
-            // 注入完整表情包列表，让 LLM 使用正确的标签名
-            val stickerPrompt = ReminderUtils.buildStickerListPrompt(core)
-            val systemPrompt = persona + "\n\n" + rulePrompt + stickerPrompt
+            val scenePrompt = template.replace("{severity}", severityDesc)
+            // 使用统一方法构建与聊天对话完全一致的 system prompt 前缀
+            val systemPrompt = ReminderUtils.buildSystemPrompt(core, scenePrompt)
 
             val reasonsText = alert.reasons.joinToString("\n") { "- $it" }
             val userMsg = """当前天气：${com.echonion.nion.ui.companion.weather.weatherDescription(current.weatherCode)}，${current.temperature}°C
@@ -184,5 +183,15 @@ $reasonsText"""
             "warning" -> "提醒一下～$mainReason。出门记得做好准备哦！"
             else -> "提示：$mainReason。"
         }
+    }
+
+    companion object {
+        private const val TAG = "WeatherAlertWorker"
+
+        /** 静默时段起始时间（22:00）—— 此时间之后不发天气预警 */
+        private val QUIET_START = LocalTime.of(22, 0)
+
+        /** 静默时段结束时间（07:00）—— 此时间之前不发天气预警 */
+        private val QUIET_END = LocalTime.of(7, 0)
     }
 }

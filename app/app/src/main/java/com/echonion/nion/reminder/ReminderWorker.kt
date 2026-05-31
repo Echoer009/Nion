@@ -30,44 +30,6 @@ class ReminderWorker(
     params: WorkerParameters,
 ) : CoroutineWorker(context, params) {
 
-    companion object {
-        private const val TAG = "ReminderWorker"
-
-        /** InputData key：任务 ID */
-        const val KEY_TASK_ID = "task_id"
-        /** InputData key：闹钟类型（"exact" 或 "daily"） */
-        const val KEY_TYPE = "type"
-
-        /**
-         * 启动 ReminderWorker 执行提醒逻辑。
-         * 由 ReminderReceiver 在闹钟触发时调用。
-         *
-         * @param context 上下文
-         * @param taskId 任务 ID
-         * @param type 闹钟类型（"exact" 或 "daily"）
-         */
-        fun enqueue(context: Context, taskId: String, type: String) {
-            val data = Data.Builder()
-                .putString(KEY_TASK_ID, taskId)
-                .putString(KEY_TYPE, type)
-                .build()
-
-            val workRequest = OneTimeWorkRequestBuilder<ReminderWorker>()
-                .setInputData(data)
-                .build()
-
-            // 使用唯一 Work 名称去重：同一任务已有排队中的 Worker 则跳过，
-            // 防止 AlarmManager 重复投递导致 trigger_count 被多次递增
-            WorkManager.getInstance(context)
-                .enqueueUniqueWork(
-                    "reminder_$taskId",
-                    ExistingWorkPolicy.KEEP,
-                    workRequest,
-                )
-            Log.d(TAG, "已入队 ReminderWorker: taskId=$taskId, type=$type")
-        }
-    }
-
     override suspend fun doWork(): Result {
         val taskId = inputData.getString(KEY_TASK_ID) ?: return Result.failure()
         val type = inputData.getString(KEY_TYPE) ?: return Result.failure()
@@ -83,6 +45,11 @@ class ReminderWorker(
         val core = app.core
 
         try {
+            // ── 0. 立即显示"正在输入..."通知，让用户知道 Nion 在工作 ──
+            val companionName = core.getSetting("companion_name")
+                ?: com.echonion.nion.ui.companion.PromptDefaults.DEFAULT_COMPANION_NAME
+            NotificationHelper.showTypingNotification(applicationContext, "reminder_$taskId", companionName)
+
             // 1. 从 DB 读取任务详情
             val task = core.getTask(taskId)
             val taskTitle = task.name
@@ -129,6 +96,9 @@ class ReminderWorker(
                 },
             )
 
+            // "正在输入..."通知已完成使命，取消它
+            NotificationHelper.dismissTypingNotification(applicationContext, "reminder_$taskId")
+
             // 6. 如果未达最大次数，调度下一次循环
             if (triggerCount < ReminderStore.MAX_TRIGGER_COUNT) {
                 val nextDelay = ReminderStore.LOOP_INTERVAL_MINUTES * 60_000L
@@ -150,6 +120,8 @@ class ReminderWorker(
             return Result.success()
         } catch (e: Exception) {
             Log.e(TAG, "提醒逻辑执行失败: taskId=$taskId", e)
+            // 异常时也要取消"正在输入"通知，避免残留
+            NotificationHelper.dismissTypingNotification(applicationContext, "reminder_$taskId")
             return Result.failure()
         }
     }
@@ -172,6 +144,44 @@ class ReminderWorker(
             }
         } catch (e: Exception) {
             Log.w(TAG, "调度明天每日提醒失败: $taskId", e)
+        }
+    }
+
+    companion object {
+        private const val TAG = "ReminderWorker"
+
+        /** InputData key：任务 ID */
+        const val KEY_TASK_ID = "task_id"
+        /** InputData key：闹钟类型（"exact" 或 "daily"） */
+        const val KEY_TYPE = "type"
+
+        /**
+         * 启动 ReminderWorker 执行提醒逻辑。
+         * 由 ReminderReceiver 在闹钟触发时调用。
+         *
+         * @param context 上下文
+         * @param taskId 任务 ID
+         * @param type 闹钟类型（"exact" 或 "daily"）
+         */
+        fun enqueue(context: Context, taskId: String, type: String) {
+            val data = Data.Builder()
+                .putString(KEY_TASK_ID, taskId)
+                .putString(KEY_TYPE, type)
+                .build()
+
+            val workRequest = OneTimeWorkRequestBuilder<ReminderWorker>()
+                .setInputData(data)
+                .build()
+
+            // 使用唯一 Work 名称去重：同一任务已有排队中的 Worker 则跳过，
+            // 防止 AlarmManager 重复投递导致 trigger_count 被多次递增
+            WorkManager.getInstance(context)
+                .enqueueUniqueWork(
+                    "reminder_$taskId",
+                    ExistingWorkPolicy.KEEP,
+                    workRequest,
+                )
+            Log.d(TAG, "已入队 ReminderWorker: taskId=$taskId, type=$type")
         }
     }
 }

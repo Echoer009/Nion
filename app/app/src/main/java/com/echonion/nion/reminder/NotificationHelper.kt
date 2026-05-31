@@ -37,6 +37,13 @@ object NotificationHelper {
     /** 天气预警渠道描述 */
     private const val WEATHER_CHANNEL_DESC = "Nion 的天气变化提醒"
 
+    /** "正在输入"状态通知渠道 ID —— IMPORTANCE_MIN 确保无声无震动无横幅 */
+    private const val TYPING_CHANNEL_ID = "typing_status"
+    /** "正在输入"渠道名称 */
+    private const val TYPING_CHANNEL_NAME = "输入状态"
+    /** "正在输入"渠道描述 */
+    private const val TYPING_CHANNEL_DESC = "Nion 正在生成回复时的状态提示"
+
     /**
      * 创建通知渠道。
      * 必须在 Application.onCreate() 中调用，且只在 Android 8.0+ 需要创建。
@@ -67,6 +74,19 @@ object NotificationHelper {
                 setShowBadge(true)
             }
             manager.createNotificationChannel(weatherChannel)
+
+            // "正在输入"状态渠道（最低优先级，不会弹横幅、响铃或震动）
+            val typingChannel = NotificationChannel(
+                TYPING_CHANNEL_ID,
+                TYPING_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_MIN,
+            ).apply {
+                description = TYPING_CHANNEL_DESC
+                enableVibration(false)
+                setShowBadge(false)
+                setSound(null, null)
+            }
+            manager.createNotificationChannel(typingChannel)
         }
     }
 
@@ -82,7 +102,7 @@ object NotificationHelper {
      * @param context 上下文
      * @param taskId 任务 ID，同时用作通知 ID（通过 hashCode）
      * @param taskTitle 任务标题，用于 Action 按钮 Intent 传递
-     * @param message Nion 的提醒文案（LLM 生成或模板）
+     * @param message Nion 的提醒文案（LLM 生成或模板），系统通知不支持 Markdown，会自动清理
      * @param triggerCount 当前触发次数（1-5），决定按钮文案
      */
     fun showReminderNotification(
@@ -92,6 +112,8 @@ object NotificationHelper {
         message: String,
         triggerCount: Int,
     ) {
+        // 系统通知不支持 Markdown 渲染，清理后显示纯文本
+        val plainMessage = ReminderUtils.stripMarkdown(message)
         val notificationId = taskId.hashCode() and 0x7FFFFFFF
         val labels = ReminderMessageGenerator.getActionLabels(triggerCount)
 
@@ -118,7 +140,7 @@ object NotificationHelper {
             .setStyle(
                 NotificationCompat.BigTextStyle()
                     .setBigContentTitle(taskTitle)
-                    .bigText(message)
+                    .bigText(plainMessage)
             )
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setDefaults(NotificationCompat.DEFAULT_ALL)
@@ -189,6 +211,7 @@ object NotificationHelper {
      * @param message 通知文案
      */
     fun showSimpleNotification(context: Context, taskId: String, message: String) {
+        val plainMessage = ReminderUtils.stripMarkdown(message)
         val notificationId = taskId.hashCode() and 0x7FFFFFFF
 
         val contentIntent = Intent(context, MainActivity::class.java).apply {
@@ -204,8 +227,8 @@ object NotificationHelper {
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher)
             .setContentTitle("Nion")
-            .setContentText(message)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setContentText(plainMessage)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(plainMessage))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)
             .setContentIntent(pendingIntent)
@@ -225,6 +248,7 @@ object NotificationHelper {
      * @param message 问候文案（LLM 生成或模板）
      */
     fun showGreetingNotification(context: Context, type: String, message: String) {
+        val plainMessage = ReminderUtils.stripMarkdown(message)
         val notificationId = ("greeting_$type").hashCode() and 0x7FFFFFFF
 
         // 点击通知 → 打开 app 并展开伙伴面板
@@ -250,45 +274,8 @@ object NotificationHelper {
         val notification = NotificationCompat.Builder(context, CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher)
             .setContentTitle(title)
-            .setContentText(message)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
-            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setAutoCancel(true)
-            .setContentIntent(contentPendingIntent)
-            .build()
-
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(notificationId, notification)
-    }
-
-    /**
-     * 显示批量提醒通知（无 Action 按钮，点击打开伙伴面板）。
-     *
-     * 用于密集时段汇总提醒，通知优先级为 DEFAULT。
-     *
-     * @param context 上下文
-     * @param message 汇总文案（LLM 生成或模板）
-     */
-    fun showBatchNotification(context: Context, message: String) {
-        val notificationId = "batch_reminder".hashCode() and 0x7FFFFFFF
-
-        // 点击通知 → 打开伙伴面板
-        val contentIntent = Intent(context, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
-            putExtra("open_companion", true)
-        }
-        val contentPendingIntent = PendingIntent.getActivity(
-            context,
-            notificationId,
-            contentIntent,
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-        )
-
-        val notification = NotificationCompat.Builder(context, CHANNEL_ID)
-            .setSmallIcon(R.drawable.ic_launcher)
-            .setContentTitle("Nion")
-            .setContentText("任务密集时段提醒")
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setContentText(plainMessage)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(plainMessage))
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
             .setAutoCancel(true)
             .setContentIntent(contentPendingIntent)
@@ -308,6 +295,7 @@ object NotificationHelper {
      * @param severity 严重程度：info/warning/urgent
      */
     fun showWeatherAlertNotification(context: Context, message: String, severity: String) {
+        val plainMessage = ReminderUtils.stripMarkdown(message)
         val notificationId = "weather_alert".hashCode() and 0x7FFFFFFF
 
         // 点击通知 → 打开 app 并展开伙伴面板
@@ -337,8 +325,8 @@ object NotificationHelper {
         val notification = NotificationCompat.Builder(context, WEATHER_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher)
             .setContentTitle(title)
-            .setContentText(message)
-            .setStyle(NotificationCompat.BigTextStyle().bigText(message))
+            .setContentText(plainMessage)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(plainMessage))
             .setPriority(priority)
             .setAutoCancel(true)
             .setContentIntent(contentPendingIntent)
@@ -362,6 +350,7 @@ object NotificationHelper {
      * 取消指定类型的问候通知。
      * 当悬浮窗或 App 内 Overlay 接管后调用，避免通知栏残留。
      *
+     * @param context Android 上下文，用于获取 NotificationManager
      * @param type 问候类型："morning" / "noon" / "evening"
      */
     fun dismissGreetingNotification(context: Context, type: String) {
@@ -376,6 +365,45 @@ object NotificationHelper {
      */
     fun dismissWeatherAlertNotification(context: Context) {
         val notificationId = "weather_alert".hashCode() and 0x7FFFFFFF
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(notificationId)
+    }
+
+    /**
+     * 显示"正在输入..."状态通知。
+     *
+     * 在 Worker 开始 LLM 生成前调用，用最低优先级通知安静地出现在通知栏，
+     * 告知用户 Nion 正在准备回复。文案格式："{companionName} 正在输入..."
+     *
+     * @param context 上下文
+     * @param type 场景标识（如 "greeting_morning" / "weather_alert" / "reminder_{taskId}"），用于生成唯一通知 ID
+     * @param companionName 用户设置的伙伴名称
+     */
+    fun showTypingNotification(context: Context, type: String, companionName: String) {
+        val notificationId = ("typing_$type").hashCode() and 0x7FFFFFFF
+        val notification = NotificationCompat.Builder(context, TYPING_CHANNEL_ID)
+            .setSmallIcon(R.drawable.ic_launcher)
+            .setContentTitle(companionName)
+            .setContentText("正在输入...")
+            .setPriority(NotificationCompat.PRIORITY_MIN)
+            .setOngoing(true)
+            .setSilent(true)
+            .build()
+
+        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(notificationId, notification)
+    }
+
+    /**
+     * 取消"正在输入..."状态通知。
+     *
+     * 在 LLM 生成完毕、正式通知/悬浮窗弹出后调用，移除"正在输入"提示。
+     *
+     * @param context 上下文
+     * @param type 场景标识，必须与 showTypingNotification 传入的一致
+     */
+    fun dismissTypingNotification(context: Context, type: String) {
+        val notificationId = ("typing_$type").hashCode() and 0x7FFFFFFF
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.cancel(notificationId)
     }

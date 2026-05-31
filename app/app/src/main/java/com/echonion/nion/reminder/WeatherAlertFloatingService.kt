@@ -85,38 +85,6 @@ import uniffi.nion_core.StickerData
  */
 class WeatherAlertFloatingService : Service() {
 
-    companion object {
-        private const val TAG = "WeatherAlertFloating"
-        private const val CHANNEL_ID = "weather_alert_floating"
-        private const val NOTIFICATION_ID = 4001
-
-        // Intent Extra keys
-        const val EXTRA_SEVERITY = "severity"
-        const val EXTRA_MESSAGE = "message"
-
-        /**
-         * 启动天气预警悬浮窗 Service。
-         * 只有在拥有悬浮窗权限时才应调用。
-         *
-         * @param context 上下文
-         * @param severity 预警严重程度："info" / "warning" / "urgent"
-         * @param message 预警文案
-         */
-        fun start(context: Context, severity: String, message: String) {
-            val intent = Intent(context, WeatherAlertFloatingService::class.java).apply {
-                putExtra(EXTRA_SEVERITY, severity)
-                putExtra(EXTRA_MESSAGE, message)
-            }
-            // Android 8+ 后台启动 Service 需要前台 Service
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                context.startForegroundService(intent)
-            } else {
-                context.startService(intent)
-            }
-            Log.d(TAG, "启动天气预警悬浮窗 Service: severity=$severity")
-        }
-    }
-
     // 悬浮窗相关
     private var windowManager: WindowManager? = null
     private var floatingView: android.view.View? = null
@@ -243,8 +211,9 @@ class WeatherAlertFloatingService : Service() {
                     when (mode) {
                         "custom" -> {
                             val activeId = app.core.getSetting("active_custom_theme_id") ?: ""
-                            if (activeId.isBlank()) NionColorTheme.CORAL.palette()
-                            else {
+                            if (activeId.isBlank()) {
+                                NionColorTheme.CORAL.palette()
+                            } else {
                                 val themes = CustomThemeEntry.listFromJson(app.core.getSetting("custom_themes_list") ?: "[]")
                                 val entry = themes.find { it.id == activeId }
                                 entry?.palette ?: NionColorTheme.CORAL.palette()
@@ -357,6 +326,38 @@ class WeatherAlertFloatingService : Service() {
     private fun handleDismiss() {
         Log.d(TAG, "关闭天气预警悬浮窗: severity=$severity")
         removeFloatingWindow(animated = true)
+    }
+
+    companion object {
+        private const val TAG = "WeatherAlertFloating"
+        private const val CHANNEL_ID = "weather_alert_floating"
+        private const val NOTIFICATION_ID = 4001
+
+        // Intent Extra keys
+        const val EXTRA_SEVERITY = "severity"
+        const val EXTRA_MESSAGE = "message"
+
+        /**
+         * 启动天气预警悬浮窗 Service。
+         * 只有在拥有悬浮窗权限时才应调用。
+         *
+         * @param context 上下文
+         * @param severity 预警严重程度："info" / "warning" / "urgent"
+         * @param message 预警文案
+         */
+        fun start(context: Context, severity: String, message: String) {
+            val intent = Intent(context, WeatherAlertFloatingService::class.java).apply {
+                putExtra(EXTRA_SEVERITY, severity)
+                putExtra(EXTRA_MESSAGE, message)
+            }
+            // Android 8+ 后台启动 Service 需要前台 Service
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                context.startForegroundService(intent)
+            } else {
+                context.startService(intent)
+            }
+            Log.d(TAG, "启动天气预警悬浮窗 Service: severity=$severity")
+        }
     }
 }
 
