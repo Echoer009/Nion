@@ -61,7 +61,7 @@ That's me you're chatting with~
 - **9 built-in tools**: I can directly manipulate your task data — see the toolbox below for details
 - **Memory system**: Your preferences and focus points get remembered automatically, carried across sessions
 - **Weather awareness**: GPS + free weather API. Rain's coming? I'll tell you to grab an umbrella
-- **Character presets**: Standard version and built-in character version — switch personalities whenever you want
+- **Fully customizable persona**: Personality, avatar, character — change whatever you want, make me whoever you want
 
 <p align="center">
   <img src="docs/gifs/和伙伴第一次打招呼.gif" width="280" alt="First Greeting">
@@ -183,9 +183,6 @@ Hehe, I know I'm already pretty awesome, right? But I've got a secret wishlist �
 > **Q: Will my API key leak?**
 > A: Don't worry don't worry! Your key stays on your phone, I swear I'd never send it anywhere else. All requests go directly from your device to the AI provider. I'm just the middleman, and I don't peek.
 
-> **Q: What's the deal with Nion vs BrainGirl?**
-> A: Oh that~ Nion is the clean standard version, no presets. BrainGirl comes with a pre-loaded character card, avatar, and a ton of stickers. Same features, just depends on what personality you vibe with~
-
 > **Q: How do I backup my data?**
 > A: Settings → Data Management → Export, and WHOOSH a zip file appears with all your tasks, stickers, avatars inside. Import it after switching phones or reinstalling — not a single byte lost!
 
@@ -289,11 +286,7 @@ cd app && ./gradlew assembleStandardDebug
 ### 3. Deploy to device
 
 ```bash
-# Standard version
 ./deploy.sh standard
-
-# Built-in character version
-./deploy.sh character
 ```
 
 ## Tech Stack
