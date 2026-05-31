@@ -32,7 +32,8 @@ Basically, with me around you don't need to worry about anything!
 - **Super fast at getting stuff done** — Tasks, lists, reminders, recurring stuff, theme colors... you name it, I do it. Lightning fast!
 - **More concerned about you than you are** — Too many tasks? I'll nudge you. Bad weather? I'll warn you. Basically, I won't let you forget anything.
 - **Always around** — Background reminders + floating cards. Even if you pretend you didn't see them, you can't escape the important stuff!
-- **Make me yours** — Stickers, character presets, avatars, theme colors — everything's customizable. Turn me into whoever you want!
+
+And here's the best part — **everything about me is customizable**. Think my stickers aren't enough? Add your own! Want a different personality? Edit my character preset! Don't like my avatar? Swap it! Theme colors, reminder messages, greetings... mold me into whatever you want. You're the boss.
 
 ## What I Can Do
 
@@ -61,7 +62,6 @@ That's me you're chatting with~
 - **Memory system**: Your preferences and focus points get remembered automatically, carried across sessions
 - **Weather awareness**: GPS + free weather API. Rain's coming? I'll tell you to grab an umbrella
 - **Character presets**: Standard version and built-in character version — switch personalities whenever you want
-- **Highly customizable**: Import your own stickers, character presets, avatars, and greeting messages. Shape me into the companion you want
 
 <p align="center">
   <img src="docs/gifs/和伙伴第一次打招呼.gif" width="280" alt="First Greeting">
