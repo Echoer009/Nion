@@ -2063,7 +2063,7 @@ class CompanionViewModel(
          * true: 在对话中显示每次 API 请求的缓存命中/未命中统计（开发/调试用）
          * false: 不显示任何缓存调试信息（Release 构建必须设为 false）
          */
-        private const val CACHE_DEBUG_ENABLED = true
+        private const val CACHE_DEBUG_ENABLED = false
 
         /**
          * ViewModel 工厂 —— 从 Application 获取 NionCore 单例注入 ViewModel。
