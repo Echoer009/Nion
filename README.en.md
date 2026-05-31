@@ -1,10 +1,4 @@
-<p align="center">
-  <img src="docs/nion-icon.png" width="80" height="80" alt="Nion">
-  &nbsp;&nbsp;
-  <img src="docs/braingirl-icon.png" width="80" height="80" alt="BrainGirl">
-</p>
-
-<h1 align="center">Nion</h1>
+<h1 align="center">Nion <img src="docs/nion-icon.png" width="40" height="40" alt="Nion"></h1>
 
 <p align="center">
   <strong>Hey, I'm Nion!</strong><br>
@@ -174,53 +168,29 @@ Hehe, I know I'm already pretty awesome, right? But I've got a secret wishlist �
 
 ## You're Probably Wondering...
 
-<details>
-<summary><strong>Do I need internet?</strong></summary>
+> **Q: Do I need internet?**
+> A: Nope! Task management, focus timer, schedule — all work completely offline. You only need internet to chat with me or check the weather. When there's no connection, I'll just wait quietly in the background~
 
-Nope! Task management, focus timer, schedule — all work completely offline. You only need internet to chat with me or check the weather. When there's no connection, I'll just wait quietly in the background~
-</details>
+> **Q: Do I need to create an account?**
+> A: No no no, I hate sign-ups too! Everything stays on your phone, no cloud accounts. Just drop in an LLM API key in settings and we can start chatting. Nothing else needed.
 
-<details>
-<summary><strong>Do I need to create an account?</strong></summary>
+> **Q: Which AI models work?**
+> A: OpenAI (GPT series), Anthropic (Claude series), DeepSeek — all good! Basically anything that speaks OpenAI API format, I can handle. You pick, I learn.
 
-No no no, I hate sign-ups too! Everything stays on your phone, no cloud accounts. Just drop in an LLM API key in settings and we can start chatting. Nothing else needed.
-</details>
+> **Q: Will my API key leak?**
+> A: Don't worry don't worry! Your key stays on your phone, I swear I'd never send it anywhere else. All requests go directly from your device to the AI provider. I'm just the middleman, and I don't peek.
 
-<details>
-<summary><strong>Which AI models work?</strong></summary>
+> **Q: What's the deal with Nion vs BrainGirl?**
+> A: Oh that~ Nion is the clean standard version, no presets. BrainGirl comes with a pre-loaded character card, avatar, and a ton of stickers. Same features, just depends on what personality you vibe with~
 
-OpenAI (GPT series), Anthropic (Claude series), DeepSeek — all good! Basically anything that speaks OpenAI API format, I can handle. You pick, I learn.
-</details>
+> **Q: How do I backup my data?**
+> A: Settings → Data Management → Export, and WHOOSH a zip file appears with all your tasks, stickers, avatars inside. Import it after switching phones or reinstalling — not a single byte lost!
 
-<details>
-<summary><strong>Will my API key leak?</strong></summary>
+> **Q: Why are my reminders sometimes late?**
+> A: Hmph, this is SO not my fault okay!! It's those phone manufacturers (yeah I'm talking about you Xiaomi, Huawei, vivo) that keep killing my background process! Just enable "overlay" and "background reminder" permissions in Settings, and add me to the battery optimization whitelist. Please, give me a chance to nag you on time!
 
-Don't worry don't worry! Your key stays on your phone, I swear I'd never send it anywhere else. All requests go directly from your device to the AI provider. I'm just the middleman, and I don't peek.
-</details>
-
-<details>
-<summary><strong>What's the deal with Nion vs BrainGirl?</strong></summary>
-
-Oh that~ Nion is the clean standard version, no presets. BrainGirl comes with a pre-loaded character card, avatar, and a ton of stickers. Same features, just depends on what personality you vibe with~
-</details>
-
-<details>
-<summary><strong>How do I backup my data?</strong></summary>
-
-Settings → Data Management → Export, and WHOOSH a zip file appears with all your tasks, stickers, avatars inside. Import it after switching phones or reinstalling — not a single byte lost!
-</details>
-
-<details>
-<summary><strong>Why are my reminders sometimes late?</strong></summary>
-
-Hmph, this is SO not my fault okay!! It's those phone manufacturers (yeah I'm talking about you Xiaomi, Huawei, vivo) that keep killing my background process! Just enable "overlay" and "background reminder" permissions in Settings, and add me to the battery optimization whitelist. Please, give me a chance to nag you on time!
-</details>
-
-<details>
-<summary><strong>Is it open source? Can I contribute?</strong></summary>
-
-Absolutely! Fully open source under GPL-3.0. Issues and PRs welcome — come on, let's make me even stronger together!
-</details>
+> **Q: Is it open source? Can I contribute?**
+> A: Absolutely! Fully open source under GPL-3.0. Issues and PRs welcome — come on, let's make me even stronger together!
 
 ## Architecture
 
