@@ -44,6 +44,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 
 import androidx.compose.runtime.setValue
 
@@ -108,6 +109,15 @@ fun SharedTaskList(
     modifier: Modifier = Modifier,
 ) {
     val haptic = LocalHapticFeedback.current
+
+    /**
+     * todoItems 的最新值包装为 State。
+     * longPressDraggableHandle 的 pointerInput 协程仅在 key 变化时重启，
+     * onDragStopped 闭包可能捕获到旧的 todoItems 参数值。
+     * 通过 rememberUpdatedState 创建的 State 对象引用不变、.value 始终是最新的，
+     * 即使闭包过期也能读到当前 todoItems，避免拖拽后长按导致 reorderableItems 被回滚。
+     */
+    val currentTodoItems by rememberUpdatedState(todoItems)
 
     var wasMoved by remember { mutableStateOf(false) }
     var subsRemoved by remember { mutableStateOf(false) }
@@ -410,7 +420,8 @@ fun SharedTaskList(
                                         val mainIdx = reorderableItems.indexOfFirst { it.task.id == draggedId }
                                         if (mainIdx >= 0 && draggedGroupId != null && preCollapseGroupIds.size > 1) {
                                             val subIds = preCollapseGroupIds.toSet() - draggedId
-                                            val subs = todoItems.filter { it.task.id in subIds }
+                                            /* 用 currentTodoItems 避免闭包过期读到旧值 */
+                                            val subs = currentTodoItems.filter { it.task.id in subIds }
                                             reorderableItems.addAll(mainIdx + 1, subs)
                                         }
                                         /* 标记拖拽异步中间态，防止 remember(todoItems) 在异步完成前
@@ -432,7 +443,10 @@ fun SharedTaskList(
                                         } else {
                                             onToggleSelection(flatItem.task.id)
                                         }
-                                        val fresh = todoItems
+                                        /* 用 rememberUpdatedState 包装的 currentTodoItems，
+                                         * 确保闭包过期时仍能读到最新的 todoItems 值，
+                                         * 避免 pointerInput 协程未重启导致强制同步回滚拖拽后的顺序 */
+                                        val fresh = currentTodoItems
                                         if (reorderableItems.size != fresh.size || reorderableItems.zip(fresh).any { (a, b) -> a != b }) {
                                             reorderableItems.clear()
                                             reorderableItems.addAll(fresh)
