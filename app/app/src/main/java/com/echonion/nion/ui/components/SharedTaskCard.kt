@@ -216,22 +216,24 @@ fun SharedTaskCard(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            // 提醒时间 + 每日循环时间行：铃铛/时钟图标 + 格式化日期，逾期时文字变红
-            // 两种时间信息：reminder（一次性提醒）、reminderTime（每日循环时间）
+            // 提醒时间显示行：根据任务类型显示不同样式
+            // - 每日循环任务：只显示时钟图标 + HH:MM，不显示具体日期，逾期时变红
+            // - 一次性提醒任务：显示铃铛图标 + 完整日期时间，逾期时变红
             val hasReminderTime = !model.reminderTime.isNullOrBlank()
-            val hasReminder = !model.reminder.isNullOrBlank()
+            // 每日循环任务不显示铃铛部分，避免与时钟图标重复
+            val hasReminder = !model.reminder.isNullOrBlank() && !model.isDaily
+            // 每日任务的逾期判断：通过 reminder 字段（自动设为今天日期+时间）检测是否已过时
+            val isDailyOverdue = model.isDaily && model.reminder.isReminderOverdue() && !model.isDone
             if (hasReminder || hasReminderTime) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     // 一次性提醒部分：铃铛图标 + 格式化的完整日期时间，逾期变红
                     if (hasReminder) {
-                        // 已完成的任务不再标红提醒时间
                         val isOverdue = model.reminder.isReminderOverdue() && !model.isDone
                         Icon(
                             Icons.Outlined.Notifications,
                             contentDescription = null,
                             modifier = Modifier.size(12.dp),
-                            // 提醒图标使用 tertiary（非逾期状态下的装饰性指示）
                             tint = if (isOverdue) MaterialTheme.colorScheme.error
                             else MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),
                         )
@@ -239,27 +241,28 @@ fun SharedTaskCard(
                         Text(
                             text = model.reminder.formatReminder() ?: "",
                             style = MaterialTheme.typography.bodySmall,
-                            // 提醒时间文字使用 tertiary（装饰性指示）
                             color = if (isOverdue) MaterialTheme.colorScheme.error
                             else MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
                     }
-                    // 每日循环提醒时间部分：时钟图标 + HH:MM 时间
+                    // 每日循环提醒时间部分：时钟图标 + HH:MM 时间，逾期时图标和文字变红
                     if (hasReminderTime) {
                         if (hasReminder) Spacer(modifier = Modifier.width(8.dp))
                         Icon(
                             Icons.Outlined.Schedule,
                             contentDescription = null,
                             modifier = Modifier.size(12.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
+                            tint = if (isDailyOverdue) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
                         )
                         Spacer(modifier = Modifier.width(4.dp))
                         Text(
                             text = model.reminderTime,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
+                            color = if (isDailyOverdue) MaterialTheme.colorScheme.error
+                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
