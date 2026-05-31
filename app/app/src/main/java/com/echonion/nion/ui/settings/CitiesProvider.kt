@@ -1,6 +1,7 @@
 package com.echonion.nion.ui.settings
 
 import android.content.Context
+import android.util.Log
 import org.json.JSONArray
 
 /**
@@ -16,6 +17,8 @@ import org.json.JSONArray
  * ```
  */
 object CitiesProvider {
+
+    private const val TAG = "CitiesProvider"
 
     /**
      * 单条城市数据。
@@ -59,6 +62,7 @@ object CitiesProvider {
             }
             cities
         } catch (e: Exception) {
+            Log.w(TAG, "加载城市列表失败", e)
             emptyList()
         }
     }

@@ -362,166 +362,282 @@ fun SettingsScreen(
             }
 
             // 悬浮窗提醒权限开关
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-            ) {
-                var overlayGranted by remember {
-                    mutableStateOf(
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            Settings.canDrawOverlays(context)
-                        } else {
-                            true
-                        }
-                    )
-                }
-                val lifecycleOwner = LocalLifecycleOwner.current
-                DisposableEffect(lifecycleOwner) {
-                    val observer = LifecycleEventObserver { _, event ->
-                        if (event == Lifecycle.Event.ON_RESUME) {
-                            overlayGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                Settings.canDrawOverlays(context)
-                            } else {
-                                true
-                            }
-                        }
-                    }
-                    lifecycleOwner.lifecycle.addObserver(observer)
-                    onDispose {
-                        lifecycleOwner.lifecycle.removeObserver(observer)
-                    }
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.OpenInNew,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(24.dp),
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "悬浮窗提醒",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            if (overlayGranted) "已授权，App 后台时可弹出悬浮卡片"
-                            else "未授权，App 后台时仅显示通知栏提醒",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (overlayGranted) MaterialTheme.colorScheme.onSurfaceVariant
-                            else MaterialTheme.colorScheme.error,
-                        )
-                    }
-                    if (!overlayGranted) {
-                        TextButton(onClick = {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                val intent = Intent(
-                                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                    Uri.parse("package:${context.packageName}"),
-                                )
-                                context.startActivity(intent)
-                            }
-                        }) {
-                            Text("去设置")
-                        }
-                    } else {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = "已授权",
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(20.dp),
-                        )
-                    }
-                }
-            }
+            OverlayPermissionCard(context = context)
 
             // 后台提醒（电池优化白名单）权限开关
-            Surface(
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.medium,
-                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-            ) {
-                var batteryOptimized by remember {
-                    mutableStateOf(
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            !(context.getSystemService(Context.POWER_SERVICE) as PowerManager)
-                                .isIgnoringBatteryOptimizations(context.packageName)
-                        } else {
-                            false
-                        }
-                    )
-                }
-                val lifecycleOwner2 = LocalLifecycleOwner.current
-                DisposableEffect(lifecycleOwner2) {
-                    val observer = LifecycleEventObserver { _, event ->
-                        if (event == Lifecycle.Event.ON_RESUME) {
-                            batteryOptimized = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                !(context.getSystemService(Context.POWER_SERVICE) as PowerManager)
-                                    .isIgnoringBatteryOptimizations(context.packageName)
-                            } else {
-                                false
-                            }
-                        }
-                    }
-                    lifecycleOwner2.lifecycle.addObserver(observer)
-                    onDispose {
-                        lifecycleOwner2.lifecycle.removeObserver(observer)
-                    }
-                }
+            BatteryPermissionCard(context = context)
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 14.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Icon(
-                        Icons.Default.BatteryAlert,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(24.dp),
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            "后台提醒",
-                            style = MaterialTheme.typography.bodyLarge,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        Text(
-                            if (!batteryOptimized) "已设置，定时提醒闹钟可正常触发"
-                            else "未设置，定时提醒可能被系统省电策略拦截",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (!batteryOptimized) MaterialTheme.colorScheme.onSurfaceVariant
-                            else MaterialTheme.colorScheme.error,
-                        )
-                    }
-                    if (batteryOptimized) {
-                        TextButton(onClick = {
-                            com.echonion.nion.reminder.VendorBatteryHelper.openBatterySettings(context)
-                        }) {
-                            Text("去设置")
-                        }
+            Spacer(modifier = Modifier.height(16.dp))
+        }
+    }
+}
+
+/**
+ * 悬浮窗提醒权限卡片 —— 自动检测权限状态，返回页面时刷新。
+ *
+ * 使用 DisposableEffect 监听 Lifecycle.ON_RESUME 事件重新检查权限，
+ * 因为用户跳转到系统设置页面授权后会返回本页面。
+ *
+ * @param context 用于检查权限和跳转系统设置
+ */
+@Composable
+private fun OverlayPermissionCard(context: Context) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+    ) {
+        var overlayGranted by remember {
+            mutableStateOf(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    Settings.canDrawOverlays(context)
+                } else {
+                    true
+                }
+            )
+        }
+        val lifecycleOwner = LocalLifecycleOwner.current
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    overlayGranted = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        Settings.canDrawOverlays(context)
                     } else {
-                        Icon(
-                            Icons.Default.Check,
-                            contentDescription = "已设置",
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(20.dp),
+                        true
+                    }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.AutoMirrored.Filled.OpenInNew,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.size(24.dp),
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "悬浮窗提醒",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    if (overlayGranted) "已授权，App 后台时可弹出悬浮卡片"
+                    else "未授权，App 后台时仅显示通知栏提醒",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (overlayGranted) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.error,
+                )
+            }
+            if (!overlayGranted) {
+                TextButton(onClick = {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        val intent = Intent(
+                            Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                            Uri.parse("package:${context.packageName}"),
+                        )
+                        context.startActivity(intent)
+                    }
+                }) {
+                    Text("去设置")
+                }
+            } else {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = "已授权",
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 电池优化白名单权限卡片 —— 自动检测是否在白名单中，返回页面时刷新。
+ *
+ * @param context 用于检查电池优化状态和跳转系统设置
+ */
+@Composable
+private fun BatteryPermissionCard(context: Context) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+    ) {
+        var batteryOptimized by remember {
+            mutableStateOf(
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    !(context.getSystemService(Context.POWER_SERVICE) as PowerManager)
+                        .isIgnoringBatteryOptimizations(context.packageName)
+                } else {
+                    false
+                }
+            )
+        }
+        val lifecycleOwner = LocalLifecycleOwner.current
+        DisposableEffect(lifecycleOwner) {
+            val observer = LifecycleEventObserver { _, event ->
+                if (event == Lifecycle.Event.ON_RESUME) {
+                    batteryOptimized = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        !(context.getSystemService(Context.POWER_SERVICE) as PowerManager)
+                            .isIgnoringBatteryOptimizations(context.packageName)
+                    } else {
+                        false
+                    }
+                }
+            }
+            lifecycleOwner.lifecycle.addObserver(observer)
+            onDispose {
+                lifecycleOwner.lifecycle.removeObserver(observer)
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Default.BatteryAlert,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.secondary,
+                modifier = Modifier.size(24.dp),
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "后台提醒",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Text(
+                    if (!batteryOptimized) "已设置，定时提醒闹钟可正常触发"
+                    else "未设置，定时提醒可能被系统省电策略拦截",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (!batteryOptimized) MaterialTheme.colorScheme.onSurfaceVariant
+                    else MaterialTheme.colorScheme.error,
+                )
+            }
+            if (batteryOptimized) {
+                TextButton(onClick = {
+                    com.echonion.nion.reminder.VendorBatteryHelper.openBatterySettings(context)
+                }) {
+                    Text("去设置")
+                }
+            } else {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = "已设置",
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 位置搜索区域 —— 包含搜索输入框和搜索结果列表。
+ *
+ * @param searchQuery 搜索关键字
+ * @param onSearchQueryChange 搜索关键字变更回调
+ * @param searchResults 搜索结果城市列表
+ * @param onCitySelect 城市选择回调
+ */
+@Composable
+private fun LocationSearchArea(
+    searchQuery: String,
+    onSearchQueryChange: (String) -> Unit,
+    searchResults: List<CitiesProvider.City>,
+    onCitySelect: (CitiesProvider.City) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Spacer(modifier = Modifier.height(10.dp))
+
+        OutlinedTextField(
+            value = searchQuery,
+            onValueChange = onSearchQueryChange,
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = {
+                Text(
+                    "搜索城市...",
+                    style = MaterialTheme.typography.bodySmall,
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Search,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            },
+            singleLine = true,
+            textStyle = MaterialTheme.typography.bodyMedium,
+            shape = RoundedCornerShape(12.dp),
+        )
+
+        AnimatedVisibility(
+            visible = searchResults.isNotEmpty(),
+            enter = expandVertically(
+                animationSpec = tween(200, easing = FastOutSlowInEasing),
+                expandFrom = Alignment.Top,
+            ),
+            exit = shrinkVertically(
+                animationSpec = tween(150, easing = FastOutSlowInEasing),
+                shrinkTowards = Alignment.Top,
+            ),
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 4.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+            ) {
+                searchResults.forEachIndexed { index, city ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { onCitySelect(city) }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                city.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                            )
+                            Text(
+                                city.province,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    if (index < searchResults.lastIndex) {
+                        HorizontalDivider(
+                            modifier = Modifier.padding(horizontal = 14.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = NionAlpha.BG_SUBTLE),
+                            thickness = 0.5.dp,
                         )
                     }
                 }
             }
-
-            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -1146,86 +1262,12 @@ private fun LocationCard(
 
                     // ── 展开的搜索区域（仅 expanded 状态下组合） ──
                     if (expanded) {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Spacer(modifier = Modifier.height(10.dp))
-
-                            // 城市搜索输入框
-                            OutlinedTextField(
-                                value = searchQuery,
-                                onValueChange = onSearchQueryChange,
-                                modifier = Modifier.fillMaxWidth(),
-                                placeholder = {
-                                    Text(
-                                        "搜索城市...",
-                                        style = MaterialTheme.typography.bodySmall,
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.Search,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(18.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                },
-                                singleLine = true,
-                                textStyle = MaterialTheme.typography.bodyMedium,
-                                shape = RoundedCornerShape(12.dp),
-                            )
-
-                            // 搜索结果列表（带垂直展开/收起动画）
-                            AnimatedVisibility(
-                                visible = searchResults.isNotEmpty(),
-                                enter = expandVertically(
-                                    animationSpec = tween(200, easing = FastOutSlowInEasing),
-                                    expandFrom = Alignment.Top,
-                                ),
-                                exit = shrinkVertically(
-                                    animationSpec = tween(150, easing = FastOutSlowInEasing),
-                                    shrinkTowards = Alignment.Top,
-                                ),
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 4.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh),
-                                ) {
-                                    searchResults.forEachIndexed { index, city ->
-                                        // 每个城市项：点击选中，显示城市名 + 省份
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clickable { onCitySelect(city) }
-                                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                        ) {
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    city.name,
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    fontWeight = FontWeight.Medium,
-                                                )
-                                                Text(
-                                                    city.province,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                )
-                                            }
-                                        }
-                                        // 分割线（最后一项不画）
-                                        if (index < searchResults.lastIndex) {
-                                            HorizontalDivider(
-                                                modifier = Modifier.padding(horizontal = 14.dp),
-                                                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = NionAlpha.BG_SUBTLE),
-                                                thickness = 0.5.dp,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
+                        LocationSearchArea(
+                            searchQuery = searchQuery,
+                            onSearchQueryChange = onSearchQueryChange,
+                            searchResults = searchResults,
+                            onCitySelect = onCitySelect,
+                        )
                     }
                 }
             }
