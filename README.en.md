@@ -152,6 +152,46 @@ You don't need to lift a finger while chatting. Just tell me and I'll handle the
 
 *OK that's enough about me. Here's the dev stuff — how I was built.*
 
+## What I Want to Learn Next
+
+I'm already pretty awesome, but there's so much more I want to do!
+
+- [ ] More list types: notes, journal, habit tracker
+- [ ] More LLM providers: Google Gemini, local models (Ollama)
+- [ ] Desktop support (built on existing Rust core)
+- [ ] Cloud sync: multi-device data synchronization
+- [ ] Widgets: home screen quick task, today's overview
+- [ ] Collaboration: share checklists, assign tasks
+- [ ] i18n: English, Japanese UI support
+- [ ] Custom reminder sounds
+- [ ] Quick actions: create tasks from notification bar
+
+## You Might Be Wondering...
+
+**Q: Do I need internet to use it?**
+A: Core features like task management, focus timer, and schedule work entirely offline. Only chatting with me and weather queries need internet.
+
+**Q: Do I need to create an account?**
+A: Nope! All data is stored locally on your phone — no cloud account needed. Just plug in an LLM API key in settings to start chatting with me.
+
+**Q: Which AI models are supported?**
+A: Currently OpenAI (GPT series), Anthropic (Claude series), and DeepSeek. Basically any service with an OpenAI-compatible API format works.
+
+**Q: Is my API key safe?**
+A: Relax, your key stays on your device and is never sent to any third-party server. All API requests go directly from your phone to the AI provider.
+
+**Q: What's the difference between Nion and BrainGirl?**
+A: Nion is the standard version without a built-in character preset. BrainGirl comes with a pre-configured character card, avatar, and sticker pack. Same features, different personality — pick whoever you like~
+
+**Q: Can I backup and restore my data?**
+A: Of course! Settings → Data Management → Export generates a zip with all your data. Import it on a new device or after reinstalling to restore everything. Nothing gets lost!
+
+**Q: Why are reminders sometimes delayed?**
+A: Hey, that's not my fault! Some manufacturers (Xiaomi, Huawei, vivo, etc.) aggressively kill background apps, which delays my alarms. Grant "overlay" and "battery optimization whitelist" permissions in Settings to fix this.
+
+**Q: Is it open source? Can I contribute?**
+A: Fully open source under GPL-3.0. Issues and PRs welcome — come make me even better!
+
 ## Architecture
 
 ```
@@ -264,44 +304,6 @@ cd app && ./gradlew assembleStandardDebug
 | Location | Google Play Services Location |
 | Rust Core | SQLite (rusqlite), UniFFI (proc-macro), serde, chrono |
 | Drag & Drop | [reorderable](https://github.com/Calvin-LL/reorderable) |
-
-## TODO
-
-- [ ] More list types: notes, journal, habit tracker
-- [ ] More LLM providers: Google Gemini, local models (Ollama)
-- [ ] Desktop support (built on existing Rust core)
-- [ ] Cloud sync: multi-device data synchronization
-- [ ] Widgets: home screen quick task, today's overview
-- [ ] Collaboration: share checklists, assign tasks
-- [ ] i18n: English, Japanese UI support
-- [ ] Custom reminder sounds
-- [ ] Quick actions: create tasks from notification bar
-
-## Q&A
-
-**Q: Do I need internet to use it?**
-A: Core features like task management, focus timer, and schedule work entirely offline. Only the AI companion chat and weather queries require internet.
-
-**Q: Do I need to create an account?**
-A: Nope. All data is stored locally on your phone — no cloud account needed. Just plug in an LLM API key in settings to start chatting with me.
-
-**Q: Which AI models are supported?**
-A: Currently OpenAI (GPT series), Anthropic (Claude series), and DeepSeek. Basically any service with an OpenAI-compatible API format works.
-
-**Q: Is my API key safe?**
-A: Your key stays on your device and is never sent to any third-party server. All API requests go directly from your phone to the AI provider.
-
-**Q: What's the difference between Nion and BrainGirl?**
-A: Nion is the standard version without a built-in character preset. BrainGirl comes with a pre-configured character card, avatar, and sticker pack. Same features, different personality.
-
-**Q: Can I backup and restore my data?**
-A: Yes! Settings → Data Management → Export generates a zip with all your data. Import it on a new device or after reinstalling to restore everything.
-
-**Q: Why are reminders sometimes delayed?**
-A: Some manufacturers (Xiaomi, Huawei, vivo, etc.) aggressively kill background apps, which can delay alarms. Grant "overlay" and "battery optimization whitelist" permissions in Settings to significantly improve reliability.
-
-**Q: Is it open source? Can I contribute?**
-A: Fully open source under GPL-3.0. Issues and PRs are welcome!
 
 ## License
 
