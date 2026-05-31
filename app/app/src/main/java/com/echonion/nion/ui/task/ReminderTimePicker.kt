@@ -72,6 +72,7 @@ private enum class PickerStep { Date, Time }
  * @param startExpanded 是否直接展开选择器（跳过标题行点击）。
  *   true = 面板模式：隐藏标题行，默认展开日历，操作完成后触发 onDismiss 回调。
  *   false = 内联模式（默认）：显示标题行，点击展开/收起。
+ * @param onDismiss 面板模式下的关闭回调（确定/取消/清除均触发），内联模式下忽略
  */
 @Composable
 fun ReminderTimePicker(
@@ -98,7 +99,9 @@ fun ReminderTimePicker(
             if (reminder != null) {
                 val timePart = reminder.substringAfter("T")
                 timePart.substringBefore(":").toIntOrNull() ?: 9
-            } else 9
+            } else {
+                9
+            }
         } catch (_: Exception) { 9 }
     }
     val initialMinute = remember(reminder) {
@@ -106,7 +109,9 @@ fun ReminderTimePicker(
             if (reminder != null) {
                 val timePart = reminder.substringAfter("T")
                 timePart.substringAfter(":").substringBefore(":").toIntOrNull() ?: 0
-            } else 0
+            } else {
+                0
+            }
         } catch (_: Exception) { 0 }
     }
 
@@ -140,52 +145,13 @@ fun ReminderTimePicker(
     }
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        // 标题行：仅内联模式显示（闹钟图标 + "提醒" + 当前值，点击展开/收起）
+        // 标题行：仅内联模式显示
         if (!startExpanded) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    Icons.Outlined.Alarm,
-                    contentDescription = null,
-                    modifier = Modifier.size(18.dp),
-                    tint = if (reminder != null) MaterialTheme.colorScheme.primary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    "提醒",
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Spacer(modifier = Modifier.weight(1f))
-                // 当前提醒时间或"设置提醒"，点击展开/收起
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    // 提醒已设置时使用 tertiaryContainer 背景（装饰性状态）
-                    color = if (reminder != null) MaterialTheme.colorScheme.tertiaryContainer
-                        else MaterialTheme.colorScheme.surfaceContainerHighest,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(8.dp))
-                        .clickable(
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                            onClick = { isExpanded = !isExpanded },
-                        ),
-                ) {
-                    Text(
-                        text = formatReminderDisplay(reminder),
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        // 提醒已设置文字使用 tertiary
-                        color = if (reminder != null) MaterialTheme.colorScheme.tertiary
-                            else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                }
-            }
+            ReminderTitleRow(
+                reminder = reminder,
+                isExpanded = isExpanded,
+                onToggleExpanded = { isExpanded = !isExpanded },
+            )
         }
 
         // 展开的选择器区域
@@ -200,9 +166,6 @@ fun ReminderTimePicker(
             AnimatedContent(
                 targetState = step,
                 transitionSpec = {
-                    // 切换动画：进入的内容从右侧滑入，退出的内容向左侧滑出
-                    // 日历→时间：日历向左走，时间从右来
-                    // 时间→日历（回退）：时间向右走，日历从左来
                     if (targetState == PickerStep.Time) {
                         // 前进：日历←左滑出，时间从右滑入
                         slideInHorizontally(
@@ -225,230 +188,372 @@ fun ReminderTimePicker(
             ) { currentStep ->
                 when (currentStep) {
                     // 第一步：日历选择日期
-                    PickerStep.Date -> {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            // 日历选择区域
-                            NionCalendar(
-                                initialYearMonth = selectedDate?.let { YearMonth.from(it) }
-                                    ?: YearMonth.now(),
-                                today = LocalDate.now(),
-                                selectedDate = selectedDate,
-                                onSelect = { date ->
-                                    selectedDate = date
-                                    // 选完日期后自动切换到时间选择步骤
-                                    step = PickerStep.Time
-                                },
-                            )
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            // 日期步骤的按钮行：清除 + 取消
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                // 清除提醒
-                                TextButton(
-                                    onClick = {
-                                        onReminderChanged(null)
-                                        if (startExpanded) onDismiss() else { isExpanded = false }
-                                    },
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = ButtonDefaults.textButtonColors(
-                                        contentColor = MaterialTheme.colorScheme.error
-                                            .copy(alpha = 0.7f),
-                                    ),
-                                    modifier = Modifier.weight(1f),
-                                ) { Text("清除", fontWeight = FontWeight.SemiBold, maxLines = 1) }
-
-                                // 取消：内联模式收起选择器，面板模式调用 onDismiss 返回上一面板
-                                TextButton(
-                                    onClick = {
-                                        if (startExpanded) onDismiss() else { isExpanded = false }
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(14.dp),
-                                ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
-                            }
-                        }
-                    }
+                    PickerStep.Date -> DatePickerStep(
+                        selectedDate = selectedDate,
+                        onSelectDate = { date ->
+                            selectedDate = date
+                            step = PickerStep.Time
+                        },
+                        onClear = {
+                            onReminderChanged(null)
+                            if (startExpanded) onDismiss() else { isExpanded = false }
+                        },
+                        onCancel = {
+                            if (startExpanded) onDismiss() else { isExpanded = false }
+                        },
+                    )
 
                     // 第二步：时间滚轮选择
-                    PickerStep.Time -> {
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            // 已选日期标签 + 返回箭头，点击可回到日历步骤
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .clickable(
-                                        interactionSource = remember {
-                                            MutableInteractionSource()
-                                        },
-                                        indication = null,
-                                        onClick = { step = PickerStep.Date },
-                                    )
-                                    .padding(vertical = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.Center,
-                            ) {
-                                // 返回箭头
-                                Icon(
-                                    Icons.AutoMirrored.Outlined.KeyboardArrowLeft,
-                                    contentDescription = "返回选择日期",
-                                    modifier = Modifier.size(20.dp),
-                                    // 导航返回箭头使用 tertiary
-                                    tint = MaterialTheme.colorScheme.tertiary,
+                    PickerStep.Time -> TimePickerStep(
+                        selectedDate = selectedDate,
+                        selectedHour = selectedHour,
+                        selectedMinute = selectedMinute,
+                        visibleItemCount = visibleItemCount,
+                        itemHeight = itemHeight,
+                        onHourSelected = { selectedHour = it },
+                        onMinuteSelected = { selectedMinute = it },
+                        onBackToDate = { step = PickerStep.Date },
+                        onConfirm = {
+                            if (selectedDate != null) {
+                                val result = "%sT%02d:%02d".format(
+                                    selectedDate!!.format(DateTimeFormatter.ISO_LOCAL_DATE),
+                                    selectedHour,
+                                    selectedMinute,
                                 )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                // 显示已选日期，如 "6月15日"
-                                Text(
-                                    text = selectedDate?.let {
-                                        "%d月%d日".format(it.monthValue, it.dayOfMonth)
-                                    } ?: "",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    // 日期显示文字使用 tertiary
-                                    color = MaterialTheme.colorScheme.tertiary,
-                                )
+                                onReminderChanged(result)
                             }
-
-                            Spacer(modifier = Modifier.height(8.dp))
-
-                            // "小时" 和 "分钟" 标签行
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.Center,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    "小时",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(end = 48.dp),
-                                )
-                                Spacer(modifier = Modifier.width(24.dp))
-                                Text(
-                                    "分钟",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Medium,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.padding(start = 48.dp),
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(4.dp))
-
-                            // 滚轮区域：高亮背景 + 小时滚轮 + 冒号 + 分钟滚轮
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(itemHeight * visibleItemCount),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                // 选中行的高亮背景
-                                Surface(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(itemHeight),
-                                    shape = RoundedCornerShape(12.dp),
-                                    // 时间滚轮选中行使用 tertiaryContainer
-                                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                                ) {}
-
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.Center,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    // 小时滚轮 (0-23)，循环滚动
-                                    WheelSpinner(
-                                        items = (0..23).map { "%02d".format(it) },
-                                        initialIndex = selectedHour,
-                                        visibleItemCount = visibleItemCount,
-                                        itemHeight = itemHeight,
-                                        onSelected = { selectedHour = it },
-                                        modifier = Modifier.weight(1f),
-                                        circular = true,
-                                    )
-
-                                    // 冒号分隔符
-                                    Text(
-                                        ":",
-                                        style = MaterialTheme.typography.headlineMedium,
-                                        fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        modifier = Modifier.padding(horizontal = 8.dp),
-                                    )
-
-                                    // 分钟滚轮 (0-59)，循环滚动
-                                    WheelSpinner(
-                                        items = (0..59).map { "%02d".format(it) },
-                                        initialIndex = selectedMinute,
-                                        visibleItemCount = visibleItemCount,
-                                        itemHeight = itemHeight,
-                                        onSelected = { selectedMinute = it },
-                                        modifier = Modifier.weight(1f),
-                                        circular = true,
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = Modifier.height(16.dp))
-
-                            // 时间步骤的按钮行：取消 + 确定
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                // 取消：内联模式收起选择器，面板模式调用 onDismiss 返回上一面板
-                                TextButton(
-                                    onClick = {
-                                        if (startExpanded) onDismiss() else { isExpanded = false }
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(14.dp),
-                                ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
-
-                                // 确定：拼接日期+时间并回调，面板模式下还要关闭面板
-                                Button(
-                                    onClick = {
-                                        if (selectedDate != null) {
-                                            val result = "%sT%02d:%02d".format(
-                                                selectedDate!!.format(
-                                                    DateTimeFormatter.ISO_LOCAL_DATE
-                                                ),
-                                                selectedHour,
-                                                selectedMinute,
-                                            )
-                                            onReminderChanged(result)
-                                        }
-                                        if (startExpanded) onDismiss() else { isExpanded = false }
-                                    },
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MaterialTheme.colorScheme.primary
-                                    ),
-                                    modifier = Modifier.weight(1f),
-                                ) {
-                                    Text(
-                                        "确定",
-                                        fontWeight = FontWeight.SemiBold,
-                                        maxLines = 1
-                                    )
-                                }
-                            }
-                        }
-                    }
+                            if (startExpanded) onDismiss() else { isExpanded = false }
+                        },
+                        onCancel = {
+                            if (startExpanded) onDismiss() else { isExpanded = false }
+                        },
+                    )
                 }
             }
+        }
+    }
+}
+
+/**
+ * 提醒选择器标题行 —— 内联模式下显示闹钟图标 + "提醒" + 当前值。
+ * 点击展开/收起选择器。
+ *
+ * @param reminder 当前提醒时间，null 表示未设置
+ * @param isExpanded 选择器是否已展开
+ * @param onToggleExpanded 点击切换展开/收起
+ */
+@Composable
+private fun ReminderTitleRow(
+    reminder: String?,
+    isExpanded: Boolean,
+    onToggleExpanded: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Outlined.Alarm,
+            contentDescription = null,
+            modifier = Modifier.size(18.dp),
+            tint = if (reminder != null) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            "提醒",
+            style = MaterialTheme.typography.bodyMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        // 当前提醒时间或"设置提醒"，点击展开/收起
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            // 提醒已设置时使用 tertiaryContainer 背景（装饰性状态）
+            color = if (reminder != null) MaterialTheme.colorScheme.tertiaryContainer
+                else MaterialTheme.colorScheme.surfaceContainerHighest,
+            modifier = Modifier
+                .clip(RoundedCornerShape(8.dp))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onToggleExpanded,
+                ),
+        ) {
+            Text(
+                text = formatReminderDisplay(reminder),
+                style = MaterialTheme.typography.labelLarge,
+                fontWeight = FontWeight.SemiBold,
+                // 提醒已设置文字使用 tertiary
+                color = if (reminder != null) MaterialTheme.colorScheme.tertiary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+            )
+        }
+    }
+}
+
+/**
+ * 提醒选择器日期步骤 —— 显示日历和清除/取消按钮。
+ *
+ * @param selectedDate 当前已选日期，null 表示未选
+ * @param onSelectDate 用户选择日期后触发
+ * @param onClear 清除提醒回调
+ * @param onCancel 取消回调
+ */
+@Composable
+private fun DatePickerStep(
+    selectedDate: LocalDate?,
+    onSelectDate: (LocalDate) -> Unit,
+    onClear: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 日历选择区域
+        NionCalendar(
+            initialYearMonth = selectedDate?.let { YearMonth.from(it) }
+                ?: YearMonth.now(),
+            today = LocalDate.now(),
+            selectedDate = selectedDate,
+            onSelect = onSelectDate,
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 日期步骤的按钮行：清除 + 取消
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 清除提醒
+            TextButton(
+                onClick = onClear,
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error
+                        .copy(alpha = 0.7f),
+                ),
+                modifier = Modifier.weight(1f),
+            ) { Text("清除", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+
+            // 取消
+            TextButton(
+                onClick = onCancel,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp),
+            ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+        }
+    }
+}
+
+/**
+ * 提醒选择器时间步骤 —— 显示已选日期、小时/分钟滚轮和确认/取消按钮。
+ *
+ * @param selectedDate 已选日期
+ * @param selectedHour 已选小时
+ * @param selectedMinute 已选分钟
+ * @param visibleItemCount 滚轮可见行数
+ * @param itemHeight 滚轮每行高度
+ * @param onHourSelected 小时变更回调
+ * @param onMinuteSelected 分钟变更回调
+ * @param onBackToDate 点击返回日期选择步骤
+ * @param onConfirm 确认选择回调
+ * @param onCancel 取消回调
+ */
+@Composable
+private fun TimePickerStep(
+    selectedDate: LocalDate?,
+    selectedHour: Int,
+    selectedMinute: Int,
+    visibleItemCount: Int,
+    itemHeight: Dp,
+    onHourSelected: (Int) -> Unit,
+    onMinuteSelected: (Int) -> Unit,
+    onBackToDate: () -> Unit,
+    onConfirm: () -> Unit,
+    onCancel: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 已选日期标签 + 返回箭头，点击可回到日历步骤
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(12.dp))
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onBackToDate,
+                )
+                .padding(vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            // 返回箭头
+            Icon(
+                Icons.AutoMirrored.Outlined.KeyboardArrowLeft,
+                contentDescription = "返回选择日期",
+                modifier = Modifier.size(20.dp),
+                // 导航返回箭头使用 tertiary
+                tint = MaterialTheme.colorScheme.tertiary,
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            // 显示已选日期，如 "6月15日"
+            Text(
+                text = selectedDate?.let {
+                    "%d月%d日".format(it.monthValue, it.dayOfMonth)
+                } ?: "",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                // 日期显示文字使用 tertiary
+                color = MaterialTheme.colorScheme.tertiary,
+            )
+        }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 时间滚轮区域
+        TimeWheelArea(
+            selectedHour = selectedHour,
+            selectedMinute = selectedMinute,
+            visibleItemCount = visibleItemCount,
+            itemHeight = itemHeight,
+            onHourSelected = onHourSelected,
+            onMinuteSelected = onMinuteSelected,
+        )
+
+        Spacer(modifier = Modifier.height(16.dp))
+
+        // 时间步骤的按钮行：取消 + 确定
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(
+                onClick = onCancel,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp),
+            ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+
+            Button(
+                onClick = onConfirm,
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                ),
+                modifier = Modifier.weight(1f),
+            ) {
+                Text("确定", fontWeight = FontWeight.SemiBold, maxLines = 1)
+            }
+        }
+    }
+}
+
+/**
+ * 时间滚轮区域 —— 小时和分钟的滚轮选择器，带高亮选中行背景。
+ *
+ * 包含"小时"/"分钟"标签行和实际滚轮。
+ * 滚轮区域中间有高亮背景条，两侧分别是小时滚轮（0-23）和分钟滚轮（0-59）。
+ *
+ * @param selectedHour 当前选中的小时索引
+ * @param selectedMinute 当前选中的分钟索引
+ * @param visibleItemCount 可见行数
+ * @param itemHeight 每行高度
+ * @param onHourSelected 小时变更回调
+ * @param onMinuteSelected 分钟变更回调
+ */
+@Composable
+private fun TimeWheelArea(
+    selectedHour: Int,
+    selectedMinute: Int,
+    visibleItemCount: Int,
+    itemHeight: Dp,
+    onHourSelected: (Int) -> Unit,
+    onMinuteSelected: (Int) -> Unit,
+) {
+    // "小时" 和 "分钟" 标签行
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "小时",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(end = 48.dp),
+        )
+        Spacer(modifier = Modifier.width(24.dp))
+        Text(
+            "分钟",
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = FontWeight.Medium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 48.dp),
+        )
+    }
+
+    Spacer(modifier = Modifier.height(4.dp))
+
+    // 滚轮区域：高亮背景 + 小时滚轮 + 冒号 + 分钟滚轮
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(itemHeight * visibleItemCount),
+        contentAlignment = Alignment.Center,
+    ) {
+        // 选中行的高亮背景
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(itemHeight),
+            shape = RoundedCornerShape(12.dp),
+            // 时间滚轮选中行使用 tertiaryContainer
+            color = MaterialTheme.colorScheme.tertiaryContainer,
+        ) {}
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 小时滚轮 (0-23)，循环滚动
+            WheelSpinner(
+                items = (0..23).map { "%02d".format(it) },
+                initialIndex = selectedHour,
+                visibleItemCount = visibleItemCount,
+                itemHeight = itemHeight,
+                onSelected = onHourSelected,
+                modifier = Modifier.weight(1f),
+                circular = true,
+            )
+
+            // 冒号分隔符
+            Text(
+                ":",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+                modifier = Modifier.padding(horizontal = 8.dp),
+            )
+
+            // 分钟滚轮 (0-59)，循环滚动
+            WheelSpinner(
+                items = (0..59).map { "%02d".format(it) },
+                initialIndex = selectedMinute,
+                visibleItemCount = visibleItemCount,
+                itemHeight = itemHeight,
+                onSelected = onMinuteSelected,
+                modifier = Modifier.weight(1f),
+                circular = true,
+            )
         }
     }
 }

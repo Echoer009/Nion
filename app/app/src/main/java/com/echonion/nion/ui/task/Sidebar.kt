@@ -85,6 +85,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
  * @param onReorderChecklists 拖拽排序结束时触发，回调传入重排后的清单 ID 列表
  * @param onSidebarDrag 侧边栏拖拽中回调，传入水平偏移量
  * @param onSidebarDragStopped 侧边栏拖拽结束回调
+ * @param modifier 修饰符，由调用方传入
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -244,129 +245,191 @@ fun SidebarContent(
                 }
             }
 
-            AnimatedVisibility(
+            // 新建清单输入框：展开/收起动画，确认后创建清单
+            AddChecklistInputField(
                 visible = isAdding,
-                enter = expandVertically(expandFrom = Alignment.Bottom, animationSpec = tween(200)) + fadeIn(tween(150)),
-                exit = shrinkVertically(shrinkTowards = Alignment.Bottom, animationSpec = tween(150)) + fadeOut(tween(100)),
-            ) {
-                Column {
-                    OutlinedTextField(
-                        value = newName,
-                        onValueChange = { newName = it },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .focusRequester(focusRequester),
-                        placeholder = {
-                            Text(
-                                "清单名称",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
-                            )
-                        },
-                        shape = RoundedCornerShape(12.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedBorderColor = MaterialTheme.colorScheme.primary,
-                            unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
-                            focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                            unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        ),
-                        singleLine = true,
-                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
-                        keyboardActions = KeyboardActions(
-                            onDone = {
-                                if (newName.isNotBlank()) {
-                                    onAddChecklist(newName.trim())
-                                    newName = ""
-                                }
-                                isAdding = false
-                            },
-                        ),
-                        trailingIcon = {
-                            IconButton(
-                                onClick = {
-                                    if (newName.isNotBlank()) {
-                                        onAddChecklist(newName.trim())
-                                        newName = ""
-                                    }
-                                    isAdding = false
-                                },
-                                modifier = Modifier.size(28.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Check,
-                                    contentDescription = "确认",
-                                    // 确认勾选使用 secondary（次要操作确认）
-                                    tint = if (newName.isNotBlank())
-                                        MaterialTheme.colorScheme.secondary
-                                    else
-                                        MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(16.dp),
-                                )
-                            }
-                        },
-                    )
-                    Spacer(modifier = Modifier.height(8.dp))
-                }
-            }
-
-            AnimatedVisibility(
-                visible = !isAdding,
-                enter = expandVertically(expandFrom = Alignment.Bottom, animationSpec = tween(200)) + fadeIn(tween(150)),
-                exit = shrinkVertically(shrinkTowards = Alignment.Bottom, animationSpec = tween(150)) + fadeOut(tween(100)),
-            ) {
-                Surface(
-                    onClick = { isAdding = true },
-                    shape = RoundedCornerShape(12.dp),
-                    // "新建清单"按钮使用 secondaryContainer 背景（次要操作）
-                    color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = NionAlpha.TEXT_SUBTITLE),
-                    modifier = Modifier.fillMaxWidth(),
-                    tonalElevation = 1.dp,
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 14.dp, vertical = 12.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.Center,
-                    ) {
-                        // 次要操作图标和文字使用 secondary
-                        Icon(
-                            Icons.Default.Add,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.secondary,
-                            modifier = Modifier.size(18.dp),
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            "新建清单",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.secondary,
-                        )
+                name = newName,
+                onNameChange = { newName = it },
+                onConfirm = {
+                    if (newName.isNotBlank()) {
+                        onAddChecklist(newName.trim())
+                        newName = ""
                     }
-                }
-            }
+                    isAdding = false
+                },
+                focusRequester = focusRequester,
+            )
+
+            // 新建清单按钮：点击后展开输入框
+            AddChecklistButton(
+                visible = !isAdding,
+                onClick = { isAdding = true },
+            )
         }
     }
 
+    // 删除清单确认对话框
+    DeleteChecklistDialog(
+        deleteConfirmId = deleteConfirmId,
+        checklistName = deleteConfirmId?.let { checklists.find { c -> c.id == it }?.name ?: "" } ?: "",
+        onConfirm = {
+            onDeleteChecklist(it)
+            deleteConfirmId = null
+        },
+        onDismiss = { deleteConfirmId = null },
+    )
+}
+
+/**
+ * 新建清单输入框 —— 展开时显示文本输入框，支持键盘确认和按钮确认。
+ * 带 bottom 展开/收起动画。
+ *
+ * @param visible 是否可见
+ * @param name 当前输入的清单名称
+ * @param onNameChange 名称变更回调
+ * @param onConfirm 确认创建回调（键盘 Done 或点击勾选图标）
+ * @param focusRequester 焦点控制器，展开时自动聚焦
+ */
+@Composable
+private fun AddChecklistInputField(
+    visible: Boolean,
+    name: String,
+    onNameChange: (String) -> Unit,
+    onConfirm: () -> Unit,
+    focusRequester: FocusRequester,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = expandVertically(expandFrom = Alignment.Bottom, animationSpec = tween(200)) + fadeIn(tween(150)),
+        exit = shrinkVertically(shrinkTowards = Alignment.Bottom, animationSpec = tween(150)) + fadeOut(tween(100)),
+    ) {
+        Column {
+            OutlinedTextField(
+                value = name,
+                onValueChange = onNameChange,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .focusRequester(focusRequester),
+                placeholder = {
+                    Text(
+                        "清单名称",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+                    )
+                },
+                shape = RoundedCornerShape(12.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant,
+                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ),
+                singleLine = true,
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(onDone = { onConfirm() }),
+                trailingIcon = {
+                    IconButton(
+                        onClick = onConfirm,
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Check,
+                            contentDescription = "确认",
+                            // 确认勾选使用 secondary（次要操作确认）
+                            tint = if (name.isNotBlank())
+                                MaterialTheme.colorScheme.secondary
+                            else
+                                MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(16.dp),
+                        )
+                    }
+                },
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
+/**
+ * 新建清单按钮 —— 点击后展开输入框。
+ * 带 bottom 展开/收起动画，与 AddChecklistInputField 互斥显示。
+ *
+ * @param visible 是否可见（输入框隐藏时显示）
+ * @param onClick 点击回调，展开输入框
+ */
+@Composable
+private fun AddChecklistButton(
+    visible: Boolean,
+    onClick: () -> Unit,
+) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = expandVertically(expandFrom = Alignment.Bottom, animationSpec = tween(200)) + fadeIn(tween(150)),
+        exit = shrinkVertically(shrinkTowards = Alignment.Bottom, animationSpec = tween(150)) + fadeOut(tween(100)),
+    ) {
+        Surface(
+            onClick = onClick,
+            shape = RoundedCornerShape(12.dp),
+            // "新建清单"按钮使用 secondaryContainer 背景（次要操作）
+            color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+            modifier = Modifier.fillMaxWidth(),
+            tonalElevation = 1.dp,
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center,
+            ) {
+                // 次要操作图标和文字使用 secondary
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    "新建清单",
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 删除清单确认对话框 —— 显示清单名称，确认后删除清单及其所有任务。
+ *
+ * @param deleteConfirmId 待删除的清单 ID，null 时不显示对话框
+ * @param checklistName 待删除清单的名称，用于显示确认文案
+ * @param onConfirm 确认删除回调，传入清单 ID
+ * @param onDismiss 取消/关闭对话框回调
+ */
+@Composable
+private fun DeleteChecklistDialog(
+    deleteConfirmId: String?,
+    checklistName: String,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
     deleteConfirmId?.let { id ->
-        val checklistName = checklists.find { it.id == id }?.name ?: ""
         AlertDialog(
-            onDismissRequest = { deleteConfirmId = null },
+            onDismissRequest = onDismiss,
             shape = RoundedCornerShape(24.dp),
             title = { Text("删除清单", fontWeight = FontWeight.SemiBold) },
             text = { Text("确定要删除「$checklistName」吗？清单下的所有任务也会被删除。") },
             confirmButton = {
                 Button(
-                    onClick = {
-                        onDeleteChecklist(id)
-                        deleteConfirmId = null
-                    },
+                    onClick = { onConfirm(id) },
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     shape = RoundedCornerShape(10.dp),
                 ) { Text("删除", fontWeight = FontWeight.SemiBold) }
             },
             dismissButton = {
-                TextButton(onClick = { deleteConfirmId = null }) { Text("取消") }
+                TextButton(onClick = onDismiss) { Text("取消") }
             },
         )
     }

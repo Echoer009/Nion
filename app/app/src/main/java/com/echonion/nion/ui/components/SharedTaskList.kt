@@ -83,6 +83,7 @@ import uniffi.nion_core.OverdueDailyTask
  * @param isSelectionMode 是否处于多选模式
  * @param selectedIds 当前选中的任务 ID 集合
  * @param taskSharedModifier 为每个任务卡片生成 sharedElement modifier 的函数，用于详情展开 morph 动画
+ * @param reorderableItems 外部传入的可重排项列表，提升到 AnimatedContent 外以保留跨过渡的拖拽状态
  * @param listState 外部传入的列表滚动状态，提升到外层以保留跨过渡的滚动位置
  * @param innerPadding Scaffold 传入的内边距，由调用方决定
  * @param modifier 传给 LazyColumn 的 modifier
@@ -140,58 +141,11 @@ fun SharedTaskList(
      */
     var pendingDragReorder by remember { mutableStateOf(false) }
 
-     /**
-      * 同步 todoItems 到 reorderableItems — 使用 remember(todoItems) 在 composition 阶段同步执行，
-      * 确保 reorderableItems 与 todoItems 在同一帧内一致，避免 todo/done 区出现重复 key 导致闪退。
-      *
-      * 增量 diff（只移除离开的、只添加新来的）避免 clear()+addAll() 导致的全部 item 闪动。
-      * 拖拽期间（draggedGroupId != null）跳过同步，由 onDragStopped 回调负责最终同步。
-      *
-      * 当 ID 集合相同但顺序不同时分两种情况：
-      * - pendingDragReorder == true：拖拽异步中间态，跳过避免回滚，并消费标志
-      * - pendingDragReorder == false：外部排序（如 AI 工具），正常同步顺序
-      * 内容同步（depth、parentId、isGroupLast 等字段）始终执行，确保元数据及时更新。
-      */
+     /* 同步 todoItems 到 reorderableItems，增量 diff 避免全部 item 闪动。
+      * 拖拽期间跳过同步，由 onDragStopped 回调负责最终同步。
+      * 详细逻辑见 syncReorderableItems 函数。 */
      remember(todoItems) {
-         if (draggedGroupId == null) {
-             val newIds = todoItems.map { it.task.id }
-             val currentIds = reorderableItems.map { it.task.id }
-             if (newIds != currentIds) {
-                 val newIdSet = newIds.toSet()
-                 val currentIdSet = currentIds.toSet()
-                 if (newIdSet == currentIdSet) {
-                     if (pendingDragReorder) {
-                         /* 拖拽异步中间态：reorderableItems 是拖拽后顺序，todoItems 还是旧顺序。
-                          * 跳过重排避免回滚，消费标志，等异步完成后 todoItems 更新为新顺序再同步。 */
-                         pendingDragReorder = false
-                     } else {
-                         /* 外部排序（如 AI 操作工具）：todoItems 已是新顺序，同步到 reorderableItems */
-                         val targetOrder = newIds.withIndex().associate { (i, id) -> id to i }
-                         reorderableItems.sortBy { targetOrder[it.task.id] ?: Int.MAX_VALUE }
-                     }
-                 } else {
-                     /* ID 集合不同（有新增或删除）—— 全量同步 */
-                     reorderableItems.removeAll { it.task.id !in newIds }
-                     for ((idx, item) in todoItems.withIndex()) {
-                         if (item.task.id !in currentIds) {
-                             reorderableItems.add(idx.coerceAtMost(reorderableItems.size), item)
-                         }
-                     }
-                     val targetOrder = newIds.withIndex().associate { (i, id) -> id to i }
-                     reorderableItems.sortBy { targetOrder[it.task.id] ?: Int.MAX_VALUE }
-                 }
-             }
-             /* 内容同步始终执行：更新 depth、parentId、isGroupLast 等字段。
-              * 即使跳过了重排，也需要将 todoItems 中已更新的元数据同步到 reorderableItems，
-              * 确保 UI（间距、缩进等）及时反映最新状态。 */
-             for (i in todoItems.indices) {
-                 val newItem = todoItems[i]
-                 val currentIdx = reorderableItems.indexOfFirst { it.task.id == newItem.task.id }
-                 if (currentIdx >= 0 && reorderableItems[currentIdx] != newItem) {
-                     reorderableItems[currentIdx] = newItem
-                 }
-             }
-         }
+         pendingDragReorder = syncReorderableItems(todoItems, reorderableItems, draggedGroupId, pendingDragReorder)
          true
      }
 
@@ -429,17 +383,9 @@ fun SharedTaskList(
                                         pendingDragReorder = true
                                         handleDrop(reorderableItems, draggedId, reorderCallback)
                                     } else {
-                                        /* 长按未拖动 → 进入选择模式 */
+                                        /* 长按未拖动 → 进入选择模式，统一切换组内选中状态 */
                                         if (preCollapseGroupIds.size > 1) {
-                                            val groupIds = preCollapseGroupIds
-                                            val allSelected = groupIds.all { it in selectedIds }
-                                            for (id in groupIds) {
-                                                if (allSelected) {
-                                                    if (id in selectedIds) onToggleSelection(id)
-                                                } else {
-                                                    if (id !in selectedIds) onToggleSelection(id)
-                                                }
-                                            }
+                                            toggleIdsSelection(preCollapseGroupIds, selectedIds, onToggleSelection)
                                         } else {
                                             onToggleSelection(flatItem.task.id)
                                         }
@@ -461,73 +407,21 @@ fun SharedTaskList(
                             )
                     ) {
                         if (showGroup) {
-                            /*
-                             * 拖拽浮起的分组卡片：主任务 + 子任务合为 Column。
-                             * Column 添加圆角背景填充 graphicsLayer 裁剪后露出的圆角区域，
-                             * 子任务区域用 AnimatedVisibility 实现收缩动画。
-                             */
-                            Column(
-                                modifier = Modifier.background(
-                                    MaterialTheme.colorScheme.surfaceContainerLowest,
-                                    dragCardShape,
-                                )
-                            ) {
-                                FlatTaskRow(
-                                    item = displayItem.copy(isGroupLast = false),
-                                    onToggleDone = onToggleDone,
-                                    onClick = { clickedTask ->
-                                        if (longPressedTaskId == flatItem.task.id) return@FlatTaskRow
-                                        if (isSelectionMode) {
-                                            val descendantIds = collectDescendantIds(reorderableItems.toList(), flatItem.task.id)
-                                            if (descendantIds.isNotEmpty()) {
-                                                val groupIds = listOf(flatItem.task.id) + descendantIds.toList()
-                                                val allSelected = groupIds.all { it in selectedIds }
-                                                for (id in groupIds) {
-                                                    if (allSelected) {
-                                                        if (id in selectedIds) onToggleSelection(id)
-                                                    } else {
-                                                        if (id !in selectedIds) onToggleSelection(id)
-                                                    }
-                                                }
-                                            } else {
-                                                onToggleSelection(clickedTask.id)
-                                            }
-                                        } else {
-                                            onTaskClick(clickedTask)
-                                        }
-                                    },
-                                    isSelected = false,
-                                    isGroupSelected = false,
-                                    sharedElementModifier = taskSharedModifier(flatItem.task.id),
-                                )
-                                /* 子任务区域：长按时展开显示，手指移动后（subsRemoved=true）
-                                 * 向上收缩+淡出，模拟子任务"收进"主任务的效果 */
-                                AnimatedVisibility(
-                                    visible = !subsRemoved,
-                                    exit = shrinkVertically(
-                                        shrinkTowards = Alignment.Top,
-                                        animationSpec = tween(200),
-                                    ) + fadeOut(tween(150)),
-                                ) {
-                                    Column {
-                                        draggedSubItems.forEachIndexed { index, subItem ->
-                                            val isSubLast = index == draggedSubItems.lastIndex
-                                            FlatTaskRow(
-                                                item = subItem.copy(isGroupFirst = false, isGroupLast = isSubLast),
-                                                onToggleDone = onToggleDone,
-                                                onClick = { clickedTask ->
-                                                    if (longPressedTaskId == flatItem.task.id) return@FlatTaskRow
-                                                    if (isSelectionMode) onToggleSelection(clickedTask.id)
-                                                    else onTaskClick(clickedTask)
-                                                },
-                                                isSelected = false,
-                                                isGroupSelected = false,
-                                                sharedElementModifier = taskSharedModifier(subItem.task.id),
-                                            )
-                                        }
-                                    }
-                                }
-                            }
+                            DraggedGroupCard(
+                                displayItem = displayItem,
+                                draggedSubItems = draggedSubItems,
+                                subsRemoved = subsRemoved,
+                                dragCardShape = dragCardShape,
+                                longPressedTaskId = longPressedTaskId,
+                                flatItemTaskId = flatItem.task.id,
+                                isSelectionMode = isSelectionMode,
+                                reorderableItems = reorderableItems.toList(),
+                                selectedIds = selectedIds,
+                                onToggleDone = onToggleDone,
+                                onToggleSelection = onToggleSelection,
+                                onTaskClick = onTaskClick,
+                                taskSharedModifier = taskSharedModifier,
+                            )
                         } else {
                             FlatTaskRow(
                                 item = displayItem,
@@ -535,20 +429,7 @@ fun SharedTaskList(
                                 onClick = { clickedTask ->
                                     if (longPressedTaskId == flatItem.task.id) return@FlatTaskRow
                                     if (isSelectionMode) {
-                                        val descendantIds = collectDescendantIds(reorderableItems.toList(), flatItem.task.id)
-                                        if (descendantIds.isNotEmpty()) {
-                                            val groupIds = listOf(flatItem.task.id) + descendantIds.toList()
-                                            val allSelected = groupIds.all { it in selectedIds }
-                                            for (id in groupIds) {
-                                                if (allSelected) {
-                                                    if (id in selectedIds) onToggleSelection(id)
-                                                } else {
-                                                    if (id !in selectedIds) onToggleSelection(id)
-                                                }
-                                            }
-                                        } else {
-                                            onToggleSelection(clickedTask.id)
-                                        }
+                                        toggleGroupSelection(flatItem.task.id, reorderableItems.toList(), selectedIds, onToggleSelection)
                                     } else {
                                         onTaskClick(clickedTask)
                                     }
@@ -610,6 +491,115 @@ fun SharedTaskList(
 
         item(key = "bottom_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(88.dp)) }
     }
+}
+
+/**
+ * 对一组任务 ID 执行"全选/全不选"切换。
+ * 若组内全部已选中则全部取消选中，否则全部选中。
+ *
+ * @param groupIds 需要统一切换的任务 ID 列表（主任务 + 子任务）
+ * @param selectedIds 当前已选中的任务 ID 集合
+ * @param onToggleSelection 切换单个任务选中状态的回调
+ */
+private fun toggleIdsSelection(
+    groupIds: List<String>,
+    selectedIds: Set<String>,
+    onToggleSelection: (String) -> Unit,
+) {
+    val allSelected = groupIds.all { it in selectedIds }
+    for (id in groupIds) {
+        if (allSelected) {
+            if (id in selectedIds) onToggleSelection(id)
+        } else {
+            if (id !in selectedIds) onToggleSelection(id)
+        }
+    }
+}
+
+/**
+ * 切换主任务及其所有子任务的选中状态。
+ * 先收集主任务的所有后代，再调用 toggleIdsSelection 统一切换。
+ *
+ * @param taskId 主任务 ID
+ * @param items 当前扁平列表，用于查找子任务
+ * @param selectedIds 当前已选中的任务 ID 集合
+ * @param onToggleSelection 切换单个任务选中状态的回调
+ */
+private fun toggleGroupSelection(
+    taskId: String,
+    items: List<FlatTaskItem>,
+    selectedIds: Set<String>,
+    onToggleSelection: (String) -> Unit,
+) {
+    val descendantIds = collectDescendantIds(items, taskId)
+    if (descendantIds.isNotEmpty()) {
+        val groupIds = listOf(taskId) + descendantIds.toList()
+        toggleIdsSelection(groupIds, selectedIds, onToggleSelection)
+    } else {
+        onToggleSelection(taskId)
+    }
+}
+
+/**
+ * 将 todoItems 的变更增量同步到 reorderableItems。
+ *
+ * 增量 diff（只移除离开的、只添加新来的）避免 clear()+addAll() 导致的全部 item 闪动。
+ * 拖拽期间（draggedGroupId != null）跳过同步，由 onDragStopped 回调负责最终同步。
+ *
+ * 当 ID 集合相同但顺序不同时：
+ * - pendingDragReorder == true → 拖拽异步中间态，跳过避免回滚，并消费标志
+ * - pendingDragReorder == false → 外部排序（如 AI 工具），正常同步顺序
+ * 内容同步（depth、parentId、isGroupLast 等字段）始终执行。
+ *
+ * @param todoItems 最新的待办任务扁平列表（来自 ViewModel）
+ * @param reorderableItems 可重排的扁平列表（拖拽操作的直接修改对象）
+ * @param draggedGroupId 当前正在拖拽的主任务 ID，非 null 表示拖拽进行中
+ * @param pendingDragReorder 是否处于拖拽异步写库中间态
+ * @return 更新后的 pendingDragReorder 值
+ */
+private fun syncReorderableItems(
+    todoItems: List<FlatTaskItem>,
+    reorderableItems: SnapshotStateList<FlatTaskItem>,
+    draggedGroupId: String?,
+    pendingDragReorder: Boolean,
+): Boolean {
+    if (draggedGroupId != null) return pendingDragReorder
+
+    val newIds = todoItems.map { it.task.id }
+    val currentIds = reorderableItems.map { it.task.id }
+    if (newIds != currentIds) {
+        val newIdSet = newIds.toSet()
+        val currentIdSet = currentIds.toSet()
+        if (newIdSet == currentIdSet) {
+            if (pendingDragReorder) {
+                /* 拖拽异步中间态：跳过重排避免回滚，消费标志 */
+                return false
+            } else {
+                /* 外部排序：同步顺序到 reorderableItems */
+                val targetOrder = newIds.withIndex().associate { (i, id) -> id to i }
+                reorderableItems.sortBy { targetOrder[it.task.id] ?: Int.MAX_VALUE }
+            }
+        } else {
+            /* ID 集合不同（有新增或删除）—— 增量同步 */
+            reorderableItems.removeAll { it.task.id !in newIds }
+            for ((idx, item) in todoItems.withIndex()) {
+                if (item.task.id !in currentIds) {
+                    reorderableItems.add(idx.coerceAtMost(reorderableItems.size), item)
+                }
+            }
+            val targetOrder = newIds.withIndex().associate { (i, id) -> id to i }
+            reorderableItems.sortBy { targetOrder[it.task.id] ?: Int.MAX_VALUE }
+        }
+    }
+    /* 内容同步：更新 depth、parentId、isGroupLast 等字段 */
+    for (i in todoItems.indices) {
+        val newItem = todoItems[i]
+        val currentIdx = reorderableItems.indexOfFirst { it.task.id == newItem.task.id }
+        if (currentIdx >= 0 && reorderableItems[currentIdx] != newItem) {
+            reorderableItems[currentIdx] = newItem
+        }
+    }
+    return pendingDragReorder
 }
 
 /**
@@ -800,6 +790,93 @@ private fun handleDrop(
     }
 
     reorderCallback(draggedId, newParentId, siblingIds)
+}
+
+/**
+ * 拖拽浮起的分组卡片 —— 主任务 + 子任务合为 Column 渲染。
+ * Column 添加圆角背景填充 graphicsLayer 裁剪后露出的圆角区域，
+ * 子任务区域用 AnimatedVisibility 实现收缩动画。
+ *
+ * @param displayItem 主任务的显示数据（isGroupLast 强制为 false）
+ * @param draggedSubItems 拖拽开始时保存的子任务数据
+ * @param subsRemoved 是否已将子任务从列表移除（控制收缩动画方向）
+ * @param dragCardShape 拖拽浮起时的圆角形状
+ * @param longPressedTaskId 当前长按的任务 ID，长按拖拽期间忽略点击
+ * @param flatItemTaskId 当前任务 ID，用于判断是否正在长按
+ * @param isSelectionMode 是否处于多选模式
+ * @param reorderableItems 当前可重排的扁平列表（用于组选逻辑）
+ * @param selectedIds 当前已选中的任务 ID 集合
+ * @param onToggleDone 切换任务完成状态时触发
+ * @param onToggleSelection 切换任务选中状态时触发
+ * @param onTaskClick 点击任务时触发（非选择模式下导航到详情）
+ * @param taskSharedModifier 为任务卡片生成 sharedElement modifier 的函数
+ */
+@Composable
+private fun DraggedGroupCard(
+    displayItem: FlatTaskItem,
+    draggedSubItems: List<FlatTaskItem>,
+    subsRemoved: Boolean,
+    dragCardShape: RoundedCornerShape,
+    longPressedTaskId: String?,
+    flatItemTaskId: String,
+    isSelectionMode: Boolean,
+    reorderableItems: List<FlatTaskItem>,
+    selectedIds: Set<String>,
+    onToggleDone: (TaskItem) -> Unit,
+    onToggleSelection: (String) -> Unit,
+    onTaskClick: (TaskItem) -> Unit,
+    taskSharedModifier: @Composable (String) -> Modifier,
+) {
+    Column(
+        modifier = Modifier.background(
+            MaterialTheme.colorScheme.surfaceContainerLowest,
+            dragCardShape,
+        )
+    ) {
+        /* 主任务行 */
+        FlatTaskRow(
+            item = displayItem.copy(isGroupLast = false),
+            onToggleDone = onToggleDone,
+            onClick = { clickedTask ->
+                if (longPressedTaskId == flatItemTaskId) return@FlatTaskRow
+                if (isSelectionMode) {
+                    toggleGroupSelection(flatItemTaskId, reorderableItems, selectedIds, onToggleSelection)
+                } else {
+                    onTaskClick(clickedTask)
+                }
+            },
+            isSelected = false,
+            isGroupSelected = false,
+            sharedElementModifier = taskSharedModifier(flatItemTaskId),
+        )
+        /* 子任务区域：长按时展开显示，手指移动后（subsRemoved=true）
+         * 向上收缩+淡出，模拟子任务"收进"主任务的效果 */
+        AnimatedVisibility(
+            visible = !subsRemoved,
+            exit = shrinkVertically(
+                shrinkTowards = Alignment.Top,
+                animationSpec = tween(200),
+            ) + fadeOut(tween(150)),
+        ) {
+            Column {
+                draggedSubItems.forEachIndexed { index, subItem ->
+                    val isSubLast = index == draggedSubItems.lastIndex
+                    FlatTaskRow(
+                        item = subItem.copy(isGroupFirst = false, isGroupLast = isSubLast),
+                        onToggleDone = onToggleDone,
+                        onClick = { clickedTask ->
+                            if (longPressedTaskId == flatItemTaskId) return@FlatTaskRow
+                            if (isSelectionMode) onToggleSelection(clickedTask.id)
+                            else onTaskClick(clickedTask)
+                        },
+                        isSelected = false,
+                        isGroupSelected = false,
+                        sharedElementModifier = taskSharedModifier(subItem.task.id),
+                    )
+                }
+            }
+        }
+    }
 }
 
 /**

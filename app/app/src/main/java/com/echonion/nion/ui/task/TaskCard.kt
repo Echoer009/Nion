@@ -45,6 +45,12 @@ import com.echonion.nion.ui.theme.LocalPriorityColors
 /**
  * 扁平任务行 —— 根据 depth 分发到主任务行或子任务行。
  *
+ * @param item 扁平任务条目，包含任务数据和层级信息
+ * @param onToggleDone 点击勾选框切换完成状态时触发
+ * @param onClick 点击任务行时触发，打开任务详情
+ * @param isSelected 当前任务是否处于选中状态（多选模式）
+ * @param isGroupSelected 当前任务所属分组是否被选中
+ * @param modifier 修饰符
  * @param sharedElementModifier shared element 动画 modifier，用于任务详情展开时的 morph 动画
  */
 @Composable
@@ -127,6 +133,13 @@ private fun Modifier.groupBorder(
  * 主任务行 —— 委托 SharedTaskCard 渲染，在此基础上添加任务列表特有的
  * group border / selection border / shared element 动画 modifier。
  *
+ * @param task 任务数据
+ * @param isGroupLast 是否为分组中最后一个任务（控制底部圆角）
+ * @param onToggleDone 点击勾选框切换完成状态时触发
+ * @param onClick 点击任务行时触发，打开任务详情
+ * @param isSelected 当前任务是否处于选中状态（多选模式）
+ * @param isGroupSelected 当前任务所属分组是否被选中
+ * @param modifier 修饰符
  * @param sharedElementModifier shared element 动画 modifier，用于任务详情展开时的 morph 动画
  */
 @Composable
@@ -182,6 +195,12 @@ private fun MainTaskRow(
 /**
  * 子任务行 —— 带缩进、小图标，嵌套在主任务下方。
  *
+ * @param item 扁平任务条目，包含任务数据和层级信息
+ * @param onToggleDone 点击勾选框切换完成状态时触发
+ * @param onClick 点击任务行时触发，打开任务详情
+ * @param isSelected 当前任务是否处于选中状态（多选模式）
+ * @param isGroupSelected 当前任务所属分组是否被选中
+ * @param modifier 修饰符
  * @param sharedElementModifier shared element 动画 modifier，用于任务详情展开时的 morph 动画
  */
 @Composable
@@ -254,7 +273,12 @@ private fun SubTaskRow(
             if (task.isDone) {
                 Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(10.dp))
             } else {
-                Icon(Icons.Default.RadioButtonUnchecked, contentDescription = null, tint = priorityColor.copy(alpha = NionAlpha.TEXT_SUBTITLE), modifier = Modifier.size(checkSize))
+                Icon(
+                    Icons.Default.RadioButtonUnchecked,
+                    contentDescription = null,
+                    tint = priorityColor.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+                    modifier = Modifier.size(checkSize)
+                )
             }
         }
         Spacer(modifier = Modifier.width(8.dp))

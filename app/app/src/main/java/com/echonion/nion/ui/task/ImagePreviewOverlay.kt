@@ -58,7 +58,9 @@ fun ImagePreviewOverlay(
                 // 限制最大边长为 2048 像素，自适应采样
                 val maxSize = 2048
                 BitmapUtils.decodeFileAdaptive(file.absolutePath, maxSize, maxSize)?.asImageBitmap()
-            } else null
+            } else {
+                null
+            }
         } catch (_: Exception) { null }
     }
 

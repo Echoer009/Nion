@@ -95,6 +95,7 @@ enum class DetailPanel { DETAIL, ADD_SUBTASK, RECURRENCE, REMINDER }
  * @param onUpdateRecurrence 循环设置变更回调，传入 (recurrenceRule, reminderTime)
  * @param onRemoveRecurrence 移除循环回调
  * @param sharedElementModifier shared element 动画 modifier（与触发卡片共享 key）
+ * @param onStartFocus 用户点击"开始专注"按钮时触发，传入预选的专注时长（分钟）
  * @param attachments 当前任务的附件列表
  * @param onPickImage 点击添加图片附件时触发
  * @param onPickFile 点击添加文件附件时触发
@@ -133,9 +134,6 @@ fun TaskDetailOverlay(
     var notes by remember(task.id) { mutableStateOf(task.description ?: "") }
     // 当前面板状态：DETAIL=详情 / ADD_SUBTASK=添加子任务
     var panel by remember { mutableStateOf(DetailPanel.DETAIL) }
-    // 子任务创建表单的标题和优先级
-    var subtaskTitle by remember { mutableStateOf("") }
-    var subtaskPriority by remember { mutableStateOf("medium") }
     // focusExpanded: 专注行是否展开（播放按钮移到左侧，显示预选时长）
     var focusExpanded by remember { mutableStateOf(false) }
     // selectedDuration: 预选专注时长（分钟），可在 25/45/60 之间循环切换
@@ -174,7 +172,7 @@ fun TaskDetailOverlay(
             color = MaterialTheme.colorScheme.surfaceContainerLowest,
             tonalElevation = 12.dp,
         ) {
-            // 内部 AnimatedContent：在三个面板之间切换，与添加子任务使用相同的 morph 动画
+            // 内部 AnimatedContent：在四个面板之间切换
             AnimatedContent(
                 targetState = panel,
                 transitionSpec = {
@@ -194,571 +192,77 @@ fun TaskDetailOverlay(
             ) { currentPanel ->
                 when (currentPanel) {
                     DetailPanel.ADD_SUBTASK -> {
-                        // ===== 添加子任务表单 =====
-                        Column(
-                            modifier = Modifier.padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(20.dp),
-                        ) {
-                            // 标题栏：图标 + "新建子任务" 文字
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    // 面板图标背景使用 tertiaryContainer（装饰性）
-                                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                                    modifier = Modifier.size(40.dp),
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Default.AddCircleOutline,
-                                            contentDescription = null,
-                                            // 面板图标色调使用 secondary（次要素）
-                                            tint = MaterialTheme.colorScheme.secondary,
-                                            modifier = Modifier.size(22.dp),
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Text(
-                                    "新建子任务",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Spacer(modifier = Modifier.weight(1f))
-                                IconButton(onClick = { panel = DetailPanel.DETAIL }) {
-                                    Icon(Icons.Default.Close, contentDescription = "关闭")
-                                }
-                            }
-
-                            // 提示：正在为哪个任务添加子任务
-                            Text(
-                                "添加到：${task.name}",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-
-                            // 子任务标题输入框
-                            OutlinedTextField(
-                                value = subtaskTitle,
-                                onValueChange = { subtaskTitle = it },
-                                label = { Text("标题") },
-                                placeholder = { Text("输入子任务标题...") },
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = OutlinedTextFieldDefaults.colors(
-                                    focusedBorderColor = MaterialTheme.colorScheme.primary,
-                                    focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                ),
-                                singleLine = true,
-                            )
-
-                            // 优先级选择
-                            Text(
-                                "优先级",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                            PrioritySelector(selected = subtaskPriority, onSelect = { subtaskPriority = it })
-
-                            // 操作按钮：取消 + 添加
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                TextButton(
-                                    onClick = {
-                                        subtaskTitle = ""
-                                        subtaskPriority = "medium"
-                                        panel = DetailPanel.DETAIL
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(14.dp),
-                                ) { Text("取消", fontWeight = FontWeight.SemiBold) }
-                                Button(
-                                    onClick = {
-                                        if (subtaskTitle.isNotBlank()) {
-                                            onCreateSubtask(subtaskTitle.trim(), subtaskPriority)
-                                            subtaskTitle = ""
-                                            subtaskPriority = "medium"
-                                            panel = DetailPanel.DETAIL
-                                        }
-                                    },
-                                    enabled = subtaskTitle.isNotBlank(),
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                    modifier = Modifier.weight(1f),
-                                ) { Text("添加", fontWeight = FontWeight.SemiBold) }
-                            }
-                        }
+                        AddSubtaskPanel(
+                            taskName = task.name,
+                            onCreateSubtask = onCreateSubtask,
+                            onBack = { panel = DetailPanel.DETAIL },
+                        )
                     }
 
                     DetailPanel.RECURRENCE -> {
-                        // ===== 循环设置页面 =====
-                        // 使用 RecurrenceSelector，与新建任务表单中的样式一致
-                        var localRule by remember(task.id) { mutableStateOf(task.recurrenceRule) }
-                        var localTime by remember(task.id) { mutableStateOf(task.recurrenceReminderTime) }
-                        Column(
-                            modifier = Modifier.padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(20.dp),
-                        ) {
-                            // 标题栏：图标 + "重复设置" + 关闭按钮
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    // 面板图标背景使用 tertiaryContainer
-                                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                                    modifier = Modifier.size(40.dp),
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Outlined.Repeat,
-                                            contentDescription = null,
-                                            // 面板图标色调使用 secondary
-                                            tint = MaterialTheme.colorScheme.secondary,
-                                            modifier = Modifier.size(22.dp),
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Text(
-                                    "重复设置",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Spacer(modifier = Modifier.weight(1f))
-                                IconButton(onClick = { panel = DetailPanel.DETAIL }) {
-                                    Icon(Icons.Default.Close, contentDescription = "关闭")
-                                }
-                            }
-
-                            // 提示正在为哪个任务设置循环
-                            Text(
-                                "为「${task.name}」设置每日循环",
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-
-                            // 循环选择器：不重复 / 每天 + 提醒时间
-                            RecurrenceSelector(
-                                recurrenceRule = localRule,
-                                reminderTime = localTime,
-                                onRecurrenceChanged = { localRule = it },
-                                onReminderTimeChanged = { localTime = it },
-                            )
-
-                            // 操作按钮：取消 + 保存 + 移除循环
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                // 移除循环按钮（仅当已设置循环时显示）
-                                if (task.recurrenceRule == "daily") {
-                                    TextButton(
-                                        onClick = {
-                                            onRemoveRecurrence()
-                                            panel = DetailPanel.DETAIL
-                                        },
-                                        shape = RoundedCornerShape(14.dp),
-                                        colors = ButtonDefaults.textButtonColors(
-                                            contentColor = MaterialTheme.colorScheme.error.copy(alpha = NionAlpha.TEXT_MEDIUM),
-                                        ),
-                                    ) {
-                                        Text("移除循环", fontWeight = FontWeight.SemiBold, maxLines = 1)
-                                    }
-                                }
-                                TextButton(
-                                    onClick = { panel = DetailPanel.DETAIL },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(14.dp),
-                                ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
-                                Button(
-                                    onClick = {
-                                        onUpdateRecurrence(localRule, localTime)
-                                        panel = DetailPanel.DETAIL
-                                    },
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                    modifier = Modifier.weight(1f),
-                                ) { Text("保存", fontWeight = FontWeight.SemiBold, maxLines = 1) }
-                            }
-                        }
+                        RecurrencePanel(
+                            task = task,
+                            onUpdateRecurrence = onUpdateRecurrence,
+                            onRemoveRecurrence = onRemoveRecurrence,
+                            onBack = { panel = DetailPanel.DETAIL },
+                        )
                     }
 
                     DetailPanel.REMINDER -> {
-                        // ===== 提醒设置页面 =====
-                        // 使用 ReminderTimePicker（startExpanded=true：直接显示日历，隐藏标题行）
-                        // ReminderTimePicker 自带 清除/取消/确定 按钮
-                        Column(
-                            modifier = Modifier.padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(20.dp),
-                        ) {
-                            // 标题栏：图标 + "提醒设置" + 关闭按钮（返回 DETAIL 面板）
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    // 面板图标背景使用 tertiaryContainer
-                                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                                    modifier = Modifier.size(40.dp),
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Outlined.Alarm,
-                                            contentDescription = null,
-                                            // 面板图标色调使用 secondary
-                                            tint = MaterialTheme.colorScheme.secondary,
-                                            modifier = Modifier.size(22.dp),
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Text(
-                                    "提醒设置",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Spacer(modifier = Modifier.weight(1f))
-                                IconButton(onClick = { panel = DetailPanel.DETAIL }) {
-                                    Icon(Icons.Default.Close, contentDescription = "关闭")
-                                }
-                            }
-
-                            // 使用 ReminderTimePicker（startExpanded=true：直接显示日历，无标题行）
-                            // onReminderChanged 只管数据，onDismiss 负责返回 DETAIL 面板
-                            ReminderTimePicker(
-                                reminder = task.reminder,
-                                onReminderChanged = { newReminder ->
-                                    onUpdateReminder(newReminder)
-                                },
-                                startExpanded = true,
-                                onDismiss = { panel = DetailPanel.DETAIL },
-                            )
-                        }
+                        ReminderPanel(
+                            task = task,
+                            onUpdateReminder = onUpdateReminder,
+                            onBack = { panel = DetailPanel.DETAIL },
+                        )
                     }
 
                     DetailPanel.DETAIL -> {
-                        // ===== 任务详情 =====
-                        // 用 Column + weight 替代 AdaptiveHeightLayout (SubcomposeLayout)，
-                        // 避免多次 subcompose 导致的"先显示居中标题，后续才出现内容"闪烁。
+                        // 任务详情面板：用 Column + weight 实现自适应高度布局
+                        // 避免多次 subcompose 导致的闪烁问题
                         Column(
                             modifier = Modifier
                                 .heightIn(max = maxCardHeight)
                                 .padding(20.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
-                            // 顶部：任务标题 + 日历图标 + 关闭按钮
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(
-                                    task.name,
-                                    style = MaterialTheme.typography.titleLarge,
-                                    fontWeight = FontWeight.Bold,
-                                    modifier = Modifier.weight(1f),
-                                )
-                            IconButton(onClick = onDismiss) {
-                                Icon(Icons.Default.Close, contentDescription = "关闭")
-                            }
-                        }
+                            // 顶部标题行
+                            DetailPanelHeader(
+                                taskName = task.name,
+                                onDismiss = onDismiss,
+                            )
 
-                        // 循环 + 提醒设置行：左右并排，各自可点击进入对应面板
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 2.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        ) {
-                            // 左半区：循环设置入口，点击进入 RECURRENCE 面板
-                            Row(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = { panel = DetailPanel.RECURRENCE },
-                                    )
-                                    .padding(vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    Icons.Outlined.Repeat,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    // 重复激活状态使用 secondary（信息性指示）
-                                    tint = if (task.recurrenceRule == "daily") MaterialTheme.colorScheme.secondary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = if (task.recurrenceRule == "daily") {
-                                        if (task.recurrenceReminderTime != null) "每天 ${task.recurrenceReminderTime}"
-                                        else "每天提醒"
-                                    } else "设置重复",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = if (task.recurrenceRule == "daily") FontWeight.Medium else FontWeight.Normal,
-                                    color = if (task.recurrenceRule == "daily") MaterialTheme.colorScheme.secondary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
-                                )
-                            }
+                            // 循环 + 提醒快捷入口行
+                            DetailRecurrenceReminderRow(
+                                task = task,
+                                onNavigateToRecurrence = { panel = DetailPanel.RECURRENCE },
+                                onNavigateToReminder = { panel = DetailPanel.REMINDER },
+                            )
 
-                            // 右半区：提醒设置入口，点击进入 REMINDER 面板
-                            Row(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = { panel = DetailPanel.REMINDER },
-                                    )
-                                    .padding(vertical = 2.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Icon(
-                                    Icons.Outlined.Alarm,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(16.dp),
-                                    // 提醒激活状态使用 secondary（信息性指示）
-                                    tint = if (task.reminder != null) MaterialTheme.colorScheme.secondary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
-                                )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text(
-                                    text = task.reminder?.let { r ->
-                                        try {
-                                            val ldt = LocalDateTime.parse(
-                                                r, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
-                                            )
-                                            "%d月%d日 %02d:%02d".format(ldt.monthValue, ldt.dayOfMonth, ldt.hour, ldt.minute)
-                                        } catch (_: Exception) { "已设置提醒" }
-                                    } ?: "设置提醒",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = if (task.reminder != null) FontWeight.Medium else FontWeight.Normal,
-                                    color = if (task.reminder != null) MaterialTheme.colorScheme.secondary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
-                                )
-                            }
-                        }
+                            // 可编辑备注区域，weight 占据 header/footer 之外的剩余空间
+                            DetailNotesField(
+                                notes = notes,
+                                onUpdateNotes = {
+                                    notes = it
+                                    onUpdateNotes(it)
+                                },
+                                onPickImage = onPickImage,
+                                onPickFile = onPickFile,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
 
-                            // 可编辑的备注输入框 —— weight(1f, fill=false) 占据 header/footer 之外的剩余空间
-                            // 内容少时收缩（最低 120dp），内容多时自动扩展，超出后内部滚动
-                            // 右下角内嵌附件按钮（回形针图标），clip 防止附件按钮展开时溢出框外
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .weight(1f, fill = false)
-                                    .heightIn(min = 120.dp)
-                                    .clip(RoundedCornerShape(14.dp)),
-                            ) {
-                                OutlinedTextField(
-                                    value = notes,
-                                    onValueChange = {
-                                        notes = it
-                                        onUpdateNotes(it)
-                                    },
-                                    placeholder = { Text("添加备注...") },
-                                    modifier = Modifier.fillMaxSize(),
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = OutlinedTextFieldDefaults.colors(
-                                        // 备注输入框聚焦边框使用 tertiary（装饰性区分）
-                                        focusedBorderColor = MaterialTheme.colorScheme.tertiary,
-                                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    ),
-                                )
-                                // 附件按钮：定位在备注输入框的右下角
-                                AttachmentButton(
-                                    onPickImage = onPickImage,
-                                    onPickFile = onPickFile,
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .padding(end = 4.dp, bottom = 4.dp),
-                                )
-                            }
-
-                            // 底部固定区域：专注信息 + 工具栏，始终显示
+                            // 底部固定区域：专注信息 + 附件 + 工具栏，始终显示
                             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
-                                /**
-                                 * 专注信息行 —— 两步交互：
-                                 * 状态 A（默认）：[⏱ 专注时间 2h 30m ▶]，点击 ▶ 进入状态 B
-                                 * 状态 B（展开）：[▶ 25分钟▲▼]，播放按钮从右侧平滑滑动到左侧，右侧显示可切换的预选时长
-                                 *   - 点击 "25分钟 ▲▼" 循环切换 25→45→60→25
-                                 *   - 点击 ▶ 启动计时并跳转专注页面
-                                 *
-                                 * 使用局部 SharedTransitionLayout + sharedBounds 让播放按钮在过渡期间保持可见，
-                                 * 从右侧平滑平移到左侧，而非淡入淡出。
-                                 */
-                                Surface(
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    SharedTransitionLayout {
-                                        AnimatedContent(
-                                            targetState = focusExpanded,
-                                            transitionSpec = {
-                                                // 淡入淡出 300ms，播放按钮由 sharedBounds 独立处理位移动画
-                                                (fadeIn(tween(300, easing = FastOutSlowInEasing))
-                                                    togetherWith fadeOut(tween(300, easing = FastOutSlowInEasing)))
-                                                    .using(SizeTransform(clip = false))
-                                            },
-                                            label = "focusRow",
-                                        ) { expanded ->
-                                            // 捕获 AnimatedVisibilityScope，避免 this@AnimatedContent 标签歧义
-                                            val animatedScope = this
-                                            Row(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .padding(horizontal = 16.dp, vertical = 12.dp),
-                                                verticalAlignment = Alignment.CenterVertically,
-                                            ) {
-                                                if (!expanded) {
-                                                    // 状态 A 左侧：时钟图标 + 专注时间文字
-                                                    Row(verticalAlignment = Alignment.CenterVertically) {
-                                                        Icon(
-                                                            Icons.Default.Timer,
-                                                            contentDescription = null,
-                                                            modifier = Modifier.size(20.dp),
-                                                            // 专注计时器图标使用 secondary（信息性）
-                                                            tint = MaterialTheme.colorScheme.secondary,
-                                                        )
-                                                        Spacer(modifier = Modifier.width(10.dp))
-                                                        Column {
-                                                            Text(
-                                                                "专注时间",
-                                                                style = MaterialTheme.typography.labelSmall,
-                                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                            )
-                                                            Text(
-                                                                formatFocusTime(task.focusSeconds),
-                                                                style = MaterialTheme.typography.bodyMedium,
-                                                                fontWeight = FontWeight.Medium,
-                                                            )
-                                                        }
-                                                    }
-                                                }
+                                FocusInfoRow(
+                                    taskId = task.id,
+                                    focusSeconds = task.focusSeconds,
+                                    focusExpanded = focusExpanded,
+                                    onFocusExpandedChange = { focusExpanded = it },
+                                    selectedDuration = selectedDuration,
+                                    onSelectedDurationChange = { selectedDuration = it },
+                                    onStartFocus = onStartFocus,
+                                )
 
-                                                /**
-                                                 * 状态 B 左侧播放按钮：放在 Spacer 之前，确保在最左端
-                                                 * 与状态 A 右侧的播放按钮共享 sharedBounds key，
-                                                 * 过渡期间从右侧平滑滑动到最左侧
-                                                 */
-                                                if (expanded) {
-                                                    Surface(
-                                                        shape = RoundedCornerShape(12.dp),
-                                                        // 专注播放按钮背景使用 tertiaryContainer
-                                                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                                                        modifier = Modifier.sharedBounds(
-                                                            sharedContentState = rememberSharedContentState(
-                                                                "focusPlayBtn_${task.id}"
-                                                            ),
-                                                            animatedVisibilityScope = animatedScope,
-                                                            boundsTransform = { _, _ ->
-                                                                spring(
-                                                                    dampingRatio = 0.75f,
-                                                                    stiffness = Spring.StiffnessMedium,
-                                                                )
-                                                            },
-                                                        ),
-                                                        onClick = {
-                                                            onStartFocus(selectedDuration)
-                                                        },
-                                                    ) {
-                                                        Icon(
-                                                            Icons.Default.PlayArrow,
-                                                            contentDescription = "开始专注",
-                                                            modifier = Modifier
-                                                                .padding(8.dp)
-                                                                .size(20.dp),
-                                                            // 播放按钮图标使用 tertiary
-                                                            tint = MaterialTheme.colorScheme.tertiary,
-                                                        )
-                                                    }
-                                                }
-
-                                                Spacer(modifier = Modifier.weight(1f))
-
-                                                /**
-                                                 * 状态 A 右侧播放按钮：点击后进入状态 B
-                                                 * 与状态 B 左侧的播放按钮共享 sharedBounds key，
-                                                 * 过渡期间从当前位置滑动到左侧
-                                                 */
-                                                if (!expanded) {
-                                                    Surface(
-                                                        shape = RoundedCornerShape(12.dp),
-                                                        // 专注播放按钮背景使用 tertiaryContainer
-                                                        color = MaterialTheme.colorScheme.tertiaryContainer,
-                                                        modifier = Modifier.sharedBounds(
-                                                            sharedContentState = rememberSharedContentState(
-                                                                "focusPlayBtn_${task.id}"
-                                                            ),
-                                                            animatedVisibilityScope = animatedScope,
-                                                            boundsTransform = { _, _ ->
-                                                                spring(
-                                                                    dampingRatio = 0.75f,
-                                                                    stiffness = Spring.StiffnessMedium,
-                                                                )
-                                                            },
-                                                        ),
-                                                        onClick = { focusExpanded = true },
-                                                    ) {
-                                                        Icon(
-                                                            Icons.Default.PlayArrow,
-                                                            contentDescription = "开始专注",
-                                                            modifier = Modifier
-                                                                .padding(8.dp)
-                                                                .size(20.dp),
-                                                            // 播放按钮图标使用 tertiary
-                                                            tint = MaterialTheme.colorScheme.tertiary,
-                                                        )
-                                                    }
-                                                }
-
-                                                if (expanded) {
-                                                    // 状态 B 右侧：预选专注时长，点击循环切换 25→45→60→25
-                                                    Row(
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        modifier = Modifier.clickable {
-                                                            selectedDuration = when (selectedDuration) {
-                                                                25 -> 45
-                                                                45 -> 60
-                                                                else -> 25
-                                                            }
-                                                        },
-                                                    ) {
-                                                        Text(
-                                                            "${selectedDuration}分钟",
-                                                            style = MaterialTheme.typography.bodyMedium,
-                                                            fontWeight = FontWeight.Medium,
-                                                            color = MaterialTheme.colorScheme.onSurface,
-                                                        )
-                                                        Spacer(modifier = Modifier.width(4.dp))
-                                                        Column(
-                                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                                        ) {
-                                                            Icon(
-                                                                Icons.Default.ArrowDropUp,
-                                                                contentDescription = null,
-                                                                modifier = Modifier.size(10.dp),
-                                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                            )
-                                                            Icon(
-                                                                Icons.Default.ArrowDropDown,
-                                                                contentDescription = null,
-                                                                modifier = Modifier.size(10.dp),
-                                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                            )
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // 附件区域：附件列表
+                                // 附件列表
                                 if (attachments.isNotEmpty()) {
                                     AttachmentList(
                                         attachments = attachments,
@@ -767,61 +271,731 @@ fun TaskDetailOverlay(
                                     )
                                 }
 
-                                // 工具栏：添加子任务 + 删除
-                                Surface(
-                                    shape = RoundedCornerShape(16.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                                        horizontalArrangement = Arrangement.SpaceEvenly,
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        // 添加子任务按钮 —— 点击后卡片内容 morph 为子任务创建表单
-                                        TextButton(
-                                            onClick = { panel = DetailPanel.ADD_SUBTASK },
-                                            colors = ButtonDefaults.textButtonColors(
-                                                contentColor = MaterialTheme.colorScheme.primary,
-                                            ),
-                                        ) {
-                                            Icon(
-                                                Icons.Default.AddCircleOutline,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("添加子任务", fontWeight = FontWeight.Medium)
-                                        }
-                                        // 分隔圆点
-                                        Text(
-                                            "·",
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.BG_SUBTLE),
-                                        )
-                                        // 删除按钮
-                                        TextButton(
-                                            onClick = onDelete,
-                                            colors = ButtonDefaults.textButtonColors(
-                                            contentColor = MaterialTheme.colorScheme.error.copy(alpha = NionAlpha.TEXT_MEDIUM),
-                                            ),
-                                        ) {
-                                            Icon(
-                                                Icons.Outlined.DeleteOutline,
-                                                contentDescription = null,
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Text("删除", fontWeight = FontWeight.Medium)
-                                        }
-                                    }
-                                }
+                                // 底部工具栏
+                                DetailBottomToolbar(
+                                    onAddSubtask = { panel = DetailPanel.ADD_SUBTASK },
+                                    onDelete = onDelete,
+                                )
                             }
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+// ==================== 私有子 Composable ====================
+
+/**
+ * 添加子任务面板 —— 包含标题输入框、优先级选择和操作按钮。
+ *
+ * 点击取消或成功创建后通过 onBack 返回详情面板。
+ * 标题和优先级为面板内部临时状态，随面板生命周期创建和销毁。
+ *
+ * @param taskName 父任务名称，显示为"添加到：xxx"提示
+ * @param onCreateSubtask 创建子任务回调，传入 (标题, 优先级)；仅当标题非空时触发
+ * @param onBack 返回详情面板回调，点击取消或成功创建后触发
+ */
+@Composable
+private fun AddSubtaskPanel(
+    taskName: String,
+    onCreateSubtask: (String, String) -> Unit,
+    onBack: () -> Unit,
+) {
+    // 子任务标题输入内容
+    var subtaskTitle by remember { mutableStateOf("") }
+    // 子任务优先级，默认 medium
+    var subtaskPriority by remember { mutableStateOf("medium") }
+
+    Column(
+        modifier = Modifier.padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        // 标题栏：图标 + "新建子任务" 文字 + 关闭按钮
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.AddCircleOutline,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Text(
+                "新建子任务",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.Close, contentDescription = "关闭")
+            }
+        }
+
+        // 提示：正在为哪个任务添加子任务
+        Text(
+            "添加到：$taskName",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        // 子任务标题输入框
+        OutlinedTextField(
+            value = subtaskTitle,
+            onValueChange = { subtaskTitle = it },
+            label = { Text("标题") },
+            placeholder = { Text("输入子任务标题...") },
+            modifier = Modifier.fillMaxWidth(),
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = MaterialTheme.colorScheme.primary,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ),
+            singleLine = true,
+        )
+
+        // 优先级选择
+        Text(
+            "优先级",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        PrioritySelector(selected = subtaskPriority, onSelect = { subtaskPriority = it })
+
+        // 操作按钮：取消 + 添加
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(
+                onClick = {
+                    subtaskTitle = ""
+                    subtaskPriority = "medium"
+                    onBack()
+                },
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp),
+            ) { Text("取消", fontWeight = FontWeight.SemiBold) }
+            Button(
+                onClick = {
+                    if (subtaskTitle.isNotBlank()) {
+                        onCreateSubtask(subtaskTitle.trim(), subtaskPriority)
+                        subtaskTitle = ""
+                        subtaskPriority = "medium"
+                        onBack()
+                    }
+                },
+                enabled = subtaskTitle.isNotBlank(),
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                modifier = Modifier.weight(1f),
+            ) { Text("添加", fontWeight = FontWeight.SemiBold) }
+        }
+    }
+}
+
+/**
+ * 循环设置面板 —— 设置任务的每日循环规则和提醒时间。
+ *
+ * 使用 RecurrenceSelector 让用户选择循环规则，本地编辑 localRule/localTime，
+ * 点保存时才通过 onUpdateRecurrence 提交到数据库。
+ *
+ * @param task 当前任务，用于读取现有循环设置和判断是否显示"移除循环"按钮
+ * @param onUpdateRecurrence 保存循环设置回调，传入 (recurrenceRule, reminderTime)
+ * @param onRemoveRecurrence 移除循环回调，点击"移除循环"按钮时触发
+ * @param onBack 返回详情面板回调，点击取消/保存/移除后触发
+ */
+@Composable
+private fun RecurrencePanel(
+    task: TaskItem,
+    onUpdateRecurrence: (String?, String?) -> Unit,
+    onRemoveRecurrence: () -> Unit,
+    onBack: () -> Unit,
+) {
+    // 本地编辑中的循环规则，初始值为任务当前设置，按 task.id 重置
+    var localRule by remember(task.id) { mutableStateOf(task.recurrenceRule) }
+    // 本地编辑中的提醒时间，初始值为任务当前设置，按 task.id 重置
+    var localTime by remember(task.id) { mutableStateOf(task.recurrenceReminderTime) }
+
+    Column(
+        modifier = Modifier.padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        // 标题栏：图标 + "重复设置" + 关闭按钮
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Outlined.Repeat,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Text(
+                "重复设置",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.Close, contentDescription = "关闭")
+            }
+        }
+
+        // 提示正在为哪个任务设置循环
+        Text(
+            "为「${task.name}」设置每日循环",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+
+        // 循环选择器：不重复 / 每天 + 提醒时间
+        RecurrenceSelector(
+            recurrenceRule = localRule,
+            reminderTime = localTime,
+            onRecurrenceChanged = { localRule = it },
+            onReminderTimeChanged = { localTime = it },
+        )
+
+        // 操作按钮：移除循环（条件显示） + 取消 + 保存
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 移除循环按钮（仅当已设置循环时显示）
+            if (task.recurrenceRule == "daily") {
+                TextButton(
+                    onClick = {
+                        onRemoveRecurrence()
+                        onBack()
+                    },
+                    shape = RoundedCornerShape(14.dp),
+                    colors = ButtonDefaults.textButtonColors(
+                        contentColor = MaterialTheme.colorScheme.error.copy(alpha = NionAlpha.TEXT_MEDIUM),
+                    ),
+                ) {
+                    Text("移除循环", fontWeight = FontWeight.SemiBold, maxLines = 1)
+                }
+            }
+            TextButton(
+                onClick = onBack,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp),
+            ) { Text("取消", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+            Button(
+                onClick = {
+                    onUpdateRecurrence(localRule, localTime)
+                    onBack()
+                },
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                modifier = Modifier.weight(1f),
+            ) { Text("保存", fontWeight = FontWeight.SemiBold, maxLines = 1) }
+        }
+    }
+}
+
+/**
+ * 提醒设置面板 —— 设置任务的一次性提醒时间。
+ *
+ * 内嵌 ReminderTimePicker（startExpanded=true：直接显示日历，隐藏标题行），
+ * ReminderTimePicker 自带 清除/取消/确定 按钮，onDismiss 负责返回 DETAIL 面板。
+ *
+ * @param task 当前任务，用于读取现有提醒设置
+ * @param onUpdateReminder 提醒时间变更回调，传入 "YYYY-MM-DDTHH:MM" 格式或 null（清除）
+ * @param onBack 返回详情面板回调，ReminderTimePicker 关闭时触发
+ */
+@Composable
+private fun ReminderPanel(
+    task: TaskItem,
+    onUpdateReminder: (String?) -> Unit,
+    onBack: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        // 标题栏：图标 + "提醒设置" + 关闭按钮
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Surface(
+                shape = RoundedCornerShape(8.dp),
+                color = MaterialTheme.colorScheme.tertiaryContainer,
+                modifier = Modifier.size(40.dp),
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Outlined.Alarm,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.secondary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(14.dp))
+            Text(
+                "提醒设置",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+            IconButton(onClick = onBack) {
+                Icon(Icons.Default.Close, contentDescription = "关闭")
+            }
+        }
+
+        // 使用 ReminderTimePicker（startExpanded=true：直接显示日历，无标题行）
+        // onReminderChanged 只管数据，onDismiss 负责返回 DETAIL 面板
+        ReminderTimePicker(
+            reminder = task.reminder,
+            onReminderChanged = { newReminder ->
+                onUpdateReminder(newReminder)
+            },
+            startExpanded = true,
+            onDismiss = onBack,
+        )
+    }
+}
+
+/**
+ * 任务详情面板顶部标题行 —— 显示任务标题和关闭按钮。
+ *
+ * @param taskName 任务标题文本
+ * @param onDismiss 关闭浮层回调，点击关闭按钮时触发
+ */
+@Composable
+private fun DetailPanelHeader(
+    taskName: String,
+    onDismiss: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            taskName,
+            style = MaterialTheme.typography.titleLarge,
+            fontWeight = FontWeight.Bold,
+            modifier = Modifier.weight(1f),
+        )
+        IconButton(onClick = onDismiss) {
+            Icon(Icons.Default.Close, contentDescription = "关闭")
+        }
+    }
+}
+
+/**
+ * 循环/提醒快捷入口行 —— 左右并排显示循环和提醒状态，点击可进入对应设置面板。
+ *
+ * 左半区显示循环设置入口（激活时显示"每天 HH:MM"，未激活时显示"设置重复"），
+ * 右半区显示提醒设置入口（激活时显示"MM月DD日 HH:MM"，未激活时显示"设置提醒"）。
+ *
+ * @param task 当前任务，用于读取循环规则和提醒时间
+ * @param onNavigateToRecurrence 点击循环入口时触发，导航到循环设置面板
+ * @param onNavigateToReminder 点击提醒入口时触发，导航到提醒设置面板
+ */
+@Composable
+private fun DetailRecurrenceReminderRow(
+    task: TaskItem,
+    onNavigateToRecurrence: () -> Unit,
+    onNavigateToReminder: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // 左半区：循环设置入口，点击进入 RECURRENCE 面板
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onNavigateToRecurrence,
+                )
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Outlined.Repeat,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                // 重复激活状态使用 secondary（信息性指示）
+                tint = if (task.recurrenceRule == "daily") MaterialTheme.colorScheme.secondary
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = if (task.recurrenceRule == "daily") {
+                    if (task.recurrenceReminderTime != null) "每天 ${task.recurrenceReminderTime}"
+                    else "每天提醒"
+                } else {
+                    "设置重复"
+                },
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (task.recurrenceRule == "daily") FontWeight.Medium else FontWeight.Normal,
+                color = if (task.recurrenceRule == "daily") MaterialTheme.colorScheme.secondary
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+            )
+        }
+
+        // 右半区：提醒设置入口，点击进入 REMINDER 面板
+        Row(
+            modifier = Modifier
+                .weight(1f)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onNavigateToReminder,
+                )
+                .padding(vertical = 2.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                Icons.Outlined.Alarm,
+                contentDescription = null,
+                modifier = Modifier.size(16.dp),
+                // 提醒激活状态使用 secondary（信息性指示）
+                tint = if (task.reminder != null) MaterialTheme.colorScheme.secondary
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                text = task.reminder?.let { r ->
+                    try {
+                        val ldt = LocalDateTime.parse(
+                            r, DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
+                        )
+                        "%d月%d日 %02d:%02d".format(ldt.monthValue, ldt.dayOfMonth, ldt.hour, ldt.minute)
+                    } catch (_: Exception) { "已设置提醒" }
+                } ?: "设置提醒",
+                style = MaterialTheme.typography.labelMedium,
+                fontWeight = if (task.reminder != null) FontWeight.Medium else FontWeight.Normal,
+                color = if (task.reminder != null) MaterialTheme.colorScheme.secondary
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+            )
+        }
+    }
+}
+
+/**
+ * 备注编辑区域 —— 可编辑的备注输入框，右下角内嵌附件按钮。
+ *
+ * 使用 clip 防止附件按钮展开时溢出框外。内容少时收缩（最低 120dp），
+ * 内容多时自动扩展，超出后内部滚动。外部通过 modifier 传入 weight 控制在 Column 中的占比。
+ *
+ * @param notes 当前备注内容
+ * @param onUpdateNotes 备注内容变更回调，传入新文本；由调用方负责同步更新本地状态和持久化
+ * @param onPickImage 点击添加图片附件时触发
+ * @param onPickFile 点击添加文件附件时触发
+ * @param modifier 外部传入的 modifier（用于 Column 中的 weight 布局）
+ */
+@Composable
+private fun DetailNotesField(
+    notes: String,
+    onUpdateNotes: (String) -> Unit,
+    onPickImage: () -> Unit,
+    onPickFile: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .heightIn(min = 120.dp)
+            .clip(RoundedCornerShape(14.dp)),
+    ) {
+        OutlinedTextField(
+            value = notes,
+            onValueChange = onUpdateNotes,
+            placeholder = { Text("添加备注...") },
+            modifier = Modifier.fillMaxSize(),
+            shape = RoundedCornerShape(14.dp),
+            colors = OutlinedTextFieldDefaults.colors(
+                // 备注输入框聚焦边框使用 tertiary（装饰性区分）
+                focusedBorderColor = MaterialTheme.colorScheme.tertiary,
+                focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+            ),
+        )
+        // 附件按钮：定位在备注输入框的右下角
+        AttachmentButton(
+            onPickImage = onPickImage,
+            onPickFile = onPickFile,
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 4.dp, bottom = 4.dp),
+        )
+    }
+}
+
+/**
+ * 专注信息行 —— 两步交互的专注计时器控件。
+ *
+ * 状态 A（默认）：[时钟图标 专注时间 Xh Xm 播放按钮]，点击播放按钮进入状态 B
+ * 状态 B（展开）：[播放按钮 N分钟上下箭头]，播放按钮从右侧滑动到左侧，右侧显示预选时长
+ *   - 点击 "N分钟 上下箭头" 循环切换 25 -> 45 -> 60 -> 25
+ *   - 点击播放按钮启动计时并跳转专注页面
+ *
+ * 使用局部 SharedTransitionLayout + sharedBounds 让播放按钮在过渡期间保持可见，
+ * 从右侧平滑平移到左侧，而非淡入淡出。
+ *
+ * @param taskId 任务 ID，用于 sharedBounds 的唯一 key
+ * @param focusSeconds 已累计的专注时长（秒），用于格式化显示
+ * @param focusExpanded 专注行是否处于展开状态（状态 B）
+ * @param onFocusExpandedChange 展开状态变更回调，用户点击播放按钮时触发并传入 true
+ * @param selectedDuration 预选的专注时长（分钟），在 25/45/60 之间循环
+ * @param onSelectedDurationChange 预选时长变更回调，用户点击时长切换器时触发
+ * @param onStartFocus 点击开始专注时触发，传入预选时长（分钟）
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun FocusInfoRow(
+    taskId: String,
+    focusSeconds: Long,
+    focusExpanded: Boolean,
+    onFocusExpandedChange: (Boolean) -> Unit,
+    selectedDuration: Int,
+    onSelectedDurationChange: (Int) -> Unit,
+    onStartFocus: (Int) -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        SharedTransitionLayout {
+            AnimatedContent(
+                targetState = focusExpanded,
+                transitionSpec = {
+                    // 淡入淡出 300ms，播放按钮由 sharedBounds 独立处理位移动画
+                    (fadeIn(tween(300, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(300, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                },
+                label = "focusRow",
+            ) { expanded ->
+                // 捕获 AnimatedVisibilityScope，避免 this@AnimatedContent 标签歧义
+                val animatedScope = this
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    if (!expanded) {
+                        // 状态 A 左侧：时钟图标 + 专注时间文字
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                Icons.Default.Timer,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp),
+                                tint = MaterialTheme.colorScheme.secondary,
+                            )
+                            Spacer(modifier = Modifier.width(10.dp))
+                            Column {
+                                Text(
+                                    "专注时间",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Text(
+                                    formatFocusTime(focusSeconds),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    fontWeight = FontWeight.Medium,
+                                )
+                            }
+                        }
+                    }
+
+                    // 状态 B 左侧播放按钮：放在 Spacer 之前，确保在最左端
+                    // 与状态 A 右侧的播放按钮共享 sharedBounds key，
+                    // 过渡期间从右侧平滑滑动到最左侧
+                    if (expanded) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            modifier = Modifier.sharedBounds(
+                                sharedContentState = rememberSharedContentState(
+                                    "focusPlayBtn_$taskId"
+                                ),
+                                animatedVisibilityScope = animatedScope,
+                                boundsTransform = { _, _ ->
+                                    spring(
+                                        dampingRatio = 0.75f,
+                                        stiffness = Spring.StiffnessMedium,
+                                    )
+                                },
+                            ),
+                            onClick = { onStartFocus(selectedDuration) },
+                        ) {
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                contentDescription = "开始专注",
+                                modifier = Modifier
+                                    .padding(8.dp)
+                                    .size(20.dp),
+                                tint = MaterialTheme.colorScheme.tertiary,
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.weight(1f))
+
+                    // 状态 A 右侧播放按钮：点击后进入状态 B
+                    // 与状态 B 左侧的播放按钮共享 sharedBounds key，
+                    // 过渡期间从当前位置滑动到左侧
+                    if (!expanded) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.tertiaryContainer,
+                            modifier = Modifier.sharedBounds(
+                                sharedContentState = rememberSharedContentState(
+                                    "focusPlayBtn_$taskId"
+                                ),
+                                animatedVisibilityScope = animatedScope,
+                                boundsTransform = { _, _ ->
+                                    spring(
+                                        dampingRatio = 0.75f,
+                                        stiffness = Spring.StiffnessMedium,
+                                    )
+                                },
+                            ),
+                            onClick = { onFocusExpandedChange(true) },
+                        ) {
+                            Icon(
+                                Icons.Default.PlayArrow,
+                                contentDescription = "开始专注",
+                                modifier = Modifier
+                                    .padding(8.dp)
+                                    .size(20.dp),
+                                tint = MaterialTheme.colorScheme.tertiary,
+                            )
+                        }
+                    }
+
+                    if (expanded) {
+                        // 状态 B 右侧：预选专注时长，点击循环切换 25 -> 45 -> 60 -> 25
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clickable {
+                                onSelectedDurationChange(
+                                    when (selectedDuration) {
+                                        25 -> 45
+                                        45 -> 60
+                                        else -> 25
+                                    }
+                                )
+                            },
+                        ) {
+                            Text(
+                                "${selectedDuration}分钟",
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Medium,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
+                            ) {
+                                Icon(
+                                    Icons.Default.ArrowDropUp,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(10.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                                Icon(
+                                    Icons.Default.ArrowDropDown,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(10.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 底部工具栏 —— 包含"添加子任务"和"删除"两个操作按钮，以分隔圆点分开。
+ *
+ * @param onAddSubtask 点击添加子任务按钮时触发，通常用于切换到 ADD_SUBTASK 面板
+ * @param onDelete 点击删除按钮时触发，用于删除当前任务
+ */
+@Composable
+private fun DetailBottomToolbar(
+    onAddSubtask: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 添加子任务按钮
+            TextButton(
+                onClick = onAddSubtask,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.primary,
+                ),
+            ) {
+                Icon(
+                    Icons.Default.AddCircleOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("添加子任务", fontWeight = FontWeight.Medium)
+            }
+            // 分隔圆点
+            Text(
+                "·",
+                style = MaterialTheme.typography.bodyLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.BG_SUBTLE),
+            )
+            // 删除按钮
+            TextButton(
+                onClick = onDelete,
+                colors = ButtonDefaults.textButtonColors(
+                    contentColor = MaterialTheme.colorScheme.error.copy(alpha = NionAlpha.TEXT_MEDIUM),
+                ),
+            ) {
+                Icon(
+                    Icons.Outlined.DeleteOutline,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("删除", fontWeight = FontWeight.Medium)
             }
         }
     }

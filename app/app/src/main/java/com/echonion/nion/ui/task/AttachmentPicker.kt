@@ -11,6 +11,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.platform.LocalContext
 import java.io.File
 import java.util.UUID
+import android.util.Log
+
+private const val TAG_ATTACHMENT = "AttachmentPicker"
 
 /**
  * 附件文件信息 —— 复制到内部存储后的文件元数据
@@ -161,6 +164,7 @@ private fun copyToInternalStorage(
 
         PickedFileInfo(destFile.absolutePath, fileName, mimeType, destFile.length())
     } catch (e: Exception) {
+        Log.w(TAG_ATTACHMENT, "复制附件文件失败", e)
         null
     }
 }

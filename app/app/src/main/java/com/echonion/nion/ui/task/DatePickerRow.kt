@@ -4,6 +4,7 @@ import com.echonion.nion.ui.theme.NionAlpha
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
+import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -236,79 +237,25 @@ fun NionCalendar(
                 // —— 日历主视图 ——
                 // 注意：容器 sharedElement 只绑在头部 Surface 上，不包含 pager，避免日期闪烁
                 Column(modifier = Modifier.fillMaxWidth()) {
-                    // 月份头部 Surface，容器 sharedElement 绑在此处
-                    // 参照 ScheduleScreen 的 MonthHeader Surface
-                    Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .sharedElement(
-                                sharedContentState = rememberSharedContentState("yearMonthContainer"),
-                                animatedVisibilityScope = this@AnimatedContent,
-                                boundsTransform = { _, _ ->
-                                    spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
-                                },
-                            ),
-                        shape = RoundedCornerShape(20.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    ) {
-                        // 月份切换行：左箭头 + 年月文字（可点击打开选择器）+ 右箭头
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            IconButton(onClick = {
-                                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
-                            }) {
-                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "上月")
-                            }
-                            // 年月文字，不使用 sharedElement（两边文字内容不同 "2026年 5月" vs "2026年"，
-                            // morph 时最后一个字会闪烁），由容器 Surface 的 bounds morph 提供动画
-                            Text(
-                                displayedYearMonth.format(
-                                    DateTimeFormatter.ofPattern("yyyy年 M月", Locale.CHINESE)
-                                ),
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        // 点击年月文字：设置 picker 年份并展开选择器
-                                        onClick = {
-                                            pickerYear = displayedYearMonth.year
-                                            showYearMonthPicker = true
-                                        },
-                                    )
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold,
-                            )
-                            IconButton(onClick = {
-                                scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
-                            }) {
-                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下月")
-                            }
-                        }
-                    }
+                    // 月份头部 Surface：容器 sharedElement + 月份切换导航
+                    CalendarHeader(
+                        displayedYearMonth = displayedYearMonth,
+                        animatedContentScope = this@AnimatedContent,
+                        sharedTransitionScope = this@SharedTransitionLayout,
+                        onPreviousMonth = {
+                            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage - 1) }
+                        },
+                        onNextMonth = {
+                            scope.launch { pagerState.animateScrollToPage(pagerState.currentPage + 1) }
+                        },
+                        onYearMonthClick = {
+                            pickerYear = displayedYearMonth.year
+                            showYearMonthPicker = true
+                        },
+                    )
                     Spacer(modifier = Modifier.height(12.dp))
-                    // 星期标签行：一、二、三、四、五、六、日
-                    Row(modifier = Modifier.fillMaxWidth()) {
-                        dayLabels.forEach { label ->
-                            Box(
-                                modifier = Modifier.weight(1f),
-                                contentAlignment = Alignment.Center,
-                            ) {
-                                Text(
-                                    label,
-                                    style = MaterialTheme.typography.labelSmall,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
-                                )
-                            }
-                        }
-                    }
+                    // 星期标签行
+                    WeekDayLabels()
                     Spacer(modifier = Modifier.height(8.dp))
                     // 月份日期网格，使用 HorizontalPager 支持左右滑动切换月份
                     HorizontalPager(
@@ -330,6 +277,99 @@ fun NionCalendar(
                         )
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 日历头部导航 —— 包含月份切换箭头和年月文字（可点击打开年月选择器）。
+ *
+ * 容器 Surface 绑定 sharedElement（"yearMonthContainer"），与年月选择器面板的 Surface 对应，
+ * 实现 morph 过渡动画。参照 ScheduleScreen 的 MonthHeader Surface。
+ *
+ * @param displayedYearMonth 当前显示的年月
+ * @param animatedContentScope 外层 AnimatedContent 的作用域，用于 sharedElement 绑定
+ * @param onPreviousMonth 点击上月箭头回调
+ * @param onNextMonth 点击下月箭头回调
+ * @param onYearMonthClick 点击年月文字回调，打开年月选择器
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun CalendarHeader(
+    displayedYearMonth: YearMonth,
+    animatedContentScope: androidx.compose.animation.AnimatedVisibilityScope,
+    sharedTransitionScope: SharedTransitionScope,
+    onPreviousMonth: () -> Unit,
+    onNextMonth: () -> Unit,
+    onYearMonthClick: () -> Unit,
+) {
+    with(sharedTransitionScope) {
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .sharedElement(
+                sharedContentState = rememberSharedContentState("yearMonthContainer"),
+                animatedVisibilityScope = animatedContentScope,
+                boundsTransform = { _, _ ->
+                    spring(dampingRatio = 0.8f, stiffness = Spring.StiffnessMediumLow)
+                },
+            ),
+        shape = RoundedCornerShape(20.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+    ) {
+        // 月份切换行：左箭头 + 年月文字（可点击打开选择器）+ 右箭头
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconButton(onClick = onPreviousMonth) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "上月")
+            }
+            // 年月文字：不使用 sharedElement（两边文字内容不同会闪烁），由容器 Surface 的 bounds morph 提供动画
+            Text(
+                displayedYearMonth.format(
+                    DateTimeFormatter.ofPattern("yyyy年 M月", Locale.CHINESE)
+                ),
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onYearMonthClick,
+                    )
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+            IconButton(onClick = onNextMonth) {
+                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下月")
+            }
+        }
+    }
+    }
+}
+
+/**
+ * 星期标签行 —— 显示"一、二、三、四、五、六、日"七个标签。
+ */
+@Composable
+private fun WeekDayLabels() {
+    Row(modifier = Modifier.fillMaxWidth()) {
+        dayLabels.forEach { label ->
+            Box(
+                modifier = Modifier.weight(1f),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+                )
             }
         }
     }
@@ -392,7 +432,9 @@ fun WheelSpinner(
         val mid = 50_000
         // 对齐到数据周期起始位置后偏移 safeInitial，确保初始显示正确
         mid - mid % items.size + safeInitial
-    } else safeInitial
+    } else {
+        safeInitial
+    }
 
     val listState = rememberLazyListState(
         initialFirstVisibleItemIndex = startVirtualIndex,
@@ -407,7 +449,9 @@ fun WheelSpinner(
         derivedStateOf {
             val offset = if (itemHeightPx > 0f) {
                 listState.firstVisibleItemScrollOffset.toFloat() / itemHeightPx
-            } else 0f
+            } else {
+                0f
+            }
             listState.firstVisibleItemIndex + offset
         }
     }
@@ -428,7 +472,9 @@ fun WheelSpinner(
             // 循环模式：虚拟位置映射回真实索引；非循环模式：直接使用
             val realIndex = if (circular) {
                 ((target % items.size) + items.size) % items.size
-            } else target
+            } else {
+                target
+            }
             // snap 目标与上次上报不同时，回调通知外部
             if (realIndex != lastReportedIndex) {
                 lastReportedIndex = realIndex

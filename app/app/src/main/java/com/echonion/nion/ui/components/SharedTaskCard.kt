@@ -150,124 +150,184 @@ fun SharedTaskCard(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 勾选框：带弹跳动画的圆形 checkbox
-        Box(
-            modifier = Modifier
-                .size(24.dp)
-                .scale(checkScale.value)
-                .clip(CircleShape)
-                .background(checkBgColor)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onToggleDone,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (model.isDone) {
+        TaskCheckbox(
+            isDone = model.isDone,
+            checkScale = checkScale.value,
+            checkBgColor = checkBgColor,
+            priorityColor = priorityColor,
+            onToggleDone = onToggleDone,
+        )
+        Spacer(modifier = Modifier.width(14.dp))
+        // 文字信息列：标题 + 描述 + 提醒时间
+        TaskTextContent(model = model, modifier = Modifier.weight(1f))
+    }
+}
+
+/**
+ * 任务勾选框 —— 带弹跳动画的圆形 checkbox。
+ *
+ * 完成时显示勾选图标（primary 背景），未完成时显示空心圆图标（颜色跟随优先级）。
+ * 弹跳动画由 checkScale 驱动，在外层通过 Animatable 控制。
+ *
+ * @param isDone 是否已完成
+ * @param checkScale 弹跳缩放值，由外层 Animatable 驱动
+ * @param checkBgColor 勾选框背景色，完成时 primary，未完成时透明
+ * @param priorityColor 优先级对应的颜色
+ * @param onToggleDone 点击切换完成状态回调
+ */
+@Composable
+private fun TaskCheckbox(
+    isDone: Boolean,
+    checkScale: Float,
+    checkBgColor: Color,
+    priorityColor: Color,
+    onToggleDone: () -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .size(24.dp)
+            .scale(checkScale)
+            .clip(CircleShape)
+            .background(checkBgColor)
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onToggleDone,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (isDone) {
+            Icon(
+                Icons.Default.Check,
+                contentDescription = "已完成",
+                tint = MaterialTheme.colorScheme.onPrimary,
+                modifier = Modifier.size(14.dp),
+            )
+        } else {
+            Icon(
+                Icons.Default.RadioButtonUnchecked,
+                contentDescription = "未完成",
+                tint = priorityColor,
+                modifier = Modifier.size(24.dp),
+            )
+        }
+    }
+}
+
+/**
+ * 任务文字内容区 —— 标题 + 描述 + 提醒时间行的纵向排列。
+ *
+ * 标题行包含任务名称（完成时带删除线）和每日循环图标（如果有）。
+ * 描述单行省略显示。提醒时间行根据任务类型显示不同样式。
+ *
+ * @param model 任务卡片数据
+ */
+@Composable
+private fun TaskTextContent(
+    model: TaskCardModel,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier = modifier) {
+        // 标题行：任务名 + 每日循环图标
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = model.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                textDecoration = if (model.isDone) TextDecoration.LineThrough else null,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            // 每日任务：卡片末尾只显示循环图标，使用 tertiary 装饰色
+            if (model.isDaily) {
+                Spacer(modifier = Modifier.width(6.dp))
                 Icon(
-                    Icons.Default.Check,
-                    contentDescription = "已完成",
-                    tint = MaterialTheme.colorScheme.onPrimary,
+                    Icons.Outlined.Repeat,
+                    contentDescription = "每天",
                     modifier = Modifier.size(14.dp),
-                )
-            } else {
-                Icon(
-                    Icons.Default.RadioButtonUnchecked,
-                    contentDescription = "未完成",
-                    tint = priorityColor,
-                    modifier = Modifier.size(24.dp),
+                    tint = MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),
                 )
             }
         }
-        Spacer(modifier = Modifier.width(14.dp))
-        // 文字信息列：标题 + 描述 + 截止日期/提醒时间
-        Column(modifier = Modifier.weight(1f)) {
-            // 标题行：任务名 + 每日循环图标
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = model.name,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = FontWeight.Medium,
-                    textDecoration = if (model.isDone) TextDecoration.LineThrough else null,
-                    color = MaterialTheme.colorScheme.onSurface,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false),
+        // 描述：单行省略，仅在有内容时显示
+        if (!model.description.isNullOrBlank()) {
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = model.description,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // 提醒时间显示行
+        TaskReminderInfoRow(model = model)
+    }
+}
+
+/**
+ * 任务提醒信息行 —— 显示一次性提醒和/或每日循环提醒时间。
+ *
+ * 显示规则：
+ * - 每日循环任务：只显示时钟图标 + HH:MM，逾期时变红
+ * - 一次性提醒任务：显示铃铛图标 + 完整日期时间，逾期时变红
+ * - 两者可同时显示（每日循环任务也可设置一次性提醒）
+ *
+ * @param model 任务卡片数据
+ */
+@Composable
+private fun TaskReminderInfoRow(
+    model: TaskCardModel,
+) {
+    val hasReminderTime = !model.reminderTime.isNullOrBlank()
+    // 每日循环任务不显示铃铛部分，避免与时钟图标重复
+    val hasReminder = !model.reminder.isNullOrBlank() && !model.isDaily
+    // 每日任务的逾期判断：通过 reminder 字段（自动设为今天日期+时间）检测是否已过时
+    val isDailyOverdue = model.isDaily && model.reminder.isReminderOverdue() && !model.isDone
+    if (hasReminder || hasReminderTime) {
+        Spacer(modifier = Modifier.height(2.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // 一次性提醒部分：铃铛图标 + 格式化的完整日期时间，逾期变红
+            if (hasReminder) {
+                val isOverdue = model.reminder.isReminderOverdue() && !model.isDone
+                Icon(
+                    Icons.Outlined.Notifications,
+                    contentDescription = null,
+                    modifier = Modifier.size(12.dp),
+                    tint = if (isOverdue) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),
                 )
-                // 每日任务：卡片末尾只显示循环图标，使用 tertiary 装饰色
-                if (model.isDaily) {
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Icon(
-                        Icons.Outlined.Repeat,
-                        contentDescription = "每天",
-                        modifier = Modifier.size(14.dp),
-                        tint = MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),
-                    )
-                }
-            }
-            // 描述：单行省略，仅在有内容时显示
-            if (!model.description.isNullOrBlank()) {
-                Spacer(modifier = Modifier.height(2.dp))
+                Spacer(modifier = Modifier.width(4.dp))
                 Text(
-                    text = model.description,
+                    text = model.reminder.formatReminder() ?: "",
                     style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = if (isOverdue) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-            // 提醒时间显示行：根据任务类型显示不同样式
-            // - 每日循环任务：只显示时钟图标 + HH:MM，不显示具体日期，逾期时变红
-            // - 一次性提醒任务：显示铃铛图标 + 完整日期时间，逾期时变红
-            val hasReminderTime = !model.reminderTime.isNullOrBlank()
-            // 每日循环任务不显示铃铛部分，避免与时钟图标重复
-            val hasReminder = !model.reminder.isNullOrBlank() && !model.isDaily
-            // 每日任务的逾期判断：通过 reminder 字段（自动设为今天日期+时间）检测是否已过时
-            val isDailyOverdue = model.isDaily && model.reminder.isReminderOverdue() && !model.isDone
-            if (hasReminder || hasReminderTime) {
-                Spacer(modifier = Modifier.height(2.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // 一次性提醒部分：铃铛图标 + 格式化的完整日期时间，逾期变红
-                    if (hasReminder) {
-                        val isOverdue = model.reminder.isReminderOverdue() && !model.isDone
-                        Icon(
-                            Icons.Outlined.Notifications,
-                            contentDescription = null,
-                            modifier = Modifier.size(12.dp),
-                            tint = if (isOverdue) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = model.reminder.formatReminder() ?: "",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isOverdue) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                    // 每日循环提醒时间部分：时钟图标 + HH:MM 时间，逾期时图标和文字变红
-                    if (hasReminderTime) {
-                        if (hasReminder) Spacer(modifier = Modifier.width(8.dp))
-                        Icon(
-                            Icons.Outlined.Schedule,
-                            contentDescription = null,
-                            modifier = Modifier.size(12.dp),
-                            tint = if (isDailyOverdue) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = model.reminderTime,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = if (isDailyOverdue) MaterialTheme.colorScheme.error
-                            else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                        )
-                    }
-                }
+            // 每日循环提醒时间部分：时钟图标 + HH:MM 时间，逾期时图标和文字变红
+            if (hasReminderTime) {
+                if (hasReminder) Spacer(modifier = Modifier.width(8.dp))
+                Icon(
+                    Icons.Outlined.Schedule,
+                    contentDescription = null,
+                    modifier = Modifier.size(12.dp),
+                    tint = if (isDailyOverdue) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = model.reminderTime,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isDailyOverdue) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
         }
     }

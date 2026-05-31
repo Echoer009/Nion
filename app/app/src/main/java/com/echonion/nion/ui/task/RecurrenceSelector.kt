@@ -87,7 +87,9 @@ fun RecurrenceEntryRow(
         Text(
             text = if (recurrenceRule == "daily") {
                 if (reminderTime != null) "每天 $reminderTime" else "每天提醒"
-            } else "不重复",
+            } else {
+                "不重复"
+            },
             style = MaterialTheme.typography.labelLarge,
             fontWeight = FontWeight.SemiBold,
             color = if (recurrenceRule == "daily") MaterialTheme.colorScheme.primary

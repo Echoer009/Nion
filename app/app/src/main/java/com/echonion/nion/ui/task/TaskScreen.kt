@@ -138,6 +138,7 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
  *
  * @param dualState 双面板状态，控制左右侧边栏
  * @param viewModel 任务 ViewModel
+ * @param onStartFocus 用户从任务详情点击"开始专注"时触发，传入 (任务ID, 任务标题, 预选时长分钟)
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalSharedTransitionApi::class)
 @Composable
@@ -439,6 +440,7 @@ fun TaskScreen(
  * @param onTaskClick 任务点击回调，打开任务详情
  * @param taskSharedModifier 为每个任务卡片生成 sharedElement modifier 的函数，用于详情展开 morph 动画
  * @param fab FAB 组件，由上层提供（包含 sharedBounds 动画逻辑）
+ * @param reorderableItems 外部传入的可重排项列表，跨 AnimatedContent 过渡保留拖拽状态
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -819,7 +821,14 @@ private fun AddTaskOverlay(
                                 ) { Text("取消", fontWeight = FontWeight.SemiBold) }
                                 Button(
                                     onClick = {
-                                        if (title.isNotBlank()) onAdd(title.trim(), description.trim().ifBlank { null }, priority, recurrenceRule, recurrenceReminderTime, taskReminder)
+                                        if (title.isNotBlank()) onAdd(
+                                            title.trim(),
+                                            description.trim().ifBlank { null },
+                                            priority,
+                                            recurrenceRule,
+                                            recurrenceReminderTime,
+                                            taskReminder
+                                        )
                                     },
                                     enabled = title.isNotBlank(),
                                     shape = RoundedCornerShape(14.dp),
@@ -836,35 +845,19 @@ private fun AddTaskOverlay(
                             modifier = Modifier.padding(20.dp),
                             verticalArrangement = Arrangement.spacedBy(20.dp),
                         ) {
-                            // 标题栏：图标 + "提醒设置" + 关闭按钮（返回 FORM 面板）
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    // 面板图标背景使用 tertiaryContainer
-                                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                                    modifier = Modifier.size(40.dp),
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Outlined.Alarm,
-                                            contentDescription = null,
-                                            // 面板图标色调使用 secondary
-                                            tint = MaterialTheme.colorScheme.secondary,
-                                            modifier = Modifier.size(22.dp),
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Text(
-                                    "提醒设置",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Spacer(modifier = Modifier.weight(1f))
-                                IconButton(onClick = { panel = AddPanel.FORM }) {
-                                    Icon(Icons.Default.Close, contentDescription = "关闭")
-                                }
-                            }
+                            // 面板标题栏：图标 + 标题 + 关闭按钮
+                            PanelHeader(
+                                icon = {
+                                    Icon(
+                                        Icons.Outlined.Alarm,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.secondary,
+                                        modifier = Modifier.size(22.dp),
+                                    )
+                                },
+                                title = "提醒设置",
+                                onClose = { panel = AddPanel.FORM },
+                            )
 
                             // 使用 ReminderTimePicker（startExpanded=true：直接显示日历，隐藏标题行）
                             // onReminderChanged 只管数据，onDismiss 负责返回 FORM 面板
@@ -877,93 +870,126 @@ private fun AddTaskOverlay(
                         }
                     }
 
-                    AddPanel.RECURRENCE -> {
-                        // ===== 重复设置面板 =====
-                        // 本地编辑状态，确定后写回外层
-                        var localRule by remember { mutableStateOf(recurrenceRule) }
-                        var localTime by remember { mutableStateOf(recurrenceReminderTime) }
-
-                        Column(
-                            modifier = Modifier.padding(20.dp),
-                            verticalArrangement = Arrangement.spacedBy(20.dp),
-                        ) {
-                            // 标题栏：图标 + "重复设置" + 关闭按钮
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    // 面板图标背景使用 tertiaryContainer
-                                    color = MaterialTheme.colorScheme.tertiaryContainer,
-                                    modifier = Modifier.size(40.dp),
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Icon(
-                                            Icons.Outlined.Repeat,
-                                            contentDescription = null,
-                                            // 面板图标色调使用 secondary
-                                            tint = MaterialTheme.colorScheme.secondary,
-                                            modifier = Modifier.size(22.dp),
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Text(
-                                    "重复设置",
-                                    style = MaterialTheme.typography.headlineMedium,
-                                    fontWeight = FontWeight.Bold,
-                                )
-                                Spacer(modifier = Modifier.weight(1f))
-                                IconButton(onClick = {
-                                    // 取消时恢复原值
-                                    localRule = recurrenceRule
-                                    localTime = recurrenceReminderTime
-                                    panel = AddPanel.FORM
-                                }) {
-                                    Icon(Icons.Default.Close, contentDescription = "关闭")
-                                }
-                            }
-
-                            // 使用 RecurrenceSelector（不重复/每天 + 内联时间滚轮）
-                            RecurrenceSelector(
-                                recurrenceRule = localRule,
-                                reminderTime = localTime,
-                                onRecurrenceChanged = { localRule = it },
-                                onReminderTimeChanged = { localTime = it },
-                            )
-
-                            // 底部操作按钮：取消 + 保存
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                TextButton(
-                                    onClick = {
-                                        // 取消时恢复原值
-                                        localRule = recurrenceRule
-                                        localTime = recurrenceReminderTime
-                                        panel = AddPanel.FORM
-                                    },
-                                    modifier = Modifier.weight(1f),
-                                    shape = RoundedCornerShape(14.dp),
-                                ) { Text("取消", fontWeight = FontWeight.SemiBold) }
-                                Button(
-                                    onClick = {
-                                        // 保存时将本地编辑值写回外层状态
-                                        recurrenceRule = localRule
-                                        recurrenceReminderTime = localTime
-                                        panel = AddPanel.FORM
-                                    },
-                                    shape = RoundedCornerShape(14.dp),
-                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                    modifier = Modifier.weight(1f),
-                                ) { Text("保存", fontWeight = FontWeight.SemiBold) }
-                            }
-                        }
-                    }
+                    AddPanel.RECURRENCE -> RecurrenceSettingPanel(
+                        initialRule = recurrenceRule,
+                        initialTime = recurrenceReminderTime,
+                        onSave = { rule, time ->
+                            recurrenceRule = rule
+                            recurrenceReminderTime = time
+                            panel = AddPanel.FORM
+                        },
+                        onCancel = { panel = AddPanel.FORM },
+                    )
                 }
             }
         } // end Surface
     } // end Box
+}
+
+/**
+ * 面板标题栏 —— 图标 + 标题 + 关闭按钮，REMINDER 和 RECURRENCE 子面板共用。
+ *
+ * @param icon 面板图标，显示在左侧圆角方块内
+ * @param title 面板标题文字
+ * @param onClose 关闭按钮回调（返回 FORM 面板）
+ */
+@Composable
+private fun PanelHeader(
+    icon: @Composable () -> Unit,
+    title: String,
+    onClose: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Surface(
+            shape = RoundedCornerShape(8.dp),
+            // 面板图标背景使用 tertiaryContainer
+            color = MaterialTheme.colorScheme.tertiaryContainer,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                icon()
+            }
+        }
+        Spacer(modifier = Modifier.width(14.dp))
+        Text(
+            title,
+            style = MaterialTheme.typography.headlineMedium,
+            fontWeight = FontWeight.Bold,
+        )
+        Spacer(modifier = Modifier.weight(1f))
+        IconButton(onClick = onClose) {
+            Icon(Icons.Default.Close, contentDescription = "关闭")
+        }
+    }
+}
+
+/**
+ * 重复设置面板 —— 编辑每日循环规则和提醒时间。
+ *
+ * 内部持有本地编辑状态（localRule / localTime），
+ * 确认后通过 onSave 回调写回外层，取消时丢弃本地修改。
+ *
+ * @param initialRule 初始循环规则（null=不循环，"daily"=每日）
+ * @param initialTime 初始每日提醒时间 "HH:MM"
+ * @param onSave 保存回调，传入 (规则, 时间)
+ * @param onCancel 取消回调
+ */
+@Composable
+private fun RecurrenceSettingPanel(
+    initialRule: String?,
+    initialTime: String?,
+    onSave: (String?, String?) -> Unit,
+    onCancel: () -> Unit,
+) {
+    // 本地编辑状态，确定后写回外层
+    var localRule by remember { mutableStateOf(initialRule) }
+    var localTime by remember { mutableStateOf(initialTime) }
+
+    Column(
+        modifier = Modifier.padding(20.dp),
+        verticalArrangement = Arrangement.spacedBy(20.dp),
+    ) {
+        // 面板标题栏
+        PanelHeader(
+            icon = {
+                Icon(
+                    Icons.Outlined.Repeat,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(22.dp),
+                )
+            },
+            title = "重复设置",
+            onClose = onCancel,
+        )
+
+        // 使用 RecurrenceSelector（不重复/每天 + 内联时间滚轮）
+        RecurrenceSelector(
+            recurrenceRule = localRule,
+            reminderTime = localTime,
+            onRecurrenceChanged = { localRule = it },
+            onReminderTimeChanged = { localTime = it },
+        )
+
+        // 底部操作按钮：取消 + 保存
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            TextButton(
+                onClick = onCancel,
+                modifier = Modifier.weight(1f),
+                shape = RoundedCornerShape(14.dp),
+            ) { Text("取消", fontWeight = FontWeight.SemiBold) }
+            Button(
+                onClick = { onSave(localRule, localTime) },
+                shape = RoundedCornerShape(14.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                modifier = Modifier.weight(1f),
+            ) { Text("保存", fontWeight = FontWeight.SemiBold) }
+        }
+    }
 }
 
 /**

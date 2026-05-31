@@ -65,6 +65,7 @@ data class AttachmentUiItem(
  * @param attachments 附件 UI 模型列表
  * @param onRemove 点击删除按钮时触发，传入附件 ID
  * @param onPreview 点击附件时触发，传入附件 UI 模型（用于图片全屏预览）
+ * @param modifier 修饰符，由调用方传入
  * @param showRemove 是否显示删除按钮
  */
 @Composable
@@ -148,7 +149,9 @@ private fun AttachmentCard(
                             BitmapUtils.decodeFileAdaptive(
                                 file.absolutePath, targetSize, targetSize
                             )?.asImageBitmap()
-                        } else null
+                        } else {
+                            null
+                        }
                     } catch (_: Exception) { null }
                 }
 

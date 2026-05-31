@@ -1,6 +1,7 @@
 package com.echonion.nion.ui.task
 
 import com.echonion.nion.ui.theme.NionAlpha
+import android.util.Log
 import android.app.Application
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -428,7 +429,8 @@ private fun completeTask(app: Application, taskId: String) {
                 app.core().updateTask(taskId, null, null, null, "done", null, null, null, null, null)
             }
         } catch (e: Exception) {
-            // 静默失败，不影响用户体验
+            // 完成任务失败时记录日志，不影响用户体验
+            Log.w("ReminderOverlay", "通过通知完成任务失败: taskId=$taskId", e)
         }
     }
 }
