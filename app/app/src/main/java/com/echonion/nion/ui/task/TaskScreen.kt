@@ -205,8 +205,7 @@ fun TaskScreen(
         }
     }
 
-    // 提升到 AnimatedContent 外部，跨过渡保留滚动位置和拖拽状态
-    val listState = rememberLazyListState()
+    // 拖拽排序状态需保持在 Crossfade 外部，跨清单切换时不丢失
     val reorderableItems = remember { mutableStateListOf<FlatTaskItem>() }
 
     // backdropBlur: 展开时模糊任务列表，收回时恢复清晰
@@ -367,7 +366,6 @@ fun TaskScreen(
                                     ) { Icon(Icons.Default.Add, contentDescription = "添加任务") }
                                 }
                             },
-                            listState = listState,
                             reorderableItems = reorderableItems,
                         )
                     } // end blur Box
@@ -451,7 +449,6 @@ private fun TaskScreenContent(
     taskSharedModifier: @Composable (String) -> Modifier,
     fab: @Composable () -> Unit,
     /** 外部传入，跨 AnimatedContent 过渡保留 */
-    listState: LazyListState,
     reorderableItems: SnapshotStateList<FlatTaskItem>,
 ) {
     Scaffold(
@@ -508,6 +505,8 @@ private fun TaskScreenContent(
             val showGroupBar = it != null
                     && it != TaskViewModel.TODAY_ID
                     && it != TaskViewModel.INBOX_ID
+            // 每个清单独立持有自己的滚动状态，切换清单时自动从顶部开始
+            val listState = rememberLazyListState()
             Column(modifier = Modifier.fillMaxSize()) {
                 if (showGroupBar) {
                     /**
