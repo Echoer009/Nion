@@ -265,6 +265,44 @@ cd app && ./gradlew assembleStandardDebug
 | Rust 核心 | SQLite (rusqlite), UniFFI (proc-macro), serde, chrono |
 | 拖拽排序 | [reorderable](https://github.com/Calvin-LL/reorderable) |
 
+## TODO
+
+- [ ] 更多清单类型：笔记、日记、习惯打卡
+- [ ] 更多 LLM Provider：Google Gemini、本地模型（Ollama）
+- [ ] 桌面端支持（基于已有 Rust 核心）
+- [ ] 云同步：多设备数据同步
+- [ ] 小组件：桌面快捷任务、今日待办一览
+- [ ] 协作：清单分享、任务分配
+- [ ] 多语言：英文、日文界面支持
+- [ ] 自定义提醒音效
+- [ ] 快捷指令：通知栏快速创建任务
+
+## Q&A
+
+**Q: 必须联网才能用吗？**
+A: 任务管理、专注计时、日程这些核心功能完全离线可用。只有 AI 伙伴聊天和天气查询需要网络。
+
+**Q: 需要注册账号吗？**
+A: 不需要。所有数据都存在你手机本地，没有任何云端账号。你只需要在设置里填一个 LLM 的 API Key 就能跟我聊天了。
+
+**Q: 支持哪些 AI 模型？**
+A: 目前支持 OpenAI（GPT 系列）、Anthropic（Claude 系列）、DeepSeek。基本上任何兼容 OpenAI API 格式的服务都能用。
+
+**Q: 我的 API Key 安全吗？**
+A: Key 只存在你手机本地，不会发送到任何第三方服务器。所有 API 请求都是直接从你的手机发到对应的 AI 服务商。
+
+**Q: 两个版本（Nion / BrainGirl）有什么区别？**
+A: Nion 是通用版，没有内置角色预设。BrainGirl 是内置角色版，预设了类脑娘的角色卡、头像和表情包。功能完全一样。
+
+**Q: 数据可以导出备份吗？**
+A: 可以。设置页 → 数据管理 → 导出，会生成一个 zip 文件包含你的所有数据。换手机或重装后导入就能恢复。
+
+**Q: 为什么提醒有时候不准时？**
+A: 部分厂商（小米、华为、vivo 等）的系统会杀后台应用导致闹钟被延迟。在设置页开启「悬浮窗提醒」和「后台提醒」权限，并把 Nion 加入电池优化白名单可以大幅改善。
+
+**Q: 开源吗？可以贡献代码吗？**
+A: 完全开源，GPL-3.0 协议。欢迎提 Issue 和 PR！
+
 ## 许可证
 
 [GNU General Public License v3.0](LICENSE)

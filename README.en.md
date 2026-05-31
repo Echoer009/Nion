@@ -265,6 +265,44 @@ cd app && ./gradlew assembleStandardDebug
 | Rust Core | SQLite (rusqlite), UniFFI (proc-macro), serde, chrono |
 | Drag & Drop | [reorderable](https://github.com/Calvin-LL/reorderable) |
 
+## TODO
+
+- [ ] More list types: notes, journal, habit tracker
+- [ ] More LLM providers: Google Gemini, local models (Ollama)
+- [ ] Desktop support (built on existing Rust core)
+- [ ] Cloud sync: multi-device data synchronization
+- [ ] Widgets: home screen quick task, today's overview
+- [ ] Collaboration: share checklists, assign tasks
+- [ ] i18n: English, Japanese UI support
+- [ ] Custom reminder sounds
+- [ ] Quick actions: create tasks from notification bar
+
+## Q&A
+
+**Q: Do I need internet to use it?**
+A: Core features like task management, focus timer, and schedule work entirely offline. Only the AI companion chat and weather queries require internet.
+
+**Q: Do I need to create an account?**
+A: Nope. All data is stored locally on your phone — no cloud account needed. Just plug in an LLM API key in settings to start chatting with me.
+
+**Q: Which AI models are supported?**
+A: Currently OpenAI (GPT series), Anthropic (Claude series), and DeepSeek. Basically any service with an OpenAI-compatible API format works.
+
+**Q: Is my API key safe?**
+A: Your key stays on your device and is never sent to any third-party server. All API requests go directly from your phone to the AI provider.
+
+**Q: What's the difference between Nion and BrainGirl?**
+A: Nion is the standard version without a built-in character preset. BrainGirl comes with a pre-configured character card, avatar, and sticker pack. Same features, different personality.
+
+**Q: Can I backup and restore my data?**
+A: Yes! Settings → Data Management → Export generates a zip with all your data. Import it on a new device or after reinstalling to restore everything.
+
+**Q: Why are reminders sometimes delayed?**
+A: Some manufacturers (Xiaomi, Huawei, vivo, etc.) aggressively kill background apps, which can delay alarms. Grant "overlay" and "battery optimization whitelist" permissions in Settings to significantly improve reliability.
+
+**Q: Is it open source? Can I contribute?**
+A: Fully open source under GPL-3.0. Issues and PRs are welcome!
+
 ## License
 
 [GNU General Public License v3.0](LICENSE)
