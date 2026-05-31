@@ -60,6 +60,67 @@ data class ThemePalette(
     val priorityMedium: Color,
     val priorityLow: Color,
 ) {
+
+    /**
+     * 序列化为 JSON。
+     * 所有颜色以 "#RRGGBB" 格式存储，不含 alpha 通道。
+     *
+     * @return 包含所有颜色槽位的 JSONObject
+     */
+    fun toJson(): JSONObject {
+        return JSONObject().apply {
+            put("primary", colorToHex(primary))
+            put("primaryContainer", colorToHex(primaryContainer))
+            put("onPrimaryContainer", colorToHex(onPrimaryContainer))
+            put("secondary", colorToHex(secondary))
+            put("secondaryContainer", colorToHex(secondaryContainer))
+            put("onSecondaryContainer", colorToHex(onSecondaryContainer))
+            put("tertiary", colorToHex(tertiary))
+            put("tertiaryContainer", colorToHex(tertiaryContainer))
+            put("onTertiaryContainer", colorToHex(onTertiaryContainer))
+            put("background", colorToHex(background))
+            put("onBackground", colorToHex(onBackground))
+            put("surfaceVariant", colorToHex(surfaceVariant))
+            put("onSurfaceVariant", colorToHex(onSurfaceVariant))
+            put("surfaceHigh", colorToHex(surfaceHigh))
+            put("surfaceHighest", colorToHex(surfaceHighest))
+            put("cardBackground", colorToHex(cardBackground))
+            put("outline", colorToHex(outline))
+            put("outlineVariant", colorToHex(outlineVariant))
+            put("priorityHigh", colorToHex(priorityHigh))
+            put("priorityMedium", colorToHex(priorityMedium))
+            put("priorityLow", colorToHex(priorityLow))
+        }
+    }
+
+    /**
+     * 将 Compose Color 转换为 "#RRGGBB" 字符串。
+     * 取 RGB 三通道（忽略 alpha），格式化为 6 位十六进制。
+     */
+    private fun colorToHex(color: Color): String {
+        val r = (color.red * 255).toInt().coerceIn(0, 255)
+        val g = (color.green * 255).toInt().coerceIn(0, 255)
+        val b = (color.blue * 255).toInt().coerceIn(0, 255)
+        return "#%02X%02X%02X".format(r, g, b)
+    }
+
+    /**
+     * 对指定颜色槽位进行部分更新，返回新的 ThemePalette 实例。
+     * 未指定的槽位保持不变。
+     *
+     * @param overrides 需要更新的颜色槽位键值对，key 为槽位名，value 为 "#RRGGBB" 格式颜色
+     * @return 更新后的新 ThemePalette 实例
+     */
+    fun withOverrides(overrides: Map<String, String>): ThemePalette {
+        val json = toJson()
+        for ((key, value) in overrides) {
+            if (key in COLOR_KEYS) {
+                json.put(key, value)
+            }
+        }
+        return fromJson(json)
+    }
+
     companion object {
 
         /**
@@ -158,66 +219,6 @@ data class ThemePalette(
             return Color(argb)
         }
     }
-
-    /**
-     * 序列化为 JSON。
-     * 所有颜色以 "#RRGGBB" 格式存储，不含 alpha 通道。
-     *
-     * @return 包含所有颜色槽位的 JSONObject
-     */
-    fun toJson(): JSONObject {
-        return JSONObject().apply {
-            put("primary", colorToHex(primary))
-            put("primaryContainer", colorToHex(primaryContainer))
-            put("onPrimaryContainer", colorToHex(onPrimaryContainer))
-            put("secondary", colorToHex(secondary))
-            put("secondaryContainer", colorToHex(secondaryContainer))
-            put("onSecondaryContainer", colorToHex(onSecondaryContainer))
-            put("tertiary", colorToHex(tertiary))
-            put("tertiaryContainer", colorToHex(tertiaryContainer))
-            put("onTertiaryContainer", colorToHex(onTertiaryContainer))
-            put("background", colorToHex(background))
-            put("onBackground", colorToHex(onBackground))
-            put("surfaceVariant", colorToHex(surfaceVariant))
-            put("onSurfaceVariant", colorToHex(onSurfaceVariant))
-            put("surfaceHigh", colorToHex(surfaceHigh))
-            put("surfaceHighest", colorToHex(surfaceHighest))
-            put("cardBackground", colorToHex(cardBackground))
-            put("outline", colorToHex(outline))
-            put("outlineVariant", colorToHex(outlineVariant))
-            put("priorityHigh", colorToHex(priorityHigh))
-            put("priorityMedium", colorToHex(priorityMedium))
-            put("priorityLow", colorToHex(priorityLow))
-        }
-    }
-
-    /**
-     * 将 Compose Color 转换为 "#RRGGBB" 字符串。
-     * 取 RGB 三通道（忽略 alpha），格式化为 6 位十六进制。
-     */
-    private fun colorToHex(color: Color): String {
-        val r = (color.red * 255).toInt().coerceIn(0, 255)
-        val g = (color.green * 255).toInt().coerceIn(0, 255)
-        val b = (color.blue * 255).toInt().coerceIn(0, 255)
-        return "#%02X%02X%02X".format(r, g, b)
-    }
-
-    /**
-     * 对指定颜色槽位进行部分更新，返回新的 ThemePalette 实例。
-     * 未指定的槽位保持不变。
-     *
-     * @param overrides 需要更新的颜色槽位键值对，key 为槽位名，value 为 "#RRGGBB" 格式颜色
-     * @return 更新后的新 ThemePalette 实例
-     */
-    fun withOverrides(overrides: Map<String, String>): ThemePalette {
-        val json = toJson()
-        for ((key, value) in overrides) {
-            if (key in COLOR_KEYS) {
-                json.put(key, value)
-            }
-        }
-        return fromJson(json)
-    }
 }
 
 /**
@@ -241,6 +242,27 @@ data class CustomThemeEntry(
     val seedColors: Map<String, String>?,
     val createdAt: Long,
 ) {
+
+    /**
+     * 序列化为 JSON。
+     *
+     * @return 包含所有字段的 JSONObject
+     */
+    fun toJson(): JSONObject {
+        return JSONObject().apply {
+            put("id", id)
+            put("name", name)
+            put("palette", palette.toJson())
+            put("createdAt", createdAt)
+            // 种子色可选保存（方便 AI 后续微调时知道原来的种子）
+            seedColors?.let { sc ->
+                val scJson = JSONObject()
+                sc.forEach { (k, v) -> scJson.put(k, v) }
+                put("seedColors", scJson)
+            }
+        }
+    }
+
     companion object {
 
         /**
@@ -260,7 +282,9 @@ data class CustomThemeEntry(
                     map[key] = sc.getString(key)
                 }
                 map.ifEmpty { null }
-            } else null
+            } else {
+                null
+            }
 
             return CustomThemeEntry(
                 id = json.getString("id"),
@@ -295,26 +319,6 @@ data class CustomThemeEntry(
             val arr = JSONArray()
             themes.forEach { entry -> arr.put(entry.toJson()) }
             return arr.toString()
-        }
-    }
-
-    /**
-     * 序列化为 JSON。
-     *
-     * @return 包含所有字段的 JSONObject
-     */
-    fun toJson(): JSONObject {
-        return JSONObject().apply {
-            put("id", id)
-            put("name", name)
-            put("palette", palette.toJson())
-            put("createdAt", createdAt)
-            // 种子色可选保存（方便 AI 后续微调时知道原来的种子）
-            seedColors?.let { sc ->
-                val scJson = JSONObject()
-                sc.forEach { (k, v) -> scJson.put(k, v) }
-                put("seedColors", scJson)
-            }
         }
     }
 }

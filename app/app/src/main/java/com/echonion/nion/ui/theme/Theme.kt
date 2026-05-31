@@ -85,6 +85,7 @@ private fun buildScheme(p: ThemePalette) = lightColorScheme(
  * 支持预设主题（通过 [NionColorTheme.palette()]）和自定义主题（通过 [ThemePalette] 直接传入）。
  *
  * @param palette 当前主题色板，包含所有颜色槽位
+ * @param content 主题包裹的 Composable 内容
  */
 @Composable
 fun NionTheme(
