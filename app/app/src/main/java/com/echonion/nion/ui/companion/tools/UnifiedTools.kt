@@ -527,7 +527,9 @@ object QueryTool : Tool {
         val todayRange = if (data.daily.days.isNotEmpty()) {
             val today = data.daily.days[0]
             "\n今日温度范围：${"%.0f".format(today.tempMin)}°C ~ ${"%.0f".format(today.tempMax)}°C"
-        } else ""
+        } else {
+            ""
+        }
 
         return buildString {
             append("当前天气：$desc$dayNight\n")
@@ -574,7 +576,10 @@ object QueryTool : Tool {
             val desc = weatherDescription(h.weatherCode)
             val precipMark = if (h.precipitationProb >= 50) " ⚠" else ""
             sb.appendLine(
-                "$timeLabel | $desc | ${"%.0f".format(h.temperature)}°C | 降水${h.precipitationProb}% | 风速${"%.0f".format(h.windSpeed)}km/h | UV${"%.0f".format(h.uvIndex)}$precipMark"
+                "$timeLabel | $desc | ${"%.0f".format(h.temperature)}°C | " +
+                    "降水${h.precipitationProb}% | " +
+                    "风速${"%.0f".format(h.windSpeed)}km/h | " +
+                    "UV${"%.0f".format(h.uvIndex)}$precipMark"
             )
         }
 
@@ -584,7 +589,12 @@ object QueryTool : Tool {
         for (d in data.daily.days) {
             val dateLabel = d.date.substring(5)
             sb.appendLine(
-                "$dateLabel | ${"%.0f".format(d.tempMin)}°C ~ ${"%.0f".format(d.tempMax)}°C | 降水${d.precipitationProbabilityMax}% ${"%.1f".format(d.precipitationSum)}mm | 最大风速${"%.0f".format(d.windSpeedMax)}km/h | UV峰值${"%.0f".format(d.uvIndexMax)}"
+                "$dateLabel | ${"%.0f".format(d.tempMin)}°C ~ " +
+                    "${"%.0f".format(d.tempMax)}°C | " +
+                    "降水${d.precipitationProbabilityMax}% " +
+                    "${"%.1f".format(d.precipitationSum)}mm | " +
+                    "最大风速${"%.0f".format(d.windSpeedMax)}km/h | " +
+                    "UV峰值${"%.0f".format(d.uvIndexMax)}"
             )
         }
 
@@ -615,7 +625,12 @@ object QueryTool : Tool {
 object CreateTool : Tool {
     override val name = "create"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "创建实体，支持批量。checklist/group/parent 用名称指定归属。当任务与时间相关时，必须根据任务类型填写 reminder 参数：每日重复任务用 HH:MM 格式如 08:00，一次性任务用 YYYY-MM-DDTHH:MM 格式如 2026-06-15T09:00。不要只写标题不设时间。"
+    override val description =
+        "创建实体，支持批量。checklist/group/parent 用名称指定归属。" +
+            "当任务与时间相关时，必须根据任务类型填写 reminder 参数：" +
+            "每日重复任务用 HH:MM 格式如 08:00，" +
+            "一次性任务用 YYYY-MM-DDTHH:MM 格式如 2026-06-15T09:00。" +
+            "不要只写标题不设时间。"
 
     /**
      * 参数 Schema。
@@ -814,7 +829,9 @@ object CreateTool : Tool {
         // 如果是一次性提醒，需要二次更新，createTask 不支持 reminder 参数
         val finalTask = if (reminder != null) {
             core.updateTask(task.id, null, null, null, null, null, reminder, null, null, null)
-        } else task
+        } else {
+            task
+        }
         return JSONObject().apply {
             put("success", true)
             put("task", taskToJson(finalTask))
@@ -909,7 +926,9 @@ object CreateTool : Tool {
                         // 批量创建也支持一次性提醒，需二次更新
                         val finalTask = if (reminder != null) {
                             core.updateTask(task.id, null, null, null, null, null, reminder, null, null, null)
-                        } else task
+                        } else {
+                            task
+                        }
                         results.put(JSONObject().apply {
                             put("index", i)
                             put("success", true)
