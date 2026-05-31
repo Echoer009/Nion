@@ -154,43 +154,45 @@ You don't need to lift a finger while chatting. Just tell me and I'll handle the
 
 ## What I Want to Learn Next
 
-I'm already pretty awesome, but there's so much more I want to do!
+Hehe, I know I'm already pretty awesome, right? But I've got a secret wishlist — who knows, maybe I'll learn these someday!
 
-- [ ] More list types: notes, journal, habit tracker
-- [ ] More LLM providers: Google Gemini, local models (Ollama)
-- [ ] Desktop support (built on existing Rust core)
-- [ ] Cloud sync: multi-device data synchronization
-- [ ] Widgets: home screen quick task, today's overview
-- [ ] Collaboration: share checklists, assign tasks
-- [ ] i18n: English, Japanese UI support
-- [ ] Custom reminder sounds
-- [ ] Quick actions: create tasks from notification bar
+- [ ] **Notes & Journal** — Not just tasks! I want to help you capture ideas, moods, rants... store it all for you
+- [ ] **More AI Brains** — Gemini, Ollama local models... I wanna make more friends so you have more choices
+- [ ] **Go Desktop** — My Rust heart is cross-platform, you know! Desktop app coming soon, phone-to-PC seamless sync, I'm so excited just thinking about it
+- [ ] **Cloud Sync** — Switch phones without starting over. Real-time sync across devices, I'll follow you everywhere
+- [ ] **Home Screen Widgets** — See what's left today right on your home screen. Don't even need to open the app and I can still nag you
+- [ ] **Work Together** — Share checklists, assign tasks... let your friends experience my nagging service too hahaha
+- [ ] **Speak More Languages** — English, Japanese UI coming up. Let the whole world chat with me
+- [ ] **Custom Reminder Sounds** — What voice do you want me to wake you up with? Hmph, I can do it
+- [ ] **Quick Notification Actions** — Create tasks from the notification shade, don't even need to open the app. Lightning fast
 
-## You Might Be Wondering...
+## You're Probably Wondering...
 
-**Q: Do I need internet to use it?**
-A: Core features like task management, focus timer, and schedule work entirely offline. Only chatting with me and weather queries need internet.
+I know what you're gonna ask, so I answered ahead of time!
 
-**Q: Do I need to create an account?**
-A: Nope! All data is stored locally on your phone — no cloud account needed. Just plug in an LLM API key in settings to start chatting with me.
+**Do I need internet?**
+Nope! Task management, focus timer, schedule — all work completely offline. You only need internet to chat with me or check the weather. When there's no connection, I'll just wait quietly in the background~
 
-**Q: Which AI models are supported?**
-A: Currently OpenAI (GPT series), Anthropic (Claude series), and DeepSeek. Basically any service with an OpenAI-compatible API format works.
+**Do I need to create an account?**
+No no no, I hate sign-ups too! Everything stays on your phone, no cloud accounts. Just drop in an LLM API key in settings and we can start chatting. Nothing else needed.
 
-**Q: Is my API key safe?**
-A: Relax, your key stays on your device and is never sent to any third-party server. All API requests go directly from your phone to the AI provider.
+**Which AI models work?**
+OpenAI (GPT series), Anthropic (Claude series), DeepSeek — all good! Basically anything that speaks OpenAI API format, I can handle. You pick, I learn.
 
-**Q: What's the difference between Nion and BrainGirl?**
-A: Nion is the standard version without a built-in character preset. BrainGirl comes with a pre-configured character card, avatar, and sticker pack. Same features, different personality — pick whoever you like~
+**Will my API key leak?**
+Don't worry don't worry! Your key stays on your phone, I swear I'd never send it anywhere else. All requests go directly from your device to the AI provider. I'm just the middleman, and I don't peek.
 
-**Q: Can I backup and restore my data?**
-A: Of course! Settings → Data Management → Export generates a zip with all your data. Import it on a new device or after reinstalling to restore everything. Nothing gets lost!
+**What's the deal with Nion vs BrainGirl?**
+Oh that~ Nion is the clean standard version, no presets. BrainGirl comes with a pre-loaded character card, avatar, and a ton of stickers. Same features, just depends on what personality you vibe with~
 
-**Q: Why are reminders sometimes delayed?**
-A: Hey, that's not my fault! Some manufacturers (Xiaomi, Huawei, vivo, etc.) aggressively kill background apps, which delays my alarms. Grant "overlay" and "battery optimization whitelist" permissions in Settings to fix this.
+**How do I backup my data?**
+Settings → Data Management → Export, and WHOOSH a zip file appears with all your tasks, stickers, avatars inside. Import it after switching phones or reinstalling — not a single byte lost!
 
-**Q: Is it open source? Can I contribute?**
-A: Fully open source under GPL-3.0. Issues and PRs welcome — come make me even better!
+**Why are my reminders sometimes late?**
+Hmph, this is SO not my fault okay!! It's those phone manufacturers (yeah I'm talking about you Xiaomi, Huawei, vivo) that keep killing my background process! Just enable "overlay" and "background reminder" permissions in Settings, and add me to the battery optimization whitelist. Please, give me a chance to nag you on time!
+
+**Is it open source? Can I contribute?**
+Absolutely! Fully open source under GPL-3.0. Issues and PRs welcome — come on, let's make me even stronger together!
 
 ## Architecture
 
