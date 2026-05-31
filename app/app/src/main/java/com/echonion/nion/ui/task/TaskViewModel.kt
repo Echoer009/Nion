@@ -464,12 +464,17 @@ class TaskViewModel(
      * 每日任务的完成/取消（新模型：实例化）。
      * 完成：调用 completeDailyTaskInstance → status 变 done + 自动创建明天的实例
      * 取消：调用 uncompleteDailyTaskInstance → status 恢复 todo + 自动删除明天实例
-     * 完成后刷新整个任务列表（因为会新建/删除明天的任务）。
+     *
+     * "今天"视图下不做全量刷新：completeDailyTaskInstance 创建的"明天"实例不会出现在
+     * getTasksDueToday 查询结果中，乐观更新已经是正确状态。跳过刷新可以避免替换整个
+     * tasks 列表导致 animateItem 位移动画被打断（首次完成时 done 区从无到有，LazyColumn
+     * 布局重建会重置 animateItem 的内部位置追踪）。
+     * 非"今天"视图仍然全量刷新，因为明天的新实例可能影响其他清单的显示。
      */
     private fun toggleDailyDone(task: TaskItem) {
         val todayStr = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
         val markDone = !task.isCompletedForDate
-        // 乐观更新 UI
+        // 乐观更新 UI（立即生效，启动 animateItem 位移动画）
         val updatedTask = task.copy(isDone = markDone, isCompletedForDate = markDone)
         tasks = updateTaskInList(tasks, task.id, updatedTask)
         viewModelScope.launch {
@@ -487,15 +492,20 @@ class TaskViewModel(
                         core.uncompleteDailyTaskInstance(task.id)
                     }
                 }
-                // 全量刷新（因为新建/删除了明天的任务，列表变化大）
-                tasks = loadTasksForCurrentView()
-                // 刷新过期列表
+                // "今天"视图：跳过全量刷新，避免打断 animateItem 动画。
+                // 乐观更新已经是正确状态（明天的新实例不会出现在今天的查询结果中）。
+                // 非今天视图：需要全量刷新，因为新建/删除了明天的任务可能影响当前清单。
+                if (activeChecklistId != TODAY_ID) {
+                    tasks = loadTasksForCurrentView()
+                }
+                // 刷新过期列表（独立状态，不影响主列表动画）
                 overdueDailyTasks = withContext(Dispatchers.IO) {
                     core.getOverdueDailyTasks(todayStr)
                 }
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("更新失败: ${e.message}")
+                // 错误时始终全量刷新，恢复乐观更新前的真实状态
                 tasks = loadTasksForCurrentView()
             }
         }
