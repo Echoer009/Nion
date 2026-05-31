@@ -6,8 +6,12 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import java.io.File
+import java.io.FileInputStream
+import java.io.FileOutputStream
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -49,10 +53,12 @@ import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -367,6 +373,18 @@ fun SettingsScreen(
             // 后台提醒（电池优化白名单）权限开关
             BatteryPermissionCard(context = context)
 
+            Spacer(modifier = Modifier.height(8.dp))
+
+            // ── 数据管理区域（区域标题使用 secondary） ──
+            Text(
+                "数据管理",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.secondary,
+            )
+
+            DataManagementCard(context = context)
+
             Spacer(modifier = Modifier.height(16.dp))
         }
     }
@@ -546,6 +564,299 @@ private fun BatteryPermissionCard(context: Context) {
                 )
             }
         }
+    }
+}
+
+/**
+ * 数据管理卡片 —— 提供导出和导入功能。
+ *
+ * 导出：将 app 数据（nion.db + stickers/ + avatar/）打包成 zip 保存到用户选择的目录。
+ * 导入：从用户选择的 zip 文件中恢复数据到 app 数据目录。
+ *
+ * 使用 SAF (Storage Access Framework) 选择目标位置/文件，兼容 Android 11+ 的分区存储限制。
+ *
+ * @param context 用于获取数据目录路径和显示 Toast
+ */
+@Composable
+private fun DataManagementCard(context: Context) {
+    // 导入确认弹窗
+    var showImportDialog by remember { mutableStateOf<Uri?>(null) }
+    // 导出/导入进行中状态
+    var isExporting by remember { mutableStateOf(false) }
+    var isImporting by remember { mutableStateOf(false) }
+
+    // 导出：用户选择保存位置后触发
+    val exportLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/zip"),
+    ) { uri ->
+        if (uri != null) {
+            isExporting = true
+            Thread {
+                try {
+                    exportData(context, uri)
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        Toast.makeText(context, "导出成功", Toast.LENGTH_SHORT).show()
+                    }
+                } catch (e: Exception) {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        Toast.makeText(context, "导出失败: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                } finally {
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        isExporting = false
+                    }
+                }
+            }.start()
+        }
+    }
+
+    // 导入：用户选择 zip 文件后触发
+    val importLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) {
+            // 先弹出确认弹窗
+            showImportDialog = uri
+        }
+    }
+
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            // 导出按钮
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !isExporting && !isImporting) {
+                        exportLauncher.launch("nion_backup_${System.currentTimeMillis() / 1000}.zip")
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.Download,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(24.dp),
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "导出数据",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "将任务、表情包、头像等打包导出为 zip",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (isExporting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
+            }
+
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+
+            // 导入按钮
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable(enabled = !isExporting && !isImporting) {
+                        importLauncher.launch(arrayOf("application/zip", "application/octet-stream"))
+                    },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.Upload,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.secondary,
+                    modifier = Modifier.size(24.dp),
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        "导入数据",
+                        style = MaterialTheme.typography.bodyLarge,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Text(
+                        "从 zip 备份恢复数据",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                if (isImporting) {
+                    CircularProgressIndicator(
+                        modifier = Modifier.size(20.dp),
+                        strokeWidth = 2.dp,
+                    )
+                }
+            }
+        }
+    }
+
+    // 导入确认弹窗
+    showImportDialog?.let { uri ->
+        AlertDialog(
+            onDismissRequest = { showImportDialog = null },
+            title = {
+                Text("确认导入", fontWeight = FontWeight.Bold)
+            },
+            text = {
+                Text("导入将覆盖当前所有数据（任务、表情包、头像等），此操作不可撤销。建议先导出备份。")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showImportDialog = null
+                        isImporting = true
+                        Thread {
+                            try {
+                                importData(context, uri)
+                                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                    Toast.makeText(context, "导入成功，请重启应用", Toast.LENGTH_LONG).show()
+                                }
+                            } catch (e: Exception) {
+                                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                    Toast.makeText(context, "导入失败: ${e.message}", Toast.LENGTH_LONG).show()
+                                }
+                            } finally {
+                                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                    isImporting = false
+                                }
+                            }
+                        }.start()
+                    },
+                ) {
+                    Text("确认导入", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showImportDialog = null }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+}
+
+/**
+ * 导出数据到指定 URI（zip 格式）。
+ *
+ * 将 app 数据目录下的所有文件（nion.db、stickers/、avatar/）打包为 zip。
+ *
+ * @param context Application Context
+ * @param destUri SAF 返回的目标文件 URI
+ */
+private fun exportData(context: Context, destUri: Uri) {
+    val dataDir = context.getExternalFilesDir(null) ?: context.getDir("nion_data", Context.MODE_PRIVATE)
+    val zipOut = java.util.zip.ZipOutputStream(context.contentResolver.openOutputStream(destUri))
+
+    // 先把 WAL 日志合并到主 db 文件，确保 nion.db 处于一致状态
+    val dbFile = File(dataDir, "nion.db")
+    if (dbFile.exists()) {
+        try {
+            val db = android.database.sqlite.SQLiteDatabase.openDatabase(
+                dbFile.absolutePath, null,
+                android.database.sqlite.SQLiteDatabase.OPEN_READWRITE,
+            )
+            db.execSQL("PRAGMA wal_checkpoint(TRUNCATE)")
+            db.close()
+        } catch (_: Exception) {}
+    }
+
+    fun addFileToZip(file: File, entryPath: String) {
+        if (file.isDirectory) {
+            file.listFiles()?.forEach { child ->
+                addFileToZip(child, "$entryPath/${child.name}")
+            }
+        } else if (file.exists()) {
+            zipOut.putNextEntry(java.util.zip.ZipEntry(entryPath))
+            FileInputStream(file).use { input ->
+                val buffer = ByteArray(8192)
+                var len: Int
+                while (input.read(buffer).also { len = it } > 0) {
+                    zipOut.write(buffer, 0, len)
+                }
+            }
+            zipOut.closeEntry()
+        }
+    }
+
+    // 遍历数据目录下所有文件，排除 WAL 临时文件
+    dataDir.listFiles()?.filter { it.name != "nion.db-wal" && it.name != "nion.db-shm" }?.forEach {
+        addFileToZip(it, it.name)
+    }
+    zipOut.close()
+}
+
+/**
+ * 从 zip URI 导入数据，覆盖 app 数据目录。
+ *
+ * @param context Application Context
+ * @param srcUri SAF 返回的源文件 URI
+ */
+private fun importData(context: Context, srcUri: Uri) {
+    val dataDir = context.getExternalFilesDir(null) ?: context.getDir("nion_data", Context.MODE_PRIVATE)
+    val zipIn = java.util.zip.ZipInputStream(context.contentResolver.openInputStream(srcUri))
+
+    var entry = zipIn.nextEntry
+    while (entry != null) {
+        val outFile = File(dataDir, entry.name)
+        // 安全检查：防止 zip 路径遍历攻击
+        if (!outFile.canonicalPath.startsWith(dataDir.canonicalPath)) {
+            zipIn.closeEntry()
+            entry = zipIn.nextEntry
+            continue
+        }
+
+        if (entry.isDirectory) {
+            outFile.mkdirs()
+        } else {
+            outFile.parentFile?.mkdirs()
+            FileOutputStream(outFile).use { output ->
+                val buffer = ByteArray(8192)
+                var len: Int
+                while (zipIn.read(buffer).also { len = it } > 0) {
+                    output.write(buffer, 0, len)
+                }
+            }
+        }
+        zipIn.closeEntry()
+        entry = zipIn.nextEntry
+    }
+    zipIn.close()
+
+    // 修复数据库中 sticker/attachment 的绝对路径，使其指向当前数据目录
+    val dbFile = File(dataDir, "nion.db")
+    if (dbFile.exists()) {
+        try {
+            val db = android.database.sqlite.SQLiteDatabase.openDatabase(
+                dbFile.absolutePath, null,
+                android.database.sqlite.SQLiteDatabase.OPEN_READWRITE,
+            )
+            val newPath = dataDir.absolutePath
+            // 将任何旧绝对路径的 stickers/ 子目录替换为当前路径
+            db.execSQL(
+                "UPDATE stickers SET file_path = REPLACE(file_path, SUBSTR(file_path, 1, INSTR(file_path, '/stickers/')), '$newPath/') WHERE file_path LIKE '%/stickers/%'"
+            )
+            db.execSQL(
+                "UPDATE attachments SET file_path = REPLACE(file_path, SUBSTR(file_path, 1, INSTR(file_path, '/attachments/')), '$newPath/') WHERE file_path LIKE '%/attachments/%'"
+            )
+            db.close()
+        } catch (_: Exception) {}
     }
 }
 

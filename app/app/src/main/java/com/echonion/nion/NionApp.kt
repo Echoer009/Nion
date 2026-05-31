@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.Application
 import android.os.Bundle
 import android.util.Log
+import java.io.File
 import com.echonion.nion.reminder.GreetingScheduler
 import com.echonion.nion.reminder.NotificationHelper
 import com.echonion.nion.reminder.GreetingEvent
@@ -130,7 +131,8 @@ class NionApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        val dbPath = getDir("nion_data", MODE_PRIVATE).absolutePath + "/nion.db"
+        val dataDir = getExternalFilesDir(null) ?: getDir("nion_data", MODE_PRIVATE)
+        val dbPath = File(dataDir, "nion.db").absolutePath
         Log.d("NionApp", "Database path: $dbPath")
         try {
             core = NionCore(dbPath)

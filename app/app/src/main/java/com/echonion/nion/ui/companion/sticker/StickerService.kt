@@ -31,7 +31,8 @@ object StickerService {
      * @return nion_data/stickers/ 目录的 File 对象
      */
     private fun getStickerDir(context: Context): File {
-        val dir = File(context.getDir("nion_data", Context.MODE_PRIVATE), "stickers")
+        val dataDir = context.getExternalFilesDir(null) ?: context.getDir("nion_data", Context.MODE_PRIVATE)
+        val dir = File(dataDir, "stickers")
         if (!dir.exists()) dir.mkdirs()
         return dir
     }

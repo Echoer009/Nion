@@ -2,6 +2,7 @@ package com.echonion.nion.ui.focus
 
 import android.app.Application
 import android.database.sqlite.SQLiteDatabase
+import java.io.File
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -196,7 +197,8 @@ class FocusStatsViewModel(
     class Factory(private val app: Application) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            val dbPath = "${app.getDir("nion_data", 0).absolutePath}/nion.db"
+            val dataDir = app.getExternalFilesDir(null) ?: app.getDir("nion_data", 0)
+            val dbPath = File(dataDir, "nion.db").absolutePath
             return FocusStatsViewModel(dbPath) as T
         }
     }

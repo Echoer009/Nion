@@ -116,7 +116,8 @@ object CharacterPresetInitializer {
     ) {
         try {
             val inputStream = context.assets.open(assetPath)
-            val avatarDir = File(context.getDir("nion_data", Context.MODE_PRIVATE), "avatar")
+            val dataDir = context.getExternalFilesDir(null) ?: context.getDir("nion_data", Context.MODE_PRIVATE)
+            val avatarDir = File(dataDir, "avatar")
             if (!avatarDir.exists()) avatarDir.mkdirs()
             val destFile = File(avatarDir, "avatar.png")
 
@@ -147,7 +148,8 @@ object CharacterPresetInitializer {
         core: uniffi.nion_core.NionCore,
         stickerAssets: Map<String, String>,
     ) {
-        val stickerDir = File(context.getDir("nion_data", Context.MODE_PRIVATE), "stickers")
+        val dataDir = context.getExternalFilesDir(null) ?: context.getDir("nion_data", Context.MODE_PRIVATE)
+        val stickerDir = File(dataDir, "stickers")
         if (!stickerDir.exists()) stickerDir.mkdirs()
 
         for ((tag, assetPath) in stickerAssets) {
