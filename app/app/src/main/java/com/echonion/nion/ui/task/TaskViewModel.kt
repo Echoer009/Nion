@@ -346,6 +346,7 @@ class TaskViewModel(
      * @param priority 优先级："high" / "medium" / "low"
      * @param recurrenceRule 循环规则：null/"none" 不循环，"daily" 每日循环
      * @param recurrenceReminderTime 每日循环提醒时间，格式 "HH:MM"
+     * @param reminder 一次性提醒时间（ISO 格式），为 null 时在"今天"视图会自动设为今天日期
      * @param onCreated 任务创建成功后的回调，传入新任务 ID
      * @return 新创建的任务 ID，失败时返回 null
      */
@@ -355,6 +356,7 @@ class TaskViewModel(
         priority: String,
         recurrenceRule: String? = null,
         recurrenceReminderTime: String? = null,
+        reminder: String? = null,
         onCreated: ((String) -> Unit) = {},
     ) {
         viewModelScope.launch {
@@ -364,8 +366,14 @@ class TaskViewModel(
                     TODAY_ID, INBOX_ID -> null
                     else -> activeChecklistId
                 }
+                // 在"今天"视图中，若未指定 reminder，自动设为今天日期，使任务出现在今天列表
+                val finalReminder = if (reminder == null && activeChecklistId == TODAY_ID) {
+                    java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
+                } else {
+                    reminder
+                }
                 val newTask = withContext(Dispatchers.IO) {
-                    core.createTask(name, description, priority, realCategoryId, null, activeGroupId, recurrenceRule, recurrenceReminderTime)
+                    core.createTask(name, description, priority, realCategoryId, null, activeGroupId, recurrenceRule, recurrenceReminderTime, finalReminder)
                 }
                 // 创建成功后调度提醒闹钟
                 scheduleReminderIfNeeded(newTask)
@@ -392,7 +400,7 @@ class TaskViewModel(
                     else -> activeChecklistId
                 }
                 withContext(Dispatchers.IO) {
-                    core.createTask(name, null, priority, realCategoryId, parentId, parentGroup, null, null)
+                    core.createTask(name, null, priority, realCategoryId, parentId, parentGroup, null, null, null)
                 }
                 tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()

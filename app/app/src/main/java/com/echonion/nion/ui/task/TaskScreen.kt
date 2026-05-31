@@ -387,14 +387,11 @@ fun TaskScreen(
                                     priority = priority,
                                     recurrenceRule = recurrenceRule,
                                     recurrenceReminderTime = recurrenceReminderTime,
+                                    reminder = reminder,
                                 ) { newTaskId ->
                                     // 任务创建成功后，批量关联临时附件
                                     if (pending.isNotEmpty()) {
                                         viewModel.commitPendingAttachments(newTaskId, pending)
-                                    }
-                                    // 设置一次性提醒（如果有）
-                                    if (reminder != null) {
-                                        viewModel.updateReminder(newTaskId, reminder)
                                     }
                                 }
                                 showAddSheet = false

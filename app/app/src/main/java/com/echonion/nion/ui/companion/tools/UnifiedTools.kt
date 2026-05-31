@@ -825,13 +825,9 @@ object CreateTool : Tool {
             groupId = groupId,
             recurrenceRule = recurrenceRule,
             recurrenceReminderTime = recurrenceReminderTime,
+            reminder = reminder,
         )
-        // 如果是一次性提醒，需要二次更新，createTask 不支持 reminder 参数
-        val finalTask = if (reminder != null) {
-            core.updateTask(task.id, null, null, null, null, null, reminder, null, null, null)
-        } else {
-            task
-        }
+        val finalTask = task
         return JSONObject().apply {
             put("success", true)
             put("task", taskToJson(finalTask))
@@ -922,13 +918,9 @@ object CreateTool : Tool {
                             groupId = groupId,
                             recurrenceRule = recurrenceRule,
                             recurrenceReminderTime = recurrenceReminderTime,
+                            reminder = reminder,
                         )
-                        // 批量创建也支持一次性提醒，需二次更新
-                        val finalTask = if (reminder != null) {
-                            core.updateTask(task.id, null, null, null, null, null, reminder, null, null, null)
-                        } else {
-                            task
-                        }
+                        val finalTask = task
                         results.put(JSONObject().apply {
                             put("index", i)
                             put("success", true)

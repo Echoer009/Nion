@@ -774,7 +774,7 @@ external fun uniffi_nion_core_fn_method_nioncore_create_group(`ptr`: Long,`name`
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_create_sticker(`ptr`: Long,`tag`: RustBuffer.ByValue,`fileName`: RustBuffer.ByValue,`filePath`: RustBuffer.ByValue,`mimeType`: RustBuffer.ByValue,`fileSize`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
-external fun uniffi_nion_core_fn_method_nioncore_create_task(`ptr`: Long,`name`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,`recurrenceRule`: RustBuffer.ByValue,`recurrenceReminderTime`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+external fun uniffi_nion_core_fn_method_nioncore_create_task(`ptr`: Long,`name`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,`recurrenceRule`: RustBuffer.ByValue,`recurrenceReminderTime`: RustBuffer.ByValue,`reminder`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_delete_checklist(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
@@ -998,7 +998,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_create_sticker() != 29120.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_nion_core_checksum_method_nioncore_create_task() != 58348.toShort()) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_create_task() != 3116.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_delete_checklist() != 38463.toShort()) {
@@ -1551,7 +1551,7 @@ public interface NionCoreInterface {
      */
     fun `createSticker`(`tag`: kotlin.String, `fileName`: kotlin.String, `filePath`: kotlin.String, `mimeType`: kotlin.String, `fileSize`: kotlin.Long): StickerData
     
-    fun `createTask`(`name`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `categoryId`: kotlin.String?, `parentId`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?): TaskData
+    fun `createTask`(`name`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `categoryId`: kotlin.String?, `parentId`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?, `reminder`: kotlin.String?): TaskData
     
     fun `deleteChecklist`(`id`: kotlin.String): kotlin.Boolean
     
@@ -1990,13 +1990,13 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
 
     
-    @Throws(NionException::class)override fun `createTask`(`name`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `categoryId`: kotlin.String?, `parentId`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?): TaskData {
+    @Throws(NionException::class)override fun `createTask`(`name`: kotlin.String, `description`: kotlin.String?, `priority`: kotlin.String, `categoryId`: kotlin.String?, `parentId`: kotlin.String?, `groupId`: kotlin.String?, `recurrenceRule`: kotlin.String?, `recurrenceReminderTime`: kotlin.String?, `reminder`: kotlin.String?): TaskData {
             return FfiConverterTypeTaskData.lift(
     callWithHandle {
     uniffiRustCallWithError(NionException) { _status ->
     UniffiLib.uniffi_nion_core_fn_method_nioncore_create_task(
         it,
-        FfiConverterString.lower(`name`),FfiConverterOptionalString.lower(`description`),FfiConverterString.lower(`priority`),FfiConverterOptionalString.lower(`categoryId`),FfiConverterOptionalString.lower(`parentId`),FfiConverterOptionalString.lower(`groupId`),FfiConverterOptionalString.lower(`recurrenceRule`),FfiConverterOptionalString.lower(`recurrenceReminderTime`),_status)
+        FfiConverterString.lower(`name`),FfiConverterOptionalString.lower(`description`),FfiConverterString.lower(`priority`),FfiConverterOptionalString.lower(`categoryId`),FfiConverterOptionalString.lower(`parentId`),FfiConverterOptionalString.lower(`groupId`),FfiConverterOptionalString.lower(`recurrenceRule`),FfiConverterOptionalString.lower(`recurrenceReminderTime`),FfiConverterOptionalString.lower(`reminder`),_status)
 }
     }
     )
