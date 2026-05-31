@@ -29,11 +29,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import uniffi.nion_core.NionCore
 import uniffi.nion_core.TaskData
-import uniffi.nion_core.DailyTaskStatus
 import uniffi.nion_core.OverdueDailyTask
-import uniffi.nion_core.ChecklistData
-import uniffi.nion_core.GroupData
-import uniffi.nion_core.AttachmentData
 
 @Stable
 data class TaskItem(
@@ -91,21 +87,6 @@ class TaskViewModel(
     private val onError: (String) -> Unit,
     private val app: android.app.Application,
 ) : ViewModel() {
-
-    companion object {
-        /**
-         * "今天"视图的虚拟清单 ID。
-         * 不是真实存储在 DB 中的清单，而是 App 启动默认显示的跨清单聚合视图。
-         */
-        const val TODAY_ID = "today"
-
-        /**
-         * "收集箱"视图的虚拟清单 ID。
-         * 不是真实存储在 DB 中的清单，用于显示所有未分配清单的孤儿任务（category_id = null）。
-         * 任何没有关联清单的任务都会自动出现在此视图中。
-         */
-        const val INBOX_ID = "inbox"
-    }
 
     var tasks by mutableStateOf<List<TaskItem>>(emptyList())
         private set
@@ -172,6 +153,30 @@ class TaskViewModel(
 
     val isSelectionMode: Boolean by derivedStateOf { selectedTaskIds.isNotEmpty() }
 
+    /** 当前正在执行的刷新协程，用于 cancelPrevious 防止并发刷新导致旧数据覆盖新数据 */
+    private var refreshJob: Job? = null
+
+    init {
+        // 初始加载：在协程中执行
+        refreshJob = viewModelScope.launch { doRefreshInternal() }
+
+        // 监听 Agent 工具执行后的数据变更事件，自动刷新任务列表
+        // debounce(300)：AI 连续调用 N 个工具时，合并为一次刷新（300ms 内的事件只触发最后一次）
+        // cancelPrevious：确保同一时刻只有一个刷新协程在运行，避免旧数据覆盖新数据
+        viewModelScope.launch {
+            app.dataEvents()
+                .debounce(300)
+                .collect { event ->
+                    // 只处理任务数据变更事件，忽略偏好/记忆等不相关事件
+                    if (DataType.TASK_DATA in event.types) {
+                        Log.d("TaskViewModel", "收到数据变更事件: ${event.types}")
+                        refreshJob?.cancel()
+                        refreshJob = viewModelScope.launch { doRefreshInternal() }
+                    }
+                }
+        }
+    }
+
     fun toggleSelection(taskId: String) {
         selectedTaskIds = if (taskId in selectedTaskIds) {
             selectedTaskIds - taskId
@@ -209,30 +214,6 @@ class TaskViewModel(
         countsJob = viewModelScope.launch {
             delay(300)
             refreshCounts()
-        }
-    }
-
-    /** 当前正在执行的刷新协程，用于 cancelPrevious 防止并发刷新导致旧数据覆盖新数据 */
-    private var refreshJob: Job? = null
-
-    init {
-        // 初始加载：在协程中执行
-        refreshJob = viewModelScope.launch { doRefreshInternal() }
-
-        // 监听 Agent 工具执行后的数据变更事件，自动刷新任务列表
-        // debounce(300)：AI 连续调用 N 个工具时，合并为一次刷新（300ms 内的事件只触发最后一次）
-        // cancelPrevious：确保同一时刻只有一个刷新协程在运行，避免旧数据覆盖新数据
-        viewModelScope.launch {
-            app.dataEvents()
-                .debounce(300)
-                .collect { event ->
-                    // 只处理任务数据变更事件，忽略偏好/记忆等不相关事件
-                    if (DataType.TASK_DATA in event.types) {
-                        Log.d("TaskViewModel", "收到数据变更事件: ${event.types}")
-                        refreshJob?.cancel()
-                        refreshJob = viewModelScope.launch { doRefreshInternal() }
-                    }
-                }
         }
     }
 
@@ -360,8 +341,12 @@ class TaskViewModel(
      * 在"今天"或"收集箱"视图中创建时，category_id 为 null（不属于任何清单），
      * 任务会自动出现在"收集箱"中。
      *
+     * @param name 任务名称
+     * @param description 任务描述，可为 null
+     * @param priority 优先级："high" / "medium" / "low"
      * @param recurrenceRule 循环规则：null/"none" 不循环，"daily" 每日循环
      * @param recurrenceReminderTime 每日循环提醒时间，格式 "HH:MM"
+     * @param onCreated 任务创建成功后的回调，传入新任务 ID
      * @return 新创建的任务 ID，失败时返回 null
      */
     fun createTask(
@@ -561,6 +546,7 @@ class TaskViewModel(
     /**
      * 更新任务的每日循环设置。
      *
+     * @param id 任务 ID
      * @param recurrenceRule 循环规则：null/"none" 不循环，"daily" 每日循环
      * @param reminderTime 提醒时间，格式 "HH:MM"
      */
@@ -1003,230 +989,22 @@ class TaskViewModel(
             }
         }
     }
-}
 
-/** 将任务树展平为 FlatTaskItem 列表，供 TaskViewModel 和 FocusSetupViewModel 共用 */
-internal fun flattenWithGroupInfo(tasks: List<TaskItem>): List<FlatTaskItem> {
-    val result = mutableListOf<FlatTaskItem>()
-    for (task in tasks) {
-        flattenTodoGroup(task, depth = 0, result)
-    }
-    return result
-}
+    companion object {
+        /**
+         * "今天"视图的虚拟清单 ID。
+         * 不是真实存储在 DB 中的清单，而是 App 启动默认显示的跨清单聚合视图。
+         */
+        const val TODAY_ID = "today"
 
-/**
- * 递归展开待办任务组。未完成任务作为组根 + 递归子树；
- * 已完成任务跳过自身但继续深入子树（子任务可能被单独取消完成）。
- * 供 flattenWithGroupInfo 内部调用。
- */
-internal fun flattenTodoGroup(
-    task: TaskItem,
-    depth: Int,
-    result: MutableList<FlatTaskItem>,
-) {
-    if (!task.isDone) {
-        val subItems = mutableListOf<FlatTaskItem>()
-        flattenSubs(task.subtasks, depth = depth + 1, parentId = task.id, subItems)
-        val hasSubs = subItems.isNotEmpty()
-        result.add(FlatTaskItem(
-            task = task,
-            depth = depth,
-            parentId = null,
-            isGroupFirst = true,
-            isGroupLast = !hasSubs,
-        ))
-        if (hasSubs) {
-            subItems[subItems.lastIndex] = subItems.last().copy(isGroupLast = true)
-            result.addAll(subItems)
-        }
-    } else {
-        // 已完成 → 跳过自身，但子任务可能被单独取消完成，继续深入
-        for (sub in task.subtasks) {
-            flattenTodoGroup(sub, depth, result)
-        }
+        /**
+         * "收集箱"视图的虚拟清单 ID。
+         * 不是真实存储在 DB 中的清单，用于显示所有未分配清单的孤儿任务（category_id = null）。
+         * 任何没有关联清单的任务都会自动出现在此视图中。
+         */
+        const val INBOX_ID = "inbox"
     }
 }
-
-/** 递归展开子任务为 FlatTaskItem 列表，跳过已完成项但继续递归其子树。供 flattenTodoGroup 内部调用。 */
-internal fun flattenSubs(
-    subs: List<TaskItem>,
-    depth: Int,
-    parentId: String,
-    result: MutableList<FlatTaskItem>,
-) {
-    for ((index, sub) in subs.withIndex()) {
-        if (sub.isDone) {
-            // 父已完成但子任务可能被单独取消，仍需递归
-            flattenSubs(sub.subtasks, depth + 1, sub.id, result)
-            continue
-        }
-        val hasChildSubs = sub.subtasks.any { !it.isDone }
-        val isLastInSameParent = index == subs.lastIndex || subs.drop(index + 1).all { it.isDone }
-        result.add(FlatTaskItem(
-            task = sub,
-            depth = depth,
-            parentId = parentId,
-            isGroupFirst = false,
-            isGroupLast = isLastInSameParent && !hasChildSubs,
-        ))
-        flattenSubs(sub.subtasks, depth + 1, sub.id, result)
-    }
-}
-
-private fun updateTaskInList(tasks: List<TaskItem>, targetId: String, updated: TaskItem): List<TaskItem> {
-    return tasks.map { task ->
-        if (task.id == targetId) updated
-        else task.copy(subtasks = updateTaskInList(task.subtasks, targetId, updated))
-    }
-}
-
-private fun markAllDone(task: TaskItem): TaskItem {
-    return task.copy(isDone = true, subtasks = task.subtasks.map { markAllDone(it) })
-}
-
-private fun markAllTodo(task: TaskItem): TaskItem {
-    return task.copy(isDone = false, subtasks = task.subtasks.map { markAllTodo(it) })
-}
-
-/**
- * 递归遍历任务树，将已完成任务按母子分组添加到结果列表。
- * 已完成的任务作为组根，其已完成的子任务跟随其后、缩进显示。
- */
-private fun addDoneGroups(
-    tasks: List<TaskItem>,
-    baseDepth: Int,
-    result: MutableList<FlatTaskItem>,
-) {
-    for (task in tasks) {
-        if (task.isDone) {
-            // 已完成项作为组根
-            val subs = mutableListOf<FlatTaskItem>()
-            collectDoneSubs(task.subtasks, depth = baseDepth + 1, parentId = task.id, subs)
-            val hasDoneSubs = subs.isNotEmpty()
-            result.add(FlatTaskItem(
-                task = task,
-                depth = baseDepth,
-                parentId = null,
-                isGroupFirst = true,
-                isGroupLast = !hasDoneSubs,
-            ))
-            if (hasDoneSubs) {
-                subs[subs.lastIndex] = subs.last().copy(isGroupLast = true)
-                result.addAll(subs)
-            }
-        } else {
-            // 未完成，但其子任务中可能有已完成的，继续深入
-            addDoneGroups(task.subtasks, baseDepth, result)
-        }
-    }
-}
-
-/**
- * 收集已完成父任务下所有已完成的子孙任务，跳过未完成的。
- * 只收集 isDone=true 的项，保持相对深度。
- */
-private fun collectDoneSubs(
-    subs: List<TaskItem>,
-    depth: Int,
-    parentId: String,
-    result: MutableList<FlatTaskItem>,
-) {
-    for ((index, sub) in subs.withIndex()) {
-        if (!sub.isDone) {
-            // 未完成的子任务不加入已完成列表，但仍需递归（其孙子可能已完成）
-            collectDoneSubs(sub.subtasks, depth + 1, sub.id, result)
-            continue
-        }
-        val hasDoneSubs = sub.subtasks.any { it.isDone }
-        val isLast = index == subs.lastIndex || subs.drop(index + 1).all { !it.isDone }
-        result.add(FlatTaskItem(
-            task = sub,
-            depth = depth,
-            parentId = parentId,
-            isGroupFirst = false,
-            isGroupLast = isLast && !hasDoneSubs,
-        ))
-        collectDoneSubs(sub.subtasks, depth + 1, sub.id, result)
-    }
-}
-
-private fun collectIds(task: TaskItem): List<String> {
-    return listOf(task.id) + task.subtasks.flatMap { collectIds(it) }
-}
-
-private fun removeTaskFromList(tasks: List<TaskItem>, targetId: String): List<TaskItem> {
-    return tasks.filter { it.id != targetId }
-        .map { it.copy(subtasks = removeTaskFromList(it.subtasks, targetId)) }
-}
-
-/**
- * 将 Rust 端 DailyTaskStatus 转换为 UI 模型。
- * 新模型：所有任务（含每日任务）的完成状态统一由 completedForDate 决定，
- * completedForDate 来自 tasks.status == "done"（Rust 端已处理）。
- */
-private fun DailyTaskStatus.toUi(): TaskItem {
-    val isDaily = task.recurrenceRule == "daily"
-    return TaskItem(
-        id = task.id,
-        name = task.name,
-        description = task.description,
-        priority = task.priority,
-        isDone = completedForDate,
-        createdAt = task.createdAt,
-        focusSeconds = task.focusSeconds,
-        recurrenceRule = task.recurrenceRule,
-        recurrenceReminderTime = task.recurrenceReminderTime,
-        reminder = task.reminder,
-        isDaily = isDaily,
-        isCompletedForDate = completedForDate,
-    )
-}
-
-/**
- * 将 Rust 端 TaskData 转换为 UI 模型（用于清单视图）。
- * 新模型：每日任务也是独立实例，完成状态由 tasks.status 决定（和普通任务一致）。
- */
-/** 将 Rust 端 TaskData 转换为 UI 模型，供 TaskViewModel 和 FocusSetupViewModel 共用 */
-internal fun TaskData.toUi(): TaskItem {
-    val isDaily = recurrenceRule == "daily"
-    return TaskItem(
-        id = id,
-        name = name,
-        description = description,
-        priority = priority,
-        isDone = status == "done",
-        createdAt = createdAt,
-        focusSeconds = focusSeconds,
-        recurrenceRule = recurrenceRule,
-        recurrenceReminderTime = recurrenceReminderTime,
-        reminder = reminder,
-        isDaily = isDaily,
-        isCompletedForDate = isDaily && status == "done",
-    )
-}
-
-private fun ChecklistData.toUi(): ChecklistItem = ChecklistItem(
-    id = id,
-    name = name,
-)
-
-/** 将 Rust 端 GroupData 转换为 UI 模型 */
-private fun GroupData.toUi(): GroupItem = GroupItem(
-    id = id,
-    name = name,
-    checklistId = checklistId,
-    color = color,
-)
-
-/** 将 Rust 端 AttachmentData 转换为 UI 模型 */
-private fun AttachmentData.toUi(): AttachmentUiItem = AttachmentUiItem(
-    id = id,
-    fileName = fileName,
-    filePath = filePath,
-    mimeType = mimeType,
-    fileSize = fileSize,
-    isImage = mimeType.startsWith("image/"),
-)
 
 @Composable
 fun taskViewModel(): TaskViewModel {
