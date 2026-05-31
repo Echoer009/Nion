@@ -1,5 +1,7 @@
 <p align="center">
-  <a href="README.md">中文</a> · <a href="README.en.md">English</a>
+  <img src="docs/nion-icon.png" width="80" height="80" alt="Nion">
+  &nbsp;&nbsp;
+  <img src="docs/braingirl-icon.png" width="80" height="80" alt="BrainGirl">
 </p>
 
 <h1 align="center">Nion</h1>
@@ -7,6 +9,10 @@
 <p align="center">
   <strong>嗨，我是 Nion</strong><br>
   Rust 核心 · Kotlin UI · Jetpack Compose
+</p>
+
+<p align="center">
+  <a href="README.md">中文</a> · <a href="README.en.md">English</a>
 </p>
 
 <p align="center">
@@ -168,31 +174,53 @@
 
 ## 你是不是想问……
 
-我知道你们肯定会问这些啦，提前回答好了！
+<details>
+<summary><strong>必须联网才能用吗？</strong></summary>
 
-**必须联网才能用吗？**
 才不是呢！任务管理、专注计时、日程这些核心功能完全离线能用。只有跟我聊天和查天气才需要网络，没网的时候我就在后台安静等着你～
+</details>
 
-**要注册账号吗？**
+<details>
+<summary><strong>要注册账号吗？</strong></summary>
+
 不用不用，最烦注册了！所有数据都存在你手机本地，没有任何云端账号。你只需要在设置里填个 LLM 的 API Key 就能跟我聊天了，其他的什么都不用管。
+</details>
 
-**支持哪些 AI 模型？**
+<details>
+<summary><strong>支持哪些 AI 模型？</strong></summary>
+
 OpenAI（GPT 系列）、Anthropic（Claude 系列）、DeepSeek 都行！基本上长得像 OpenAI API 的我都能对接，你用哪个我就学哪个。
+</details>
 
-**我的 API Key 会不会泄露？**
+<details>
+<summary><strong>我的 API Key 会不会泄露？</strong></summary>
+
 放心放心！Key 只存在你手机本地，我发誓绝对不会发给任何第三方。所有请求都是你的手机直接跟 AI 服务商说的，我就是个中间人，但我不偷看。
+</details>
 
-**Nion 和 BrainGirl 是啥关系？**
+<details>
+<summary><strong>Nion 和 BrainGirl 是啥关系？</strong></summary>
+
 哦这个嘛～ Nion 是通用版，干干净净没有预设。BrainGirl 呢，就是自带了类脑娘的角色卡、头像和一大堆表情包的版本。功能完全一样的，就看你喜欢跟什么性格的聊天啦～
+</details>
 
-**数据怎么备份？**
+<details>
+<summary><strong>数据怎么备份？</strong></summary>
+
 设置页 → 数据管理 → 导出，唰的一下就给你生成一个 zip，任务、表情包、头像全在里面。换手机或重装之后导入就能恢复，一个字节都不会丢！
+</details>
 
-**提醒为什么有时候不准时？**
+<details>
+<summary><strong>提醒为什么有时候不准时？</strong></summary>
+
 哼，这真的不是我的锅好吗！！是那些手机厂商（说的就是你小米华为vivo）的系统会偷偷把我的后台杀掉！你只要在设置里开启「悬浮窗提醒」和「后台提醒」权限，再把我加到电池优化白名单里就好了。求你了，给我个机会准时催你吧！
+</details>
 
-**开源吗？想贡献代码？**
+<details>
+<summary><strong>开源吗？想贡献代码？</strong></summary>
+
 那必须的！完全开源，GPL-3.0 协议。Issue 和 PR 都欢迎，来吧来吧，一起来让我变得更强！
+</details>
 
 ## 架构
 
