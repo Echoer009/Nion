@@ -29,11 +29,6 @@ import uniffi.nion_core.NionCore
 data class DataChangeEvent(val types: Set<DataType>)
 
 class NionApp : Application() {
-    companion object {
-        /** 全局 Application 实例引用，供 QueryTool 天气查询等需要 Context 的组件使用 */
-        var instance: NionApp? = null
-            private set
-    }
 
     lateinit var core: NionCore
         private set
@@ -68,28 +63,12 @@ class NionApp : Application() {
     val reminderEvents: SharedFlow<ReminderEvent> = _reminderEvents.asSharedFlow()
 
     /**
-     * 发送提醒事件到 UI 层。
-     * 由 ReminderWorker 在提醒逻辑执行时调用。
-     */
-    fun postReminderEvent(event: ReminderEvent) {
-        _reminderEvents.tryEmit(event)
-    }
-
-    /**
      * 问候事件总线 —— GreetingWorker 触发时通过此总线通知 UI 层。
      *
      * GreetingOverlay 监听此事件流，收到事件后弹出问候悬浮卡片。
      */
     private val _greetingEvents = MutableSharedFlow<GreetingEvent>(extraBufferCapacity = 4)
     val greetingEvents: SharedFlow<GreetingEvent> = _greetingEvents.asSharedFlow()
-
-    /**
-     * 发送问候事件到 UI 层。
-     * 由 GreetingWorker 在前台模式下调用。
-     */
-    fun postGreetingEvent(event: GreetingEvent) {
-        _greetingEvents.tryEmit(event)
-    }
 
     /**
      * 天气预警事件总线 —— WeatherAlertWorker 触发时通过此总线通知 UI 层。
@@ -100,20 +79,36 @@ class NionApp : Application() {
     val weatherAlertEvents: SharedFlow<WeatherAlertEvent> = _weatherAlertEvents.asSharedFlow()
 
     /**
-     * 发送天气预警事件到 UI 层。
-     * 由 WeatherAlertWorker 在前台模式下调用。
-     */
-    fun postWeatherAlertEvent(event: WeatherAlertEvent) {
-        _weatherAlertEvents.tryEmit(event)
-    }
-
-    /**
      * 专注完成事件总线 —— 专注计时完成/中断时通过此总线通知 UI 层。
      *
      * CompletionOverlay 监听此事件流，收到事件后弹出鼓励悬浮卡片。
      */
     private val _completionEvents = MutableSharedFlow<CompletionEvent>(extraBufferCapacity = 4)
     val completionEvents: SharedFlow<CompletionEvent> = _completionEvents.asSharedFlow()
+
+    /**
+     * 发送提醒事件到 UI 层。
+     * 由 ReminderWorker 在提醒逻辑执行时调用。
+     */
+    fun postReminderEvent(event: ReminderEvent) {
+        _reminderEvents.tryEmit(event)
+    }
+
+    /**
+     * 发送问候事件到 UI 层。
+     * 由 GreetingWorker 在前台模式下调用。
+     */
+    fun postGreetingEvent(event: GreetingEvent) {
+        _greetingEvents.tryEmit(event)
+    }
+
+    /**
+     * 发送天气预警事件到 UI 层。
+     * 由 WeatherAlertWorker 在前台模式下调用。
+     */
+    fun postWeatherAlertEvent(event: WeatherAlertEvent) {
+        _weatherAlertEvents.tryEmit(event)
+    }
 
     /**
      * 发送专注完成事件到 UI 层。
@@ -186,6 +181,12 @@ class NionApp : Application() {
             override fun onActivityDestroyed(activity: Activity) {}
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
         })
+    }
+
+    companion object {
+        /** 全局 Application 实例引用，供 QueryTool 天气查询等需要 Context 的组件使用 */
+        var instance: NionApp? = null
+            private set
     }
 }
 

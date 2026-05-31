@@ -147,7 +147,9 @@ object WeatherService {
         val base = "$desc$dayNight，气温 ${current.temperature}°C"
         val apparent = if (current.apparentTemperature != current.temperature) {
             "，体感 ${current.apparentTemperature}°C"
-        } else ""
+        } else {
+            ""
+        }
         val baseInfo = "$base$apparent，湿度 ${current.humidity}%，风速 ${current.windSpeed} km/h"
 
         // 附加空气质量信息
