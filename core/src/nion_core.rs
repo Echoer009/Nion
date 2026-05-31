@@ -1310,13 +1310,20 @@ impl NionCore {
             |row| row.get(0),
         ).ok();
 
-        // 6. 不存在则创建
+        // 6. 不存在则创建，继承原任务的 sort_order 以保持排序位置不变
         let new_task = if existing.is_none() {
+            // 查询原任务的 sort_order，新实例继承同一排序位置
+            let original_sort_order: i64 = db.query_row(
+                "SELECT sort_order FROM tasks WHERE id = ?1",
+                params![task_id],
+                |row| row.get(0),
+            ).map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+
             let new_id = next_id(&db, "tasks")?;
             let new_now = chrono::Utc::now().to_rfc3339();
             db.execute(
-                "INSERT INTO tasks (id, name, description, priority, status, category_id, parent_id, group_id, reminder, recurrence_rule, recurrence_reminder_time, created_at, updated_at) \
-                 VALUES (?1, ?2, ?3, ?4, 'todo', ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?10)",
+                "INSERT INTO tasks (id, name, description, priority, status, category_id, parent_id, group_id, reminder, recurrence_rule, recurrence_reminder_time, sort_order, created_at, updated_at) \
+                 VALUES (?1, ?2, ?3, ?4, 'todo', ?5, NULL, ?6, ?7, ?8, ?9, ?10, ?11, ?11)",
                 params![
                     new_id,
                     original.name,
@@ -1327,6 +1334,7 @@ impl NionCore {
                     next_reminder,
                     original.recurrence_rule,
                     original.recurrence_reminder_time,
+                    original_sort_order,
                     new_now,
                 ],
             ).map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
