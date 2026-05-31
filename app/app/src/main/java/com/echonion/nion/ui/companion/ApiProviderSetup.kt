@@ -277,7 +277,7 @@ fun ApiProviderSetup(
                     selectedProvider,
                     apiKeyInput.trim(),
                     if (isCustom) customModelInput.trim() else selectedModelName,
-                    if (isCustom) customBaseUrl.trim() else "",
+                    if (isCustom) customBaseUrl.trim().let { if (it.isNotEmpty() && !it.startsWith("http://") && !it.startsWith("https://")) "https://$it" else it } else "",
                 )
             },
         )

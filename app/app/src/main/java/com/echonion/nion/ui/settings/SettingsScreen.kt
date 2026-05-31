@@ -1104,7 +1104,7 @@ private fun ThemeSelectorCard(
                     // ── 底部提示 ──
                     Spacer(modifier = Modifier.height(2.dp))
                     Text(
-                        "让伙伴帮你创建更多主题 ✨",
+                        "想换个颜色？在设置页喊我出来说一声就行，不过其他页面喊我不可以哦",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                     )

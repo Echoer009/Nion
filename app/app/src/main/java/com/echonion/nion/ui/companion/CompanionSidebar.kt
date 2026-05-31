@@ -39,6 +39,8 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.border
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.res.painterResource
+import com.echonion.nion.R
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.clickable
@@ -400,10 +402,10 @@ private fun SetupContent(
 
 /**
  * 伙伴头像 —— 圆形头像。
- * 如果设置了头像图片则显示图片，否则显示伙伴名字的首字母作为占位符。
+ * 如果设置了头像图片则显示图片，否则显示 Nion 默认图标。
  *
- * @param name 伙伴名称，取首字母显示（无图片时使用）
- * @param avatarUri 头像图片的 URI 字符串，null 则使用首字母占位符
+ * @param name 伙伴名称（保留参数，不再用于首字母显示）
+ * @param avatarUri 头像图片的 URI 字符串，null 则使用 Nion 默认图标
  * @param size 头像尺寸
  * @param modifier 修饰符（外部传入 clickable 等）
  */
@@ -447,16 +449,13 @@ private fun CompanionAvatar(
                 contentScale = ContentScale.Crop,
             )
         } else {
-            // 无图片时显示首字母占位符
-            val initial = name.firstOrNull()?.uppercase() ?: "N"
-            Box(contentAlignment = Alignment.Center) {
-                Text(
-                    initial,
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
+            // 无图片时显示 Nion 默认图标
+            Image(
+                painter = painterResource(id = R.drawable.default_avatar),
+                contentDescription = "默认头像",
+                modifier = Modifier.fillMaxSize().clip(CircleShape),
+                contentScale = ContentScale.Crop,
+            )
         }
     }
 }
