@@ -37,12 +37,12 @@ import java.util.UUID
 /**
  * 已保存的 Provider 配置 —— 用户可保存多组 API 配置，在它们之间自由切换。
  *
- * @param id 唯一标识
- * @param provider 内置 Provider 名称或自定义名称
- * @param apiKey API 密钥
- * @param model 模型名称
- * @param baseUrl 自定义 baseUrl（仅"自定义"provider 需要）
- * @param apiType API 类型名
+ * @property id 唯一标识
+ * @property provider 内置 Provider 名称或自定义名称
+ * @property apiKey API 密钥
+ * @property model 模型名称
+ * @property baseUrl 自定义 baseUrl（仅"自定义"provider 需要）
+ * @property apiType API 类型名
  */
 data class SavedConfig(
     val id: String,
@@ -146,13 +146,6 @@ class CompanionViewModel(
     /** 面板关闭时记录的消息数量，用于判断面板打开时是否有新消息需要滚到底部 */
     var lastSeenMessageCount by mutableStateOf(0)
         private set
-
-    /** 保存当前滚动位置和消息数量，面板关闭时调用 */
-    fun saveScrollPosition(index: Int, offset: Int, messageCount: Int) {
-        savedScrollIndex = index
-        savedScrollOffset = offset
-        lastSeenMessageCount = messageCount
-    }
 
     /** 当前已配置的 Provider，null 表示尚未配置 API key */
     var currentProvider by mutableStateOf<ProviderConfig?>(null)
@@ -360,7 +353,12 @@ class CompanionViewModel(
                 CharacterPresetInitializer.initializeIfNeeded(app, core, CharacterPreset.current())
             }
             loadSettings()
-            Log.d("NionCompanion", "[init] loadSettings 完成 → isInitialized=$isInitialized, provider=${currentProvider?.name}, apiKey=${if (apiKey != null) "已配置" else "未配置"}")
+            Log.d(
+                "NionCompanion",
+                "[init] loadSettings 完成 → isInitialized=$isInitialized, " +
+                    "provider=${currentProvider?.name}, " +
+                    "apiKey=${if (apiKey != null) "已配置" else "未配置"}"
+            )
             loadChatMessages()
             loadConversationList()
             loadStickers()
@@ -401,6 +399,13 @@ class CompanionViewModel(
         }
     }
 
+    /** 保存当前滚动位置和消息数量，面板关闭时调用 */
+    fun saveScrollPosition(index: Int, offset: Int, messageCount: Int) {
+        savedScrollIndex = index
+        savedScrollOffset = offset
+        lastSeenMessageCount = messageCount
+    }
+
     /**
      * 从 Rust 层 settings 表中加载已保存的 provider / API key / 模型配置。
      * 同时加载多配置列表，向后兼容旧版单配置存储。
@@ -410,45 +415,13 @@ class CompanionViewModel(
      * 在后台线程执行，mutableStateOf 写入留在主线程以确保 Compose 快照正确观察。
      */
     private suspend fun loadSettings() {
-        /** 阶段 1 从 DB 读取的原始数据，用于在 IO 线程收集、在主线程写入 mutableStateOf */
-        data class RawData(
-            val configsJson: String?,
-            val providerName: String?,
-            val apiKey: String?,
-            val model: String?,
-            val baseUrl: String?,
-            val apiTypeName: String?,
-            val companionName: String?,
-            val prefsJson: String?,
-            val memoriesJson: String?,
-            val avatarUri: String?,
-            val promptPersona: String?,
-            val promptFormat: String?,
-            val promptGreetingMorning: String?,
-            val promptGreetingNoon: String?,
-            val promptGreetingEvening: String?,
-            val promptReminder: String?,
-            val promptWeatherAlert: String?,
-            val promptFocusComplete: String?,
-            val promptFocusInterrupted: String?,
-            val morningEnabled: String?,
-            val morningTime: String?,
-            val noonEnabled: String?,
-            val noonTime: String?,
-            val eveningEnabled: String?,
-            val eveningTime: String?,
-            val weatherAlertEnabled: String?,
-            val focusCompletionEnabled: String?,
-            val companionStyle: String?,
-        )
-
         /**
          * 阶段 1：在 IO 线程读取所有 DB 数据，存入局部变量。
          * 关键：core.getSetting 内部有互斥锁，必须异步执行避免阻塞主线程。
          */
-        val loaded: RawData = withContext(Dispatchers.IO) {
+        val loaded: RawSettings = withContext(Dispatchers.IO) {
             try {
-                RawData(
+                RawSettings(
                     configsJson = core.getSetting("llm_saved_configs"),
                     providerName = core.getSetting("llm_provider"),
                     apiKey = core.getSetting("llm_api_key"),
@@ -480,121 +453,188 @@ class CompanionViewModel(
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "loadSettings DB 读取异常", e)
-                RawData(null, null, null, null, null, null, null, null, null, null,
+                RawSettings(null, null, null, null, null, null, null, null, null, null,
                     null, null, null, null, null, null, null, null,
                     null, null, null, null, null, null, null, null, null, null)
             }
         }
 
-        /**
-         * 阶段 2：在主线程处理数据并写入 mutableStateOf。
-         * 此时已回到调用协程的 dispatcher（Main），所有 Compose 状态写入可被正确观察。
-         */
+        // 阶段 2：在主线程解析原始数据并写入 mutableStateOf
         try {
-            // ── 解析多配置列表 ──
-            if (!loaded.configsJson.isNullOrEmpty()) {
-                try {
-                    val arr = JSONArray(loaded.configsJson)
-                    val configs = mutableListOf<SavedConfig>()
-                    for (i in 0 until arr.length()) {
-                        val obj = arr.getJSONObject(i)
-                        configs.add(SavedConfig(
-                            id = obj.getString("id"),
-                            provider = obj.getString("provider"),
-                            apiKey = obj.getString("apiKey"),
-                            model = obj.getString("model"),
-                            baseUrl = obj.optString("baseUrl", ""),
-                            apiType = obj.optString("apiType", "OPENAI_COMPATIBLE"),
-                        ))
-                    }
-                    savedConfigs = configs
-                } catch (_: Exception) {}
-            }
-
-            // ── 加载当前激活的配置 ──
-            val pName = loaded.providerName
-            val pKey = loaded.apiKey
-            val pModel = loaded.model
-            if (!pName.isNullOrEmpty() && !pKey.isNullOrEmpty() && !pModel.isNullOrEmpty()) {
-                apiKey = pKey
-                modelName = pModel
-                val apiType = try {
-                    ApiType.valueOf(loaded.apiTypeName ?: "OPENAI_COMPATIBLE")
-                } catch (_: Exception) {
-                    ApiType.OPENAI_COMPATIBLE
-                }
-                currentProvider = builtInProviders.find { it.name == pName }
-                    ?: ProviderConfig(name = pName, baseUrl = loaded.baseUrl ?: "", apiType = apiType)
-                // 旧版单配置自动迁移到多配置列表
-                if (savedConfigs.isEmpty()) {
-                    migrateToMultiConfig(pName, pKey, pModel, loaded.baseUrl ?: "", loaded.apiTypeName ?: "OPENAI_COMPATIBLE")
-                }
-            }
-
-            // ── 加载伙伴名称 ──
-            if (!loaded.companionName.isNullOrEmpty()) companionName = loaded.companionName
-
-            // ── 加载提示词（缺失时写入默认值，确保首次启动有值） ──
-            val defs = PromptDefaults.ALL_DEFAULTS
-            promptPersona = loaded.promptPersona ?: defs[PromptDefaults.KEY_PERSONA]!!
-            promptFormat = loaded.promptFormat ?: defs[PromptDefaults.KEY_FORMAT]!!
-            promptGreetingMorning = loaded.promptGreetingMorning ?: defs[PromptDefaults.KEY_GREETING_MORNING]!!
-            promptGreetingNoon = loaded.promptGreetingNoon ?: defs[PromptDefaults.KEY_GREETING_NOON]!!
-            promptGreetingEvening = loaded.promptGreetingEvening ?: defs[PromptDefaults.KEY_GREETING_EVENING]!!
-            promptReminder = loaded.promptReminder ?: defs[PromptDefaults.KEY_REMINDER]!!
-            promptWeatherAlert = loaded.promptWeatherAlert ?: defs[PromptDefaults.KEY_WEATHER_ALERT]!!
-            promptFocusComplete = loaded.promptFocusComplete ?: defs[PromptDefaults.KEY_FOCUS_COMPLETE]!!
-            promptFocusInterrupted = loaded.promptFocusInterrupted ?: defs[PromptDefaults.KEY_FOCUS_INTERRUPTED]!!
-
-            // ── 加载问候调度设置 ──
-            morningEnabled = loaded.morningEnabled != "false"
-            morningTime = loaded.morningTime ?: "08:00"
-            noonEnabled = loaded.noonEnabled != "false"
-            noonTime = loaded.noonTime ?: "12:00"
-            eveningEnabled = loaded.eveningEnabled != "false"
-            eveningTime = loaded.eveningTime ?: "21:00"
-
-            // ── 加载天气预警设置 ──
-            weatherAlertEnabled = loaded.weatherAlertEnabled != "false"
-
-            // ── 加载专注完成鼓励设置 ──
-            focusCompletionEnabled = loaded.focusCompletionEnabled != "false"
-
-            // ── 加载用户偏好 ──
-            if (!loaded.prefsJson.isNullOrEmpty()) {
-                try { userPreferences = JSONArray(loaded.prefsJson) } catch (_: Exception) {}
-            }
-
-            // ── 加载用户记忆 ──
-            if (!loaded.memoriesJson.isNullOrEmpty()) {
-                try { userMemories = JSONArray(loaded.memoriesJson) } catch (_: Exception) {}
-            }
-
-            // ── 加载头像 ──
-            if (!loaded.avatarUri.isNullOrEmpty()) companionAvatarUri = loaded.avatarUri
-
-            // ── 加载伙伴风格 ──
-            if (!loaded.companionStyle.isNullOrEmpty()) companionStyle = loaded.companionStyle
-
-            // ── 首次启动迁移：缺失的提示词 key 写入默认值 ──
-            migratePromptDefaults(mapOf(
-                PromptDefaults.KEY_PERSONA to loaded.promptPersona,
-                PromptDefaults.KEY_FORMAT to loaded.promptFormat,
-                PromptDefaults.KEY_GREETING_MORNING to loaded.promptGreetingMorning,
-                PromptDefaults.KEY_GREETING_NOON to loaded.promptGreetingNoon,
-                PromptDefaults.KEY_GREETING_EVENING to loaded.promptGreetingEvening,
-                PromptDefaults.KEY_REMINDER to loaded.promptReminder,
-                PromptDefaults.KEY_WEATHER_ALERT to loaded.promptWeatherAlert,
-                PromptDefaults.KEY_FOCUS_COMPLETE to loaded.promptFocusComplete,
-                PromptDefaults.KEY_FOCUS_INTERRUPTED to loaded.promptFocusInterrupted,
-            ))
+            applyLoadedSettings(loaded)
         } catch (e: Exception) {
-            // 兜底：内层未捕获异常
             Log.e(TAG, "loadSettings 状态写入异常", e)
         } finally {
-            // 无论任何情况，标记初始化完成，防止面板永久空白
             isInitialized = true
         }
+    }
+
+    /**
+     * 从数据库读取的原始设置数据，用于在 IO 线程收集、在主线程解析。
+     * 每个字段对应 settings 表中的一个 key，null 表示该 key 不存在。
+     */
+    private data class RawSettings(
+        val configsJson: String?,
+        val providerName: String?,
+        val apiKey: String?,
+        val model: String?,
+        val baseUrl: String?,
+        val apiTypeName: String?,
+        val companionName: String?,
+        val prefsJson: String?,
+        val memoriesJson: String?,
+        val avatarUri: String?,
+        val promptPersona: String?,
+        val promptFormat: String?,
+        val promptGreetingMorning: String?,
+        val promptGreetingNoon: String?,
+        val promptGreetingEvening: String?,
+        val promptReminder: String?,
+        val promptWeatherAlert: String?,
+        val promptFocusComplete: String?,
+        val promptFocusInterrupted: String?,
+        val morningEnabled: String?,
+        val morningTime: String?,
+        val noonEnabled: String?,
+        val noonTime: String?,
+        val eveningEnabled: String?,
+        val eveningTime: String?,
+        val weatherAlertEnabled: String?,
+        val focusCompletionEnabled: String?,
+        val companionStyle: String?,
+    )
+
+    /**
+     * 将从数据库读取的原始数据解析并应用到 mutableStateOf 状态变量。
+     * 由 loadSettings 在主线程调用，所有状态写入可被 Compose 正确观察。
+     *
+     * @param loaded 从 IO 线程返回的原始设置数据
+     */
+    private fun applyLoadedSettings(loaded: RawSettings) {
+        // ── 解析多配置列表 ──
+        parseAndApplyConfigs(loaded.configsJson)
+
+        // ── 加载当前激活的配置 ──
+        applyProviderConfig(loaded)
+
+        // ── 加载伙伴名称 ──
+        if (!loaded.companionName.isNullOrEmpty()) companionName = loaded.companionName
+
+        // ── 加载提示词（缺失时写入默认值） ──
+        applyPromptDefaults(loaded)
+
+        // ── 加载问候调度设置 ──
+        applyGreetingSettings(loaded)
+
+        // ── 加载天气预警设置 ──
+        weatherAlertEnabled = loaded.weatherAlertEnabled != "false"
+
+        // ── 加载专注完成鼓励设置 ──
+        focusCompletionEnabled = loaded.focusCompletionEnabled != "false"
+
+        // ── 加载用户偏好 ──
+        if (!loaded.prefsJson.isNullOrEmpty()) {
+            try { userPreferences = JSONArray(loaded.prefsJson) } catch (_: Exception) {}
+        }
+
+        // ── 加载用户记忆 ──
+        if (!loaded.memoriesJson.isNullOrEmpty()) {
+            try { userMemories = JSONArray(loaded.memoriesJson) } catch (_: Exception) {}
+        }
+
+        // ── 加载头像 ──
+        if (!loaded.avatarUri.isNullOrEmpty()) companionAvatarUri = loaded.avatarUri
+
+        // ── 加载伙伴风格 ──
+        if (!loaded.companionStyle.isNullOrEmpty()) companionStyle = loaded.companionStyle
+
+        // ── 首次启动迁移：缺失的提示词 key 写入默认值 ──
+        migratePromptDefaults(mapOf(
+            PromptDefaults.KEY_PERSONA to loaded.promptPersona,
+            PromptDefaults.KEY_FORMAT to loaded.promptFormat,
+            PromptDefaults.KEY_GREETING_MORNING to loaded.promptGreetingMorning,
+            PromptDefaults.KEY_GREETING_NOON to loaded.promptGreetingNoon,
+            PromptDefaults.KEY_GREETING_EVENING to loaded.promptGreetingEvening,
+            PromptDefaults.KEY_REMINDER to loaded.promptReminder,
+            PromptDefaults.KEY_WEATHER_ALERT to loaded.promptWeatherAlert,
+            PromptDefaults.KEY_FOCUS_COMPLETE to loaded.promptFocusComplete,
+            PromptDefaults.KEY_FOCUS_INTERRUPTED to loaded.promptFocusInterrupted,
+        ))
+    }
+
+    /**
+     * 解析多配置列表 JSON 并写入 savedConfigs 状态。
+     */
+    private fun parseAndApplyConfigs(configsJson: String?) {
+        if (configsJson.isNullOrEmpty()) return
+        try {
+            val arr = JSONArray(configsJson)
+            val configs = mutableListOf<SavedConfig>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.getJSONObject(i)
+                configs.add(SavedConfig(
+                    id = obj.getString("id"),
+                    provider = obj.getString("provider"),
+                    apiKey = obj.getString("apiKey"),
+                    model = obj.getString("model"),
+                    baseUrl = obj.optString("baseUrl", ""),
+                    apiType = obj.optString("apiType", "OPENAI_COMPATIBLE"),
+                ))
+            }
+            savedConfigs = configs
+        } catch (_: Exception) {}
+    }
+
+    /**
+     * 加载当前激活的 Provider 配置并写入 apiKey / modelName / currentProvider 状态。
+     * 如果是旧版单配置且多配置列表为空，自动迁移到多配置列表。
+     */
+    private fun applyProviderConfig(loaded: RawSettings) {
+        val pName = loaded.providerName
+        val pKey = loaded.apiKey
+        val pModel = loaded.model
+        if (!pName.isNullOrEmpty() && !pKey.isNullOrEmpty() && !pModel.isNullOrEmpty()) {
+            apiKey = pKey
+            modelName = pModel
+            val apiType = try {
+                ApiType.valueOf(loaded.apiTypeName ?: "OPENAI_COMPATIBLE")
+            } catch (_: Exception) {
+                ApiType.OPENAI_COMPATIBLE
+            }
+            currentProvider = builtInProviders.find { it.name == pName }
+                ?: ProviderConfig(name = pName, baseUrl = loaded.baseUrl ?: "", apiType = apiType)
+            if (savedConfigs.isEmpty()) {
+                migrateToMultiConfig(pName, pKey, pModel, loaded.baseUrl ?: "", loaded.apiTypeName ?: "OPENAI_COMPATIBLE")
+            }
+        }
+    }
+
+    /**
+     * 加载提示词设置，缺失时使用 ALL_DEFAULTS 中的默认值。
+     */
+    private fun applyPromptDefaults(loaded: RawSettings) {
+        val defs = PromptDefaults.ALL_DEFAULTS
+        promptPersona = loaded.promptPersona ?: defs[PromptDefaults.KEY_PERSONA]!!
+        promptFormat = loaded.promptFormat ?: defs[PromptDefaults.KEY_FORMAT]!!
+        promptGreetingMorning = loaded.promptGreetingMorning ?: defs[PromptDefaults.KEY_GREETING_MORNING]!!
+        promptGreetingNoon = loaded.promptGreetingNoon ?: defs[PromptDefaults.KEY_GREETING_NOON]!!
+        promptGreetingEvening = loaded.promptGreetingEvening ?: defs[PromptDefaults.KEY_GREETING_EVENING]!!
+        promptReminder = loaded.promptReminder ?: defs[PromptDefaults.KEY_REMINDER]!!
+        promptWeatherAlert = loaded.promptWeatherAlert ?: defs[PromptDefaults.KEY_WEATHER_ALERT]!!
+        promptFocusComplete = loaded.promptFocusComplete ?: defs[PromptDefaults.KEY_FOCUS_COMPLETE]!!
+        promptFocusInterrupted = loaded.promptFocusInterrupted ?: defs[PromptDefaults.KEY_FOCUS_INTERRUPTED]!!
+    }
+
+    /**
+     * 加载问候调度设置（早/午/晚的启用状态和时间）。
+     */
+    private fun applyGreetingSettings(loaded: RawSettings) {
+        morningEnabled = loaded.morningEnabled != "false"
+        morningTime = loaded.morningTime ?: "08:00"
+        noonEnabled = loaded.noonEnabled != "false"
+        noonTime = loaded.noonTime ?: "12:00"
+        eveningEnabled = loaded.eveningEnabled != "false"
+        eveningTime = loaded.eveningTime ?: "21:00"
     }
 
     /**
@@ -702,12 +742,10 @@ class CompanionViewModel(
         // 按 id 排序，保证前缀稳定性（API Prefix Caching 要求系统提示词跨请求完全一致）
         val sorted = stickers.sortedBy { it.id }
         return buildString {
-            append("\n\n---\n你可以使用以下表情包来表达情感，在回复中用尖括号包裹标签名即可插入：")
+            append("\n\n---\n可以使用以下表情包：")
             for (sticker in sorted) {
                 append("\n- <${sticker.tag}>")
             }
-            append("\n使用示例：\"今天天气真好呢 <开心>\" 或 \"考试加油！<加油>\"")
-            append("\n注意：表情包应自然融入文字中，不要滥用，也不要单独发一条只含表情包的消息。")
         }
     }
 

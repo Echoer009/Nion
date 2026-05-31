@@ -77,6 +77,17 @@ object ChatService {
     private val cachedAnthropicToolsJson: MutableMap<String, String> = mutableMapOf()
 
     /**
+     * 流式聊天客户端的单例 —— 长超时配置，复用连接池。
+     * connectTimeout=30s, readTimeout=120s（流式推送可能间隔较长）。
+     */
+    private val streamingClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(30, TimeUnit.SECONDS)
+            .readTimeout(120, TimeUnit.SECONDS)
+            .build()
+    }
+
+    /**
      * 获取指定路由的 OpenAI tools JSON 缓存。
      * 从 ToolRegistry 获取对应路由的工具集后缓存，保证同一路由的 tools 序列化完全一致。
      */
@@ -148,17 +159,6 @@ object ChatService {
         } catch (e: Exception) {
             Result.failure(Exception("获取模型列表异常: ${e.message}", e))
         }
-    }
-
-    /**
-     * 流式聊天客户端的单例 —— 长超时配置，复用连接池。
-     * connectTimeout=30s, readTimeout=120s（流式推送可能间隔较长）。
-     */
-    private val streamingClient by lazy {
-        OkHttpClient.Builder()
-            .connectTimeout(30, TimeUnit.SECONDS)
-            .readTimeout(120, TimeUnit.SECONDS)
-            .build()
     }
 
     /**
@@ -310,6 +310,7 @@ object ChatService {
      * @param apiKey   API 密钥
      * @param model    模型名称
      * @param messages 消息列表，每项是完整的 JSON 对象（含 role / content / tool_calls 等）
+     * @param currentRoute 当前导航路由，用于注入路由相关工具上下文，null 表示无路由
      * @return 成功时返回 [ChatResponse]，失败时返回异常
      */
     suspend fun chatWithTools(
@@ -396,7 +397,6 @@ object ChatService {
         val url = "$baseUrl/chat/completions"
 
         // 构建请求体：使用稳定序列化保证 key 顺序一致
-        // 请求前缀的 tools 部分使用缓存的 JSON 字符串，确保每次请求完全一致，命中 API 缓存
         val messagesArray = JSONArray().apply {
             for (msg in messages) put(msg)
         }
@@ -404,7 +404,6 @@ object ChatService {
 
         Log.d("ChatService", "OpenAI stream request: ${bodyStr.take(500)}")
 
-        // 使用 OkHttp 发送请求（支持流式响应读取）
         val httpRequest = Request.Builder()
             .url(url)
             .addHeader("Content-Type", "application/json")
@@ -412,113 +411,39 @@ object ChatService {
             .post(bodyStr.toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = streamingClient.newCall(httpRequest).execute()
-        if (!response.isSuccessful) {
-            val errorBody = response.body?.string() ?: "未知错误"
-            response.close()
-            Log.e("ChatService", "OpenAI stream 失败 (HTTP ${response.code}): $errorBody")
-            return Result.failure(Exception("API 请求失败 (HTTP ${response.code}): $errorBody"))
-        }
+        // 执行流式请求，统一处理 HTTP 层错误
+        val response = executeStreamRequest(httpRequest)
+            .getOrElse { return Result.failure(it) }
 
-        // ── SSE 流式读取 ──
-        val textContent = StringBuilder() // 累积的完整文本
-        val reasoningContent = StringBuilder() // 累积的 reasoning_content（DeepSeek R1 等推理模型）
-        val toolCallAccumulators = mutableMapOf<Int, ToolCallAccumulator>() // 按 index 累积工具调用
-        // 缓存命中统计 —— DeepSeek 在最后一个 chunk 的 usage 字段返回缓存数据
+        // SSE 流式读取的累积状态
+        val textContent = StringBuilder()
+        val reasoningContent = StringBuilder()
+        val toolCallAccumulators = mutableMapOf<Int, ToolCallAccumulator>()
         var cacheHitTokens = 0
         var cacheMissTokens = 0
 
-        response.body?.source()?.let { source ->
-            try {
-                while (!source.exhausted()) {
-                    // 检查线程是否被中断（协程取消时会中断 IO 线程）
-                    if (Thread.interrupted()) break
-                    val line = source.readUtf8Line() ?: break
-                    if (!line.startsWith("data: ")) continue // 跳过非 data 行
-                    val data = line.removePrefix("data: ").trim()
-
-                    if (data == "[DONE]") break // SSE 流结束标志
-
-                    try {
-                        val chunk = JSONObject(data)
-
-                        // 提取 usage 字段（DeepSeek 在流式最后一个 chunk 中返回，含缓存命中数据）
-                        // usage 格式：{"prompt_tokens":N,"completion_tokens":N,"prompt_cache_hit_tokens":N,"prompt_cache_miss_tokens":N}
-                        val usage = chunk.optJSONObject("usage")
-                        if (usage != null) {
-                            cacheHitTokens = usage.optInt("prompt_cache_hit_tokens", 0)
-                            cacheMissTokens = usage.optInt("prompt_cache_miss_tokens", 0)
-                        }
-
-                        val choices = chunk.optJSONArray("choices")
-                        if (choices == null || choices.length() == 0) continue
-                        val delta = choices.getJSONObject(0).optJSONObject("delta") ?: continue
-
-                        // 处理文本增量（delta.content 可能为 JSON null，optString 会转为字符串 "null"）
-                        val contentDelta = delta.optString("content", "")
-                        if (contentDelta.isNotEmpty() && !delta.isNull("content")) {
-                            textContent.append(contentDelta)
-                            onTextDelta(contentDelta) // 回调给 ViewModel 刷新 UI
-                        }
-
-                        // 处理推理内容增量（DeepSeek R1 等模型的 reasoning_content）
-                        // 此字段必须原样回传到后续请求的 assistant 消息中
-                        val reasoningDelta = delta.optString("reasoning_content", "")
-                        if (reasoningDelta.isNotEmpty() && !delta.isNull("reasoning_content")) {
-                            reasoningContent.append(reasoningDelta)
-                        }
-
-                        // 处理工具调用增量
-                        val toolCallsDelta = delta.optJSONArray("tool_calls")
-                        if (toolCallsDelta != null) {
-                            for (j in 0 until toolCallsDelta.length()) {
-                                val tcDelta = toolCallsDelta.getJSONObject(j)
-                                val tcIndex = tcDelta.optInt("index", j)
-                                val acc = toolCallAccumulators.getOrPut(tcIndex) {
-                                    ToolCallAccumulator()
-                                }
-                                // 第一个 chunk 包含 id 和 function.name
-                                if (tcDelta.has("id")) {
-                                    acc.id = tcDelta.getString("id")
-                                }
-                                val function = tcDelta.optJSONObject("function")
-                                if (function != null) {
-                                    if (function.has("name")) {
-                                        acc.name = function.getString("name")
-                                    }
-                                    if (function.has("arguments")) {
-                                        acc.arguments.append(function.getString("arguments"))
-                                    }
-                                }
-                            }
-                        }
-                    } catch (_: Exception) {
-                        // 某些 chunk 的 JSON 可能不完整（如仅含 usage），跳过即可
-                    }
-                }
-            } catch (e: Exception) {
-                Log.e("ChatService", "OpenAI SSE 读取异常: ${e.message}")
-                throw e
-            } finally {
-                response.close()
+        // 读取 SSE 流，逐行处理 OpenAI 格式的 data 帧
+        if (!readSseLines(response) { line ->
+            // 跳过非 data 行
+            if (!line.startsWith("data: ")) return@readSseLines false
+            val data = line.removePrefix("data: ").trim()
+            // SSE 流结束标志
+            if (data == "[DONE]") return@readSseLines true
+            // 解析并处理单个 SSE 数据块
+            processOpenAISseChunk(data, textContent, reasoningContent, toolCallAccumulators, onTextDelta) { hit, miss ->
+                cacheHitTokens = hit
+                cacheMissTokens = miss
             }
-        } ?: run {
-            response.close()
+            false
+        }) {
             return Result.failure(Exception("响应体为空"))
         }
 
-        // ── 组装最终响应 ──
-        val text = textContent.toString().takeIf { it.isNotEmpty() }
-        val reasoning = reasoningContent.toString().takeIf { it.isNotEmpty() }
-        val toolCalls = toolCallAccumulators.values
-            .filter { it.id.isNotEmpty() && it.name.isNotEmpty() }
-            .map { ToolCall(id = it.id, name = it.name, arguments = it.arguments.toString()) }
-            .takeIf { it.isNotEmpty() }
-
+        // 组装最终响应
         return Result.success(ChatResponse(
-            text = text,
-            toolCalls = toolCalls,
-            reasoningContent = reasoning,
+            text = textContent.toString().takeIf { it.isNotEmpty() },
+            toolCalls = accumulatorsToToolCalls(toolCallAccumulators),
+            reasoningContent = reasoningContent.toString().takeIf { it.isNotEmpty() },
             cacheHitTokens = cacheHitTokens,
             cacheMissTokens = cacheMissTokens,
         ))
@@ -582,8 +507,7 @@ object ChatService {
             }
         }
 
-        // 使用稳定序列化构建请求体
-        // 为 system 和 tools 添加 cache_control 标记，启用 Anthropic Prompt Caching
+        // 使用稳定序列化构建请求体，添加 cache_control 启用 Prompt Caching
         val bodyStr = buildStableAnthropicBody(
             model = model,
             systemPrompt = systemPrompt,
@@ -605,131 +529,48 @@ object ChatService {
             .post(bodyStr.toRequestBody("application/json".toMediaType()))
             .build()
 
-        val response = streamingClient.newCall(httpRequest).execute()
-        if (!response.isSuccessful) {
-            val errorBody = response.body?.string() ?: "未知错误"
-            response.close()
-            Log.e("ChatService", "Anthropic stream 失败 (HTTP ${response.code}): $errorBody")
-            return Result.failure(Exception("API 请求失败 (HTTP ${response.code}): $errorBody"))
-        }
+        // 执行流式请求，统一处理 HTTP 层错误
+        val response = executeStreamRequest(httpRequest)
+            .getOrElse { return Result.failure(it) }
 
-        // ── SSE 流式读取 ──
-        val textBlocks = mutableMapOf<Int, StringBuilder>() // 按 index 累积文本块
-        val toolUseBlocks = mutableMapOf<Int, ToolCallAccumulator>() // 按 index 累积工具调用
+        // SSE 流式读取的累积状态
+        val textBlocks = mutableMapOf<Int, StringBuilder>()
+        val toolUseBlocks = mutableMapOf<Int, ToolCallAccumulator>()
         var currentEventType = ""
-        // 缓存命中统计
-        // Anthropic 返回 cache_read_input_tokens（缓存命中）和 cache_creation_input_tokens（缓存新建）
         var cacheHitTokens = 0
         var cacheMissTokens = 0
 
-        response.body?.source()?.let { source ->
-            try {
-                while (!source.exhausted()) {
-                    // 检查线程是否被中断（协程取消时会中断 IO 线程）
-                    if (Thread.interrupted()) break
-                    val line = source.readUtf8Line() ?: break
-
-                    when {
-                        // 记录当前事件类型
-                        line.startsWith("event: ") -> {
-                            currentEventType = line.removePrefix("event: ").trim()
-                        }
-                        // data 行包含 JSON payload
-                        line.startsWith("data: ") -> {
-                            val data = line.removePrefix("data: ").trim()
-                            try {
-                                val event = JSONObject(data)
-                                val eventType = event.optString("type", currentEventType)
-
-                                when (eventType) {
-                                    "content_block_start" -> {
-                                        val contentBlock = event.optJSONObject("content_block")
-                                        if (contentBlock != null) {
-                                            val blockType = contentBlock.optString("type")
-                                            val idx = event.optInt("index", 0)
-                                            when (blockType) {
-                                                "text" -> {
-                                                    textBlocks[idx] = StringBuilder()
-                                                }
-                                                "tool_use" -> {
-                                                    toolUseBlocks[idx] = ToolCallAccumulator(
-                                                        id = contentBlock.optString("id", ""),
-                                                        name = contentBlock.optString("name", ""),
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                    "content_block_delta" -> {
-                                        val delta = event.optJSONObject("delta")
-                                        val idx = event.optInt("index", 0)
-                                        if (delta != null) {
-                                            when (delta.optString("type")) {
-                                                "text_delta" -> {
-                                                    val text = delta.optString("text", "")
-                                                    if (text.isNotEmpty() && !delta.isNull("text")) {
-                                                        textBlocks.getOrPut(idx) { StringBuilder() }
-                                                            .append(text)
-                                                        onTextDelta(text) // 回调给 ViewModel
-                                                    }
-                                                }
-                                                "input_json_delta" -> {
-                                                    val partialJson = delta.optString("partial_json", "")
-                                                    if (partialJson.isNotEmpty()) {
-                                                        toolUseBlocks.getOrPut(idx) {
-                                                            ToolCallAccumulator()
-                                                        }.arguments.append(partialJson)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                    "message_delta" -> {
-                                        // message_delta 事件包含 usage 信息（Anthropic 缓存命中统计）
-                                        // {"type":"message_delta","usage":{"cache_read_input_tokens":N,"cache_creation_input_tokens":N}}
-                                        val usage = event.optJSONObject("usage")
-                                        if (usage != null) {
-                                            cacheHitTokens = usage.optInt("cache_read_input_tokens", 0)
-                                            cacheMissTokens = usage.optInt("cache_creation_input_tokens", 0)
-                                        }
-                                    }
-                                    "message_stop" -> {
-                                        // 流结束标志，跳出循环
-                                    }
-                                }
-
-                                if (eventType == "message_stop") break
-                            } catch (_: Exception) {
-                                // 忽略无法解析的 JSON 行
-                            }
-                        }
+        // 读取 SSE 流，处理 Anthropic 的 event/data 行
+        if (!readSseLines(response) { line ->
+            when {
+                // 记录当前事件类型，供后续 data 行使用
+                line.startsWith("event: ") -> {
+                    currentEventType = line.removePrefix("event: ").trim()
+                    false
+                }
+                // data 行包含 JSON payload，交由事件处理器解析
+                line.startsWith("data: ") -> {
+                    val data = line.removePrefix("data: ").trim()
+                    processAnthropicSseData(data, currentEventType, textBlocks, toolUseBlocks, onTextDelta) { hit, miss ->
+                        cacheHitTokens = hit
+                        cacheMissTokens = miss
                     }
                 }
-            } catch (e: Exception) {
-                Log.e("ChatService", "Anthropic SSE 读取异常: ${e.message}")
-                throw e
-            } finally {
-                response.close()
+                else -> false
             }
-        } ?: run {
-            response.close()
+        }) {
             return Result.failure(Exception("响应体为空"))
         }
 
-        // ── 组装最终响应 ──
+        // 组装最终响应
         val text = textBlocks.values
             .map { it.toString() }
             .joinToString("")
             .takeIf { it.isNotEmpty() }
 
-        val toolCalls = toolUseBlocks.values
-            .filter { it.id.isNotEmpty() && it.name.isNotEmpty() }
-            .map { ToolCall(id = it.id, name = it.name, arguments = it.arguments.toString()) }
-            .takeIf { it.isNotEmpty() }
-
         return Result.success(ChatResponse(
             text = text,
-            toolCalls = toolCalls,
+            toolCalls = accumulatorsToToolCalls(toolUseBlocks),
             cacheHitTokens = cacheHitTokens,
             cacheMissTokens = cacheMissTokens,
         ))
@@ -746,6 +587,266 @@ object ChatService {
         var name: String = "",
         val arguments: StringBuilder = StringBuilder(),
     )
+
+    // ═══════════════════════════════════════════════════════════════════
+    // SSE 流式辅助方法 —— 降低 chatStreamOpenAI / chatStreamAnthropic 的复杂度
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * 执行流式 HTTP 请求并统一处理 HTTP 层错误。
+     *
+     * 封装 OkHttp 请求执行、响应码检查和错误响应体读取。
+     * 成功时返回 OkHttp Response（调用方负责关闭），失败时返回异常。
+     *
+     * @param httpRequest 已构建好的 OkHttp Request
+     * @return 成功返回 Response，失败返回 Exception
+     */
+    private fun executeStreamRequest(httpRequest: Request): Result<okhttp3.Response> {
+        val response = streamingClient.newCall(httpRequest).execute()
+        if (!response.isSuccessful) {
+            val errorBody = response.body?.string() ?: "未知错误"
+            response.close()
+            Log.e("ChatService", "Stream 请求失败 (HTTP ${response.code}): $errorBody")
+            return Result.failure(Exception("API 请求失败 (HTTP ${response.code}): $errorBody"))
+        }
+        return Result.success(response)
+    }
+
+    /**
+     * 从 OkHttp Response 中逐行读取 SSE 数据。
+     *
+     * 统一封装 SSE 流的读取循环、线程中断检测和响应关闭逻辑。
+     * 对每一行原始内容调用 [lineProcessor]，处理器返回 true 时停止读取（如遇到 [DONE] 或 message_stop）。
+     *
+     * @param response OkHttp 响应对象，读取完毕或异常后自动关闭
+     * @param lineProcessor 行处理器，接收原始行内容（含 "data: " / "event: " 前缀），返回 true 表示应停止读取
+     * @return true 表示成功读取完成，false 表示响应体为空
+     */
+    private fun readSseLines(
+        response: okhttp3.Response,
+        lineProcessor: (String) -> Boolean,
+    ): Boolean {
+        response.body?.source()?.let { source ->
+            try {
+                while (!source.exhausted()) {
+                    // 检查线程是否被中断（协程取消时会中断 IO 线程）
+                    if (Thread.interrupted()) break
+                    val line = source.readUtf8Line() ?: break
+                    // 处理器返回 true 表示应停止读取（如遇到 [DONE] 或 message_stop）
+                    if (lineProcessor(line)) break
+                }
+            } catch (e: Exception) {
+                Log.e("ChatService", "SSE 读取异常: ${e.message}")
+                throw e
+            } finally {
+                response.close()
+            }
+            return true
+        } ?: run {
+            response.close()
+            return false
+        }
+    }
+
+    /**
+     * 处理单个 OpenAI SSE 数据块。
+     *
+     * 从 SSE `data:` 行的 JSON 字符串中提取四类信息：
+     * 1. **文本增量**（delta.content）→ 追加到 [textContent] 并通过 [onTextDelta] 回调
+     * 2. **推理内容增量**（delta.reasoning_content，DeepSeek R1 等模型）→ 追加到 [reasoningContent]
+     * 3. **工具调用增量**（delta.tool_calls）→ 按 index 累积到 [toolCallAccumulators]
+     * 4. **缓存统计**（usage 字段，DeepSeek Prefix Caching）→ 通过 [onUsage] 回调
+     *
+     * @param data SSE data 行的 JSON 字符串
+     * @param textContent 累积文本内容的 StringBuilder
+     * @param reasoningContent 累积推理内容的 StringBuilder
+     * @param toolCallAccumulators 按 index 累积工具调用的映射
+     * @param onTextDelta 文本增量回调，触发时传递增量文本片段
+     * @param onUsage 缓存统计回调，触发时传递 (hitTokens, missTokens)
+     */
+    private fun processOpenAISseChunk(
+        data: String,
+        textContent: StringBuilder,
+        reasoningContent: StringBuilder,
+        toolCallAccumulators: MutableMap<Int, ToolCallAccumulator>,
+        onTextDelta: (String) -> Unit,
+        onUsage: (hit: Int, miss: Int) -> Unit,
+    ) {
+        try {
+            val chunk = JSONObject(data)
+
+            // 提取 usage 字段（DeepSeek 在流式最后一个 chunk 中返回，含缓存命中数据）
+            // usage 格式：{"prompt_tokens":N,"completion_tokens":N,"prompt_cache_hit_tokens":N,"prompt_cache_miss_tokens":N}
+            val usage = chunk.optJSONObject("usage")
+            if (usage != null) {
+                onUsage(
+                    usage.optInt("prompt_cache_hit_tokens", 0),
+                    usage.optInt("prompt_cache_miss_tokens", 0),
+                )
+            }
+
+            val choices = chunk.optJSONArray("choices")
+            if (choices == null || choices.length() == 0) return
+            val delta = choices.getJSONObject(0).optJSONObject("delta") ?: return
+
+            // 处理文本增量（delta.content 可能为 JSON null，optString 会转为字符串 "null"）
+            val contentDelta = delta.optString("content", "")
+            if (contentDelta.isNotEmpty() && !delta.isNull("content")) {
+                textContent.append(contentDelta)
+                onTextDelta(contentDelta)
+            }
+
+            // 处理推理内容增量（DeepSeek R1 等模型的 reasoning_content）
+            // 此字段必须原样回传到后续请求的 assistant 消息中
+            val reasoningDelta = delta.optString("reasoning_content", "")
+            if (reasoningDelta.isNotEmpty() && !delta.isNull("reasoning_content")) {
+                reasoningContent.append(reasoningDelta)
+            }
+
+            // 处理工具调用增量：按 index 累积 id/name/arguments
+            accumulateOpenAIToolCalls(delta, toolCallAccumulators)
+        } catch (_: Exception) {
+            // 某些 chunk 的 JSON 可能不完整（如仅含 usage），跳过即可
+        }
+    }
+
+    /**
+     * 累积 OpenAI 格式的工具调用增量。
+     *
+     * OpenAI 流式中工具调用的 id/name 出现在第一个 chunk，
+     * arguments 分散在后续 chunk 中逐步传输，需要按 index 累积。
+     *
+     * @param delta SSE chunk 中的 delta JSON 对象
+     * @param toolCallAccumulators 按 index 累积的累加器映射
+     */
+    private fun accumulateOpenAIToolCalls(
+        delta: JSONObject,
+        toolCallAccumulators: MutableMap<Int, ToolCallAccumulator>,
+    ) {
+        val toolCallsDelta = delta.optJSONArray("tool_calls") ?: return
+        for (j in 0 until toolCallsDelta.length()) {
+            val tcDelta = toolCallsDelta.getJSONObject(j)
+            val tcIndex = tcDelta.optInt("index", j)
+            val acc = toolCallAccumulators.getOrPut(tcIndex) { ToolCallAccumulator() }
+            // 第一个 chunk 包含 id 和 function.name
+            if (tcDelta.has("id")) {
+                acc.id = tcDelta.getString("id")
+            }
+            val function = tcDelta.optJSONObject("function")
+            if (function != null) {
+                if (function.has("name")) {
+                    acc.name = function.getString("name")
+                }
+                if (function.has("arguments")) {
+                    acc.arguments.append(function.getString("arguments"))
+                }
+            }
+        }
+    }
+
+    /**
+     * 处理单个 Anthropic SSE data 事件。
+     *
+     * 根据事件类型（content_block_start / content_block_delta / message_delta / message_stop）
+     * 分别处理内容块初始化、文本/工具调用增量累积和缓存统计提取。
+     *
+     * @param data SSE data 行的 JSON 字符串
+     * @param eventType 当前事件类型（由 "event:" 行设定）
+     * @param textBlocks 按 index 累积文本块的映射
+     * @param toolUseBlocks 按 index 累积工具调用的映射
+     * @param onTextDelta 文本增量回调，触发时传递增量文本片段
+     * @param onUsage 缓存统计回调，触发时传递 (hitTokens, missTokens)
+     * @return true 表示收到 message_stop 应停止读取，false 表示继续
+     */
+    private fun processAnthropicSseData(
+        data: String,
+        eventType: String,
+        textBlocks: MutableMap<Int, StringBuilder>,
+        toolUseBlocks: MutableMap<Int, ToolCallAccumulator>,
+        onTextDelta: (String) -> Unit,
+        onUsage: (hit: Int, miss: Int) -> Unit,
+    ): Boolean {
+        try {
+            val event = JSONObject(data)
+            val type = event.optString("type", eventType)
+
+            when (type) {
+                "content_block_start" -> {
+                    // 初始化文本块或工具调用块的累加器
+                    val contentBlock = event.optJSONObject("content_block") ?: return false
+                    val blockType = contentBlock.optString("type")
+                    val idx = event.optInt("index", 0)
+                    when (blockType) {
+                        "text" -> {
+                            textBlocks[idx] = StringBuilder()
+                        }
+                        "tool_use" -> {
+                            toolUseBlocks[idx] = ToolCallAccumulator(
+                                id = contentBlock.optString("id", ""),
+                                name = contentBlock.optString("name", ""),
+                            )
+                        }
+                    }
+                }
+                "content_block_delta" -> {
+                    // 处理文本增量或工具参数增量
+                    val delta = event.optJSONObject("delta")
+                    val idx = event.optInt("index", 0)
+                    if (delta != null) {
+                        when (delta.optString("type")) {
+                            "text_delta" -> {
+                                val text = delta.optString("text", "")
+                                if (text.isNotEmpty() && !delta.isNull("text")) {
+                                    textBlocks.getOrPut(idx) { StringBuilder() }.append(text)
+                                    onTextDelta(text)
+                                }
+                            }
+                            "input_json_delta" -> {
+                                val partialJson = delta.optString("partial_json", "")
+                                if (partialJson.isNotEmpty()) {
+                                    toolUseBlocks.getOrPut(idx) { ToolCallAccumulator() }
+                                        .arguments.append(partialJson)
+                                }
+                            }
+                        }
+                    }
+                }
+                "message_delta" -> {
+                    // message_delta 事件包含 usage 信息（Anthropic 缓存命中统计）
+                    // {"type":"message_delta","usage":{"cache_read_input_tokens":N,"cache_creation_input_tokens":N}}
+                    val usage = event.optJSONObject("usage")
+                    if (usage != null) {
+                        onUsage(
+                            usage.optInt("cache_read_input_tokens", 0),
+                            usage.optInt("cache_creation_input_tokens", 0),
+                        )
+                    }
+                }
+                "message_stop" -> return true
+            }
+        } catch (_: Exception) {
+            // 忽略无法解析的 JSON 行
+        }
+        return false
+    }
+
+    /**
+     * 将工具调用累加器映射转换为 [ToolCall] 列表。
+     *
+     * 过滤掉不完整的累加器（id 或 name 为空），仅保留有效调用。
+     * OpenAI 和 Anthropic 的流式方法共享此转换逻辑。
+     *
+     * @param accumulators 按 index 累积的 [ToolCallAccumulator] 映射
+     * @return 有效的 [ToolCall] 列表，或 null（无工具调用时）
+     */
+    private fun accumulatorsToToolCalls(
+        accumulators: Map<Int, ToolCallAccumulator>,
+    ): List<ToolCall>? {
+        return accumulators.values
+            .filter { it.id.isNotEmpty() && it.name.isNotEmpty() }
+            .map { ToolCall(id = it.id, name = it.name, arguments = it.arguments.toString()) }
+            .takeIf { it.isNotEmpty() }
+    }
 
     /**
      * OpenAI 兼容 API 的 Tool Calling 实现。
@@ -834,7 +935,9 @@ object ChatService {
                     arguments = function.getString("arguments"),
                 )
             }
-        } else null
+        } else {
+            null
+        }
 
         return ChatResponse(text = text, toolCalls = toolCalls, rawMessage = message)
     }

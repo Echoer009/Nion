@@ -126,6 +126,8 @@ import androidx.compose.ui.platform.LocalDensity
  * @param text 消息正文
  * @param isFromUser true=用户消息（右侧主题色气泡），false=AI 回复（左侧灰色气泡）
  * @param timestamp 显示时间，格式 HH:mm
+ * @param isToolMessage 是否为工具执行消息（显示为小型状态行而非完整气泡）
+ * @param toolDone 工具是否已执行完成（用对勾替换加载图标）
  */
 data class ChatMessage(
     val id: String,
@@ -148,6 +150,7 @@ data class ChatMessage(
  * @param onSidebarDrag 水平拖拽回调，用于控制面板打开/关闭
  * @param onSidebarDragStopped 拖拽结束回调
  * @param isVisible 面板是否可见，用于自动滚动到最新消息
+ * @param currentRoute 当前导航路由，传递给 ViewModel 用于决定注入哪些工具
  * @param viewModel 伙伴 ViewModel，管理消息和配置状态
  * @param modifier 由面板容器传入的修饰符（含 draggable 手势）
  */
@@ -194,7 +197,12 @@ fun CompanionSidebar(
     }
 
     // 调试日志：追踪面板为何停在 loading 而不切换到实际内容
-    android.util.Log.d("NionCompanion", "[Sidebar] actualMode=$actualMode, isInitialized=${viewModel.isInitialized}, isDataLoading=${viewModel.isDataLoading}, panelMode=$panelMode, provider=${viewModel.currentProvider?.name}")
+    android.util.Log.d(
+        "NionCompanion",
+        "[Sidebar] actualMode=$actualMode, isInitialized=${viewModel.isInitialized}, " +
+            "isDataLoading=${viewModel.isDataLoading}, panelMode=$panelMode, " +
+            "provider=${viewModel.currentProvider?.name}"
+    )
 
     // 当从设置页保存配置后（currentProvider 从 null 变为非 null），自动回到聊天页
     LaunchedEffect(viewModel.currentProvider) {
@@ -301,7 +309,7 @@ fun CompanionSidebar(
                 )
                 "setup" -> SetupContent(
                     viewModel = viewModel,
-                    onBack = if (hasConfigured) { { panelMode = "switch" } } else null,
+                    onBack = if (hasConfigured) { { panelMode = "switch" } } else { null },
                     onAvatarClick = onAvatarClick,
                 )
                 else -> ChatContent(
@@ -420,7 +428,9 @@ private fun CompanionAvatar(
                     context.contentResolver, uri, targetPx, targetPx
                 )
             } catch (_: Exception) { null }
-        } else null
+        } else {
+            null
+        }
     }
 
     Surface(
@@ -534,69 +544,24 @@ private fun ProfileContent(
             .padding(vertical = 24.dp, horizontal = 16.dp),
     ) {
         // ── 顶部导航栏 ──
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            IconButton(onClick = backAndSave) {
-                Icon(
-                    Icons.Default.ArrowBack,
-                    contentDescription = "返回并保存",
-                    modifier = Modifier.size(20.dp),
-                )
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // 表情包按钮：打开表情包管理面板
-                IconButton(onClick = onStickersClick) {
-                    Icon(
-                        Icons.Outlined.SentimentSatisfied,
-                        contentDescription = "表情包",
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                // "关于你"按钮：打开用户偏好面板
-                IconButton(onClick = onPreferencesClick) {
-                    Icon(
-                        Icons.Outlined.Bookmarks,
-                        contentDescription = "关于你",
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                // 记忆按钮：打开 Nion 的笔记本
-                IconButton(onClick = onMemoriesClick) {
-                    Icon(
-                        Icons.Outlined.AutoAwesome,
-                        contentDescription = "记忆",
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
+        ProfileTopBar(
+            onBack = backAndSave,
+            onStickersClick = onStickersClick,
+            onPreferencesClick = onPreferencesClick,
+            onMemoriesClick = onMemoriesClick,
+        )
 
         Spacer(modifier = Modifier.height(24.dp))
 
         // ── 头像区域 ──
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalAlignment = Alignment.CenterHorizontally,
-        ) {
-            CompanionAvatar(
-                name = name.ifEmpty { viewModel.companionName },
-                avatarUri = viewModel.companionAvatarUri,
-                size = 72.dp,
-                modifier = Modifier.clickable { imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "点击更换头像",
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
-            )
-        }
+        ProfileAvatarSection(
+            avatarUri = viewModel.companionAvatarUri,
+            name = name,
+            companionName = viewModel.companionName,
+            onImagePickerLaunch = {
+                imagePicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly))
+            },
+        )
 
         Spacer(modifier = Modifier.height(28.dp))
 
@@ -612,73 +577,28 @@ private fun ProfileContent(
         Spacer(modifier = Modifier.height(24.dp))
 
         // ── 风格选择器：横向可滚动 Chip 组 ──
-        Text(
-            "风格",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        CompanionStyleSelector(
+            currentStyle = viewModel.companionStyle,
+            onStyleChange = { viewModel.updateCompanionStyle(it) },
         )
-        Spacer(modifier = Modifier.height(6.dp))
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.horizontalScroll(rememberScrollState()),
-        ) {
-            ToolPhrasePool.STYLES.forEach { (key, label) ->
-                val isSelected = viewModel.companionStyle == key
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = if (isSelected) MaterialTheme.colorScheme.primary
-                    else MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.clickable(
-                        interactionSource = remember { MutableInteractionSource() },
-                        indication = null,
-                    ) { viewModel.updateCompanionStyle(key) },
-                ) {
-                    Text(
-                        label,
-                        style = MaterialTheme.typography.labelSmall,
-                        color = if (isSelected) MaterialTheme.colorScheme.onPrimary
-                        else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
-                    )
-                }
-            }
-        }
 
         Spacer(modifier = Modifier.height(24.dp))
         // ══════════════════════════════════════════════════════════════
-        SectionHeader("伙伴设定")
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 人设卡片
-        ExpandablePromptCard(
-            cardKey = "persona",
-            title = "人设",
-            text = editingPersona,
-            isExpanded = expandedCard == PromptDefaults.KEY_PERSONA,
-            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_PERSONA) null else PromptDefaults.KEY_PERSONA },
-            onTextChange = { editingPersona = it },
-            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_PERSONA].orEmpty(),
-            onReset = {
+        ProfileCompanionSettings(
+            editingPersona = editingPersona,
+            editingFormat = editingFormat,
+            expandedCard = expandedCard,
+            onToggleExpand = { key ->
+                expandedCard = if (expandedCard == key) null else key
+            },
+            onPersonaChange = { editingPersona = it },
+            onFormatChange = { editingFormat = it },
+            onPersonaReset = {
                 val default = PromptDefaults.PERSONA
                 editingPersona = default
                 viewModel.updatePrompt(PromptDefaults.KEY_PERSONA, default)
             },
-            sharedTransitionScope = sts,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 回复格式卡片
-        ExpandablePromptCard(
-            cardKey = "format",
-            title = "回复格式",
-            text = editingFormat,
-            isExpanded = expandedCard == PromptDefaults.KEY_FORMAT,
-            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_FORMAT) null else PromptDefaults.KEY_FORMAT },
-            onTextChange = { editingFormat = it },
-            variables = emptyList(),
-            onReset = {
+            onFormatReset = {
                 val default = PromptDefaults.FORMAT
                 editingFormat = default
                 viewModel.updatePrompt(PromptDefaults.KEY_FORMAT, default)
@@ -691,163 +611,62 @@ private fun ProfileContent(
         // ══════════════════════════════════════════════════════════════
         // 提醒设定
         // ══════════════════════════════════════════════════════════════
-        SectionHeader("提醒设定")
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 早安问候卡片（开关 + 时间 + 提示词）
-        ExpandableReminderCard(
-            cardKey = "greeting_morning",
-            title = "早安问候",
-            description = if (viewModel.morningEnabled) "每天 ${viewModel.morningTime} 汇总今日待办" else "已关闭",
-            enabled = viewModel.morningEnabled,
-            time = viewModel.morningTime,
-            promptText = editingGreetingMorning,
-            isExpanded = expandedCard == PromptDefaults.KEY_GREETING_MORNING,
-            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_GREETING_MORNING) null else PromptDefaults.KEY_GREETING_MORNING },
-            onEnabledChange = { viewModel.updateGreetingEnabled("morning", it, context) },
-            onTimeChange = { viewModel.updateGreetingTime("morning", it, context) },
-            onPromptChange = { editingGreetingMorning = it },
-            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_GREETING_MORNING].orEmpty(),
-            onReset = {
+        ProfileReminderSettings(
+            viewModel = viewModel,
+            expandedCard = expandedCard,
+            onToggleExpand = { key ->
+                expandedCard = if (expandedCard == key) null else key
+            },
+            editingGreetingMorning = editingGreetingMorning,
+            editingGreetingNoon = editingGreetingNoon,
+            editingGreetingEvening = editingGreetingEvening,
+            editingFocusComplete = editingFocusComplete,
+            editingFocusInterrupted = editingFocusInterrupted,
+            editingReminder = editingReminder,
+            editingWeatherAlert = editingWeatherAlert,
+            onGreetingMorningChange = { editingGreetingMorning = it },
+            onGreetingNoonChange = { editingGreetingNoon = it },
+            onGreetingEveningChange = { editingGreetingEvening = it },
+            onFocusCompleteChange = { editingFocusComplete = it },
+            onFocusInterruptedChange = { editingFocusInterrupted = it },
+            onReminderChange = { editingReminder = it },
+            onWeatherAlertChange = { editingWeatherAlert = it },
+            onGreetingMorningReset = {
                 val default = PromptDefaults.GREETING_MORNING
                 editingGreetingMorning = default
                 viewModel.updatePrompt(PromptDefaults.KEY_GREETING_MORNING, default)
             },
-            sharedTransitionScope = sts,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 午间检查卡片
-        ExpandableReminderCard(
-            cardKey = "greeting_noon",
-            title = "午间检查",
-            description = if (viewModel.noonEnabled) "每天 ${viewModel.noonTime} 检查上午完成情况" else "已关闭",
-            enabled = viewModel.noonEnabled,
-            time = viewModel.noonTime,
-            promptText = editingGreetingNoon,
-            isExpanded = expandedCard == PromptDefaults.KEY_GREETING_NOON,
-            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_GREETING_NOON) null else PromptDefaults.KEY_GREETING_NOON },
-            onEnabledChange = { viewModel.updateGreetingEnabled("noon", it, context) },
-            onTimeChange = { viewModel.updateGreetingTime("noon", it, context) },
-            onPromptChange = { editingGreetingNoon = it },
-            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_GREETING_NOON].orEmpty(),
-            onReset = {
+            onGreetingNoonReset = {
                 val default = PromptDefaults.GREETING_NOON
                 editingGreetingNoon = default
                 viewModel.updatePrompt(PromptDefaults.KEY_GREETING_NOON, default)
             },
-            sharedTransitionScope = sts,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 晚间总结卡片
-        ExpandableReminderCard(
-            cardKey = "greeting_evening",
-            title = "晚间总结",
-            description = if (viewModel.eveningEnabled) "每天 ${viewModel.eveningTime} 总结今日成就" else "已关闭",
-            enabled = viewModel.eveningEnabled,
-            time = viewModel.eveningTime,
-            promptText = editingGreetingEvening,
-            isExpanded = expandedCard == PromptDefaults.KEY_GREETING_EVENING,
-            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_GREETING_EVENING) null else PromptDefaults.KEY_GREETING_EVENING },
-            onEnabledChange = { viewModel.updateGreetingEnabled("evening", it, context) },
-            onTimeChange = { viewModel.updateGreetingTime("evening", it, context) },
-            onPromptChange = { editingGreetingEvening = it },
-            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_GREETING_EVENING].orEmpty(),
-            onReset = {
+            onGreetingEveningReset = {
                 val default = PromptDefaults.GREETING_EVENING
                 editingGreetingEvening = default
                 viewModel.updatePrompt(PromptDefaults.KEY_GREETING_EVENING, default)
             },
-            sharedTransitionScope = sts,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 专注鼓励卡片（开关 + 提示词，无时间）
-        ExpandableReminderCard(
-            cardKey = "focus_completion",
-            title = "专注",
-            description = if (viewModel.focusCompletionEnabled) "完成专注时 ${viewModel.companionName} 会给你一句鼓励" else "已关闭",
-            enabled = viewModel.focusCompletionEnabled,
-            time = null,
-            promptText = editingFocusComplete,
-            isExpanded = expandedCard == PromptDefaults.KEY_FOCUS_COMPLETE,
-            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_FOCUS_COMPLETE) null else PromptDefaults.KEY_FOCUS_COMPLETE },
-            onEnabledChange = { viewModel.updateFocusCompletionEnabled(it) },
-            onTimeChange = null,
-            onPromptChange = { editingFocusComplete = it },
-            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_FOCUS_COMPLETE].orEmpty(),
-            onReset = {
+            onFocusCompleteReset = {
                 val default = PromptDefaults.FOCUS_COMPLETE
                 editingFocusComplete = default
                 viewModel.updatePrompt(PromptDefaults.KEY_FOCUS_COMPLETE, default)
             },
-            sharedTransitionScope = sts,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 专注中断提示词卡片（仅提示词，无开关/时间，作为专注鼓励的补充）
-        ExpandablePromptCard(
-            cardKey = "focus_interrupted",
-            title = "专注中断",
-            text = editingFocusInterrupted,
-            isExpanded = expandedCard == PromptDefaults.KEY_FOCUS_INTERRUPTED,
-            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_FOCUS_INTERRUPTED) null else PromptDefaults.KEY_FOCUS_INTERRUPTED },
-            onTextChange = { editingFocusInterrupted = it },
-            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_FOCUS_INTERRUPTED].orEmpty(),
-            onReset = {
+            onFocusInterruptedReset = {
                 val default = PromptDefaults.FOCUS_INTERRUPTED
                 editingFocusInterrupted = default
                 viewModel.updatePrompt(PromptDefaults.KEY_FOCUS_INTERRUPTED, default)
             },
-            sharedTransitionScope = sts,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 任务提醒卡片（仅提示词，无开关/时间）
-        ExpandablePromptCard(
-            cardKey = "reminder",
-            title = "任务提醒",
-            text = editingReminder,
-            isExpanded = expandedCard == PromptDefaults.KEY_REMINDER,
-            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_REMINDER) null else PromptDefaults.KEY_REMINDER },
-            onTextChange = { editingReminder = it },
-            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_REMINDER].orEmpty(),
-            onReset = {
+            onReminderReset = {
                 val default = PromptDefaults.REMINDER
                 editingReminder = default
                 viewModel.updatePrompt(PromptDefaults.KEY_REMINDER, default)
             },
-            sharedTransitionScope = sts,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
-        // 天气预警卡片（开关 + 提示词，无时间）
-        ExpandableReminderCard(
-            cardKey = "weather_alert",
-            title = "天气预警",
-            description = if (viewModel.weatherAlertEnabled) "下雨、降温、大风等天气变化时提醒你" else "已关闭",
-            enabled = viewModel.weatherAlertEnabled,
-            time = null,
-            promptText = editingWeatherAlert,
-            isExpanded = expandedCard == PromptDefaults.KEY_WEATHER_ALERT,
-            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_WEATHER_ALERT) null else PromptDefaults.KEY_WEATHER_ALERT },
-            onEnabledChange = { viewModel.updateWeatherAlertEnabled(it, context) },
-            onTimeChange = null,
-            onPromptChange = { editingWeatherAlert = it },
-            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_WEATHER_ALERT].orEmpty(),
-            onReset = {
+            onWeatherAlertReset = {
                 val default = PromptDefaults.WEATHER_ALERT
                 editingWeatherAlert = default
                 viewModel.updatePrompt(PromptDefaults.KEY_WEATHER_ALERT, default)
             },
+            context = context,
             sharedTransitionScope = sts,
         )
 
@@ -869,6 +688,394 @@ private fun SectionHeader(title: String) {
         fontWeight = FontWeight.Bold,
         // 区域标题使用 secondary，与主操作 primary 区分
         color = MaterialTheme.colorScheme.secondary,
+    )
+}
+
+/**
+ * 资料页顶部导航栏 -- 返回按钮 + 快捷操作按钮组。
+ *
+ * @param onBack 返回并保存按钮回调
+ * @param onStickersClick 点击表情包按钮时触发
+ * @param onPreferencesClick 点击"关于你"按钮时触发
+ * @param onMemoriesClick 点击记忆按钮时触发
+ */
+@Composable
+private fun ProfileTopBar(
+    onBack: () -> Unit,
+    onStickersClick: () -> Unit,
+    onPreferencesClick: () -> Unit,
+    onMemoriesClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        IconButton(onClick = onBack) {
+            Icon(
+                Icons.Default.ArrowBack,
+                contentDescription = "返回并保存",
+                modifier = Modifier.size(20.dp),
+            )
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // 表情包按钮：打开表情包管理面板
+            IconButton(onClick = onStickersClick) {
+                Icon(
+                    Icons.Outlined.SentimentSatisfied,
+                    contentDescription = "表情包",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // "关于你"按钮：打开用户偏好面板
+            IconButton(onClick = onPreferencesClick) {
+                Icon(
+                    Icons.Outlined.Bookmarks,
+                    contentDescription = "关于你",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // 记忆按钮：打开 Nion 的笔记本
+            IconButton(onClick = onMemoriesClick) {
+                Icon(
+                    Icons.Outlined.AutoAwesome,
+                    contentDescription = "记忆",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 资料页头像区域 -- 居中展示头像和"点击更换头像"提示文字。
+ *
+ * @param avatarUri 头像图片 URI
+ * @param name 当前编辑中的名字（无图片时用作首字母占位）
+ * @param companionName ViewModel 中的原始名字（name 为空时使用）
+ * @param onImagePickerLaunch 点击头像时触发，启动系统图片选择器
+ */
+@Composable
+private fun ProfileAvatarSection(
+    avatarUri: String?,
+    name: String,
+    companionName: String,
+    onImagePickerLaunch: () -> Unit,
+) {
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        CompanionAvatar(
+            name = name.ifEmpty { companionName },
+            avatarUri = avatarUri,
+            size = 72.dp,
+            modifier = Modifier.clickable { onImagePickerLaunch() },
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Text(
+            "点击更换头像",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+        )
+    }
+}
+
+/**
+ * 伙伴风格选择器 -- 横向可滚动的 Chip 组，选中项以主题色高亮。
+ *
+ * @param currentStyle 当前选中的风格 key
+ * @param onStyleChange 点击某个风格时触发，传入风格 key
+ */
+@Composable
+private fun CompanionStyleSelector(
+    currentStyle: String,
+    onStyleChange: (String) -> Unit,
+) {
+    Text(
+        "风格",
+        style = MaterialTheme.typography.labelMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(modifier = Modifier.height(6.dp))
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.horizontalScroll(rememberScrollState()),
+    ) {
+        ToolPhrasePool.STYLES.forEach { (key, label) ->
+            val isSelected = currentStyle == key
+            Surface(
+                shape = RoundedCornerShape(16.dp),
+                color = if (isSelected) MaterialTheme.colorScheme.primary
+                else MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                ) { onStyleChange(key) },
+            ) {
+                Text(
+                    label,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary
+                    else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 资料页"伙伴设定"区域 -- 包含人设和回复格式两张可展开卡片。
+ *
+ * @param editingPersona 当前编辑中的人设提示词
+ * @param editingFormat 当前编辑中的回复格式提示词
+ * @param expandedCard 当前展开的卡片 key，null 表示全部折叠
+ * @param onToggleExpand 切换卡片展开/折叠，传入卡片 key
+ * @param onPersonaChange 人设内容变更回调
+ * @param onFormatChange 回复格式内容变更回调
+ * @param onPersonaReset 恢复人设默认值回调
+ * @param onFormatReset 恢复回复格式默认值回调
+ * @param sharedTransitionScope SharedTransitionLayout 提供的作用域
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun ProfileCompanionSettings(
+    editingPersona: String,
+    editingFormat: String,
+    expandedCard: String?,
+    onToggleExpand: (String) -> Unit,
+    onPersonaChange: (String) -> Unit,
+    onFormatChange: (String) -> Unit,
+    onPersonaReset: () -> Unit,
+    onFormatReset: () -> Unit,
+    sharedTransitionScope: SharedTransitionScope,
+) {
+    SectionHeader("伙伴设定")
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // 人设卡片
+    ExpandablePromptCard(
+        cardKey = "persona",
+        title = "人设",
+        text = editingPersona,
+        isExpanded = expandedCard == PromptDefaults.KEY_PERSONA,
+        onToggleExpand = { onToggleExpand(PromptDefaults.KEY_PERSONA) },
+        onTextChange = onPersonaChange,
+        variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_PERSONA].orEmpty(),
+        onReset = onPersonaReset,
+        sharedTransitionScope = sharedTransitionScope,
+    )
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // 回复格式卡片
+    ExpandablePromptCard(
+        cardKey = "format",
+        title = "回复格式",
+        text = editingFormat,
+        isExpanded = expandedCard == PromptDefaults.KEY_FORMAT,
+        onToggleExpand = { onToggleExpand(PromptDefaults.KEY_FORMAT) },
+        onTextChange = onFormatChange,
+        variables = emptyList(),
+        onReset = onFormatReset,
+        sharedTransitionScope = sharedTransitionScope,
+    )
+}
+
+/**
+ * 资料页"提醒设定"区域 -- 包含早安/午间/晚间问候、专注鼓励/中断、任务提醒、天气预警卡片。
+ *
+ * @param viewModel 伙伴 ViewModel，读取问候开关/时间等配置
+ * @param expandedCard 当前展开的卡片 key，null 表示全部折叠
+ * @param onToggleExpand 切换卡片展开/折叠，传入卡片 key
+ * @param editingGreetingMorning 早安问候编辑内容
+ * @param editingGreetingNoon 午间检查编辑内容
+ * @param editingGreetingEvening 晚间总结编辑内容
+ * @param editingFocusComplete 专注鼓励编辑内容
+ * @param editingFocusInterrupted 专注中断编辑内容
+ * @param editingReminder 任务提醒编辑内容
+ * @param editingWeatherAlert 天气预警编辑内容
+ * @param onGreetingMorningChange 早安问候内容变更回调
+ * @param onGreetingNoonChange 午间检查内容变更回调
+ * @param onGreetingEveningChange 晚间总结内容变更回调
+ * @param onFocusCompleteChange 专注鼓励内容变更回调
+ * @param onFocusInterruptedChange 专注中断内容变更回调
+ * @param onReminderChange 任务提醒内容变更回调
+ * @param onWeatherAlertChange 天气预警内容变更回调
+ * @param onGreetingMorningReset 恢复早安问候默认值回调
+ * @param onGreetingNoonReset 恢复午间检查默认值回调
+ * @param onGreetingEveningReset 恢复晚间总结默认值回调
+ * @param onFocusCompleteReset 恢复专注鼓励默认值回调
+ * @param onFocusInterruptedReset 恢复专注中断默认值回调
+ * @param onReminderReset 恢复任务提醒默认值回调
+ * @param onWeatherAlertReset 恢复天气预警默认值回调
+ * @param context Android Context，用于 AlarmManager 注册
+ * @param sharedTransitionScope SharedTransitionLayout 提供的作用域
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun ProfileReminderSettings(
+    viewModel: CompanionViewModel,
+    expandedCard: String?,
+    onToggleExpand: (String) -> Unit,
+    editingGreetingMorning: String,
+    editingGreetingNoon: String,
+    editingGreetingEvening: String,
+    editingFocusComplete: String,
+    editingFocusInterrupted: String,
+    editingReminder: String,
+    editingWeatherAlert: String,
+    onGreetingMorningChange: (String) -> Unit,
+    onGreetingNoonChange: (String) -> Unit,
+    onGreetingEveningChange: (String) -> Unit,
+    onFocusCompleteChange: (String) -> Unit,
+    onFocusInterruptedChange: (String) -> Unit,
+    onReminderChange: (String) -> Unit,
+    onWeatherAlertChange: (String) -> Unit,
+    onGreetingMorningReset: () -> Unit,
+    onGreetingNoonReset: () -> Unit,
+    onGreetingEveningReset: () -> Unit,
+    onFocusCompleteReset: () -> Unit,
+    onFocusInterruptedReset: () -> Unit,
+    onReminderReset: () -> Unit,
+    onWeatherAlertReset: () -> Unit,
+    context: android.content.Context,
+    sharedTransitionScope: SharedTransitionScope,
+) {
+    SectionHeader("提醒设定")
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // 早安问候卡片（开关 + 时间 + 提示词）
+    ExpandableReminderCard(
+        cardKey = "greeting_morning",
+        title = "早安问候",
+        description = if (viewModel.morningEnabled) "每天 ${viewModel.morningTime} 汇总今日待办" else "已关闭",
+        enabled = viewModel.morningEnabled,
+        time = viewModel.morningTime,
+        promptText = editingGreetingMorning,
+        isExpanded = expandedCard == PromptDefaults.KEY_GREETING_MORNING,
+        onToggleExpand = { onToggleExpand(PromptDefaults.KEY_GREETING_MORNING) },
+        onEnabledChange = { viewModel.updateGreetingEnabled("morning", it, context) },
+        onTimeChange = { viewModel.updateGreetingTime("morning", it, context) },
+        onPromptChange = onGreetingMorningChange,
+        variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_GREETING_MORNING].orEmpty(),
+        onReset = onGreetingMorningReset,
+        sharedTransitionScope = sharedTransitionScope,
+    )
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // 午间检查卡片
+    ExpandableReminderCard(
+        cardKey = "greeting_noon",
+        title = "午间检查",
+        description = if (viewModel.noonEnabled) "每天 ${viewModel.noonTime} 检查上午完成情况" else "已关闭",
+        enabled = viewModel.noonEnabled,
+        time = viewModel.noonTime,
+        promptText = editingGreetingNoon,
+        isExpanded = expandedCard == PromptDefaults.KEY_GREETING_NOON,
+        onToggleExpand = { onToggleExpand(PromptDefaults.KEY_GREETING_NOON) },
+        onEnabledChange = { viewModel.updateGreetingEnabled("noon", it, context) },
+        onTimeChange = { viewModel.updateGreetingTime("noon", it, context) },
+        onPromptChange = onGreetingNoonChange,
+        variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_GREETING_NOON].orEmpty(),
+        onReset = onGreetingNoonReset,
+        sharedTransitionScope = sharedTransitionScope,
+    )
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // 晚间总结卡片
+    ExpandableReminderCard(
+        cardKey = "greeting_evening",
+        title = "晚间总结",
+        description = if (viewModel.eveningEnabled) "每天 ${viewModel.eveningTime} 总结今日成就" else "已关闭",
+        enabled = viewModel.eveningEnabled,
+        time = viewModel.eveningTime,
+        promptText = editingGreetingEvening,
+        isExpanded = expandedCard == PromptDefaults.KEY_GREETING_EVENING,
+        onToggleExpand = { onToggleExpand(PromptDefaults.KEY_GREETING_EVENING) },
+        onEnabledChange = { viewModel.updateGreetingEnabled("evening", it, context) },
+        onTimeChange = { viewModel.updateGreetingTime("evening", it, context) },
+        onPromptChange = onGreetingEveningChange,
+        variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_GREETING_EVENING].orEmpty(),
+        onReset = onGreetingEveningReset,
+        sharedTransitionScope = sharedTransitionScope,
+    )
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // 专注鼓励卡片（开关 + 提示词，无时间）
+    ExpandableReminderCard(
+        cardKey = "focus_completion",
+        title = "专注",
+        description = if (viewModel.focusCompletionEnabled) "完成专注时 ${viewModel.companionName} 会说些什么" else "已关闭",
+        enabled = viewModel.focusCompletionEnabled,
+        time = null,
+        promptText = editingFocusComplete,
+        isExpanded = expandedCard == PromptDefaults.KEY_FOCUS_COMPLETE,
+        onToggleExpand = { onToggleExpand(PromptDefaults.KEY_FOCUS_COMPLETE) },
+        onEnabledChange = { viewModel.updateFocusCompletionEnabled(it) },
+        onTimeChange = null,
+        onPromptChange = onFocusCompleteChange,
+        variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_FOCUS_COMPLETE].orEmpty(),
+        onReset = onFocusCompleteReset,
+        sharedTransitionScope = sharedTransitionScope,
+    )
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // 专注中断提示词卡片（仅提示词，无开关/时间，作为专注鼓励的补充）
+    ExpandablePromptCard(
+        cardKey = "focus_interrupted",
+        title = "专注中断",
+        text = editingFocusInterrupted,
+        isExpanded = expandedCard == PromptDefaults.KEY_FOCUS_INTERRUPTED,
+        onToggleExpand = { onToggleExpand(PromptDefaults.KEY_FOCUS_INTERRUPTED) },
+        onTextChange = onFocusInterruptedChange,
+        variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_FOCUS_INTERRUPTED].orEmpty(),
+        onReset = onFocusInterruptedReset,
+        sharedTransitionScope = sharedTransitionScope,
+    )
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // 任务提醒卡片（仅提示词，无开关/时间）
+    ExpandablePromptCard(
+        cardKey = "reminder",
+        title = "任务提醒",
+        text = editingReminder,
+        isExpanded = expandedCard == PromptDefaults.KEY_REMINDER,
+        onToggleExpand = { onToggleExpand(PromptDefaults.KEY_REMINDER) },
+        onTextChange = onReminderChange,
+        variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_REMINDER].orEmpty(),
+        onReset = onReminderReset,
+        sharedTransitionScope = sharedTransitionScope,
+    )
+
+    Spacer(modifier = Modifier.height(8.dp))
+
+    // 天气预警卡片（开关 + 提示词，无时间）
+    ExpandableReminderCard(
+        cardKey = "weather_alert",
+        title = "天气预警",
+        description = if (viewModel.weatherAlertEnabled) "下雨、降温、大风等天气变化时提醒你" else "已关闭",
+        enabled = viewModel.weatherAlertEnabled,
+        time = null,
+        promptText = editingWeatherAlert,
+        isExpanded = expandedCard == PromptDefaults.KEY_WEATHER_ALERT,
+        onToggleExpand = { onToggleExpand(PromptDefaults.KEY_WEATHER_ALERT) },
+        onEnabledChange = { viewModel.updateWeatherAlertEnabled(it, context) },
+        onTimeChange = null,
+        onPromptChange = onWeatherAlertChange,
+        variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_WEATHER_ALERT].orEmpty(),
+        onReset = onWeatherAlertReset,
+        sharedTransitionScope = sharedTransitionScope,
     )
 }
 
@@ -1409,11 +1616,171 @@ private fun AddPreferenceDialog(
 }
 
 /**
+ * 聊天界面顶部标题栏 —— 头像 + 名字 + 新对话/历史/切换按钮组。
+ *
+ * @param companionName 伙伴名称
+ * @param avatarUri 头像 URI
+ * @param onAvatarClick 点击头像时触发，切换到编辑伙伴信息页面
+ * @param onNewChat 点击新建对话时触发
+ * @param onHistoryClick 点击历史记录时触发
+ * @param onSwitchClick 点击切换配置时触发
+ */
+@Composable
+private fun ChatHeader(
+    companionName: String,
+    avatarUri: String?,
+    onAvatarClick: () -> Unit,
+    onNewChat: () -> Unit,
+    onHistoryClick: () -> Unit,
+    onSwitchClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 左侧：头像 + 名字 —— 点击任意一个进入编辑伙伴信息页面
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.clickable { onAvatarClick() },
+        ) {
+            CompanionAvatar(
+                name = companionName,
+                avatarUri = avatarUri,
+                size = 36.dp,
+            )
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                companionName,
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurface,
+            )
+        }
+        // 右侧按钮组：新对话 + 历史记录 + 切换配置
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            // 新对话按钮：保存当前对话并开始新对话
+            IconButton(onClick = onNewChat) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = "新对话",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // 历史记录按钮：查看历史对话列表
+            IconButton(onClick = onHistoryClick) {
+                Icon(
+                    Icons.Default.History,
+                    contentDescription = "历史记录",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            // 切换配置按钮：打开多配置选择面板
+            IconButton(onClick = onSwitchClick) {
+                Icon(
+                    Icons.Default.SwapHoriz,
+                    contentDescription = "切换配置",
+                    modifier = Modifier.size(20.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 聊天输入框 —— 无焦点时灰色边框，有焦点时主题色边框 + 底色。
+ * 包含多行文本输入框和发送按钮。
+ *
+ * @param inputText 当前输入文本
+ * @param onInputTextChanged 输入内容变更回调
+ * @param onSendClick 点击发送按钮时触发
+ * @param isLoading 是否正在加载（加载时禁用输入和发送）
+ */
+@Composable
+private fun ChatInputBar(
+    inputText: String,
+    onInputTextChanged: (String) -> Unit,
+    onSendClick: () -> Unit,
+    isLoading: Boolean,
+) {
+    // 焦点状态：控制边框和底色样式切换
+    val focusState = remember { mutableStateOf(false) }
+    val isFocused = focusState.value
+    Surface(
+        shape = RoundedCornerShape(24.dp),
+        color = MaterialTheme.colorScheme.primaryContainer.copy(
+            alpha = if (isFocused) 0.12f else 0f,
+        ),
+        border = androidx.compose.foundation.BorderStroke(
+            2.dp,
+            if (isFocused)
+                MaterialTheme.colorScheme.primary
+            else
+                MaterialTheme.colorScheme.outline,
+        ),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            BasicTextField(
+                value = inputText,
+                onValueChange = onInputTextChanged,
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(vertical = 10.dp)
+                    .onFocusChanged { focusState.value = it.isFocused },
+                textStyle = MaterialTheme.typography.bodyLarge.copy(
+                    color = MaterialTheme.colorScheme.onSurface,
+                ),
+                maxLines = 3,
+                // 启用状态跟随 isLoading：加载中时不可输入
+                enabled = !isLoading,
+                decorationBox = { innerTextField ->
+                    // 占位符：输入为空时显示提示文字，文字和输入框叠加
+                    Box(Modifier.fillMaxWidth()) {
+                        if (inputText.isEmpty()) {
+                            Text(
+                                "说点什么...",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+                            )
+                        }
+                        innerTextField()
+                    }
+                },
+            )
+            // 发送按钮 —— 有内容时主题色高亮，无内容时灰色淡化
+            IconButton(
+                onClick = onSendClick,
+                enabled = inputText.isNotBlank() && !isLoading,
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Send,
+                    contentDescription = "发送",
+                    tint = if (inputText.isNotBlank() && !isLoading)
+                        MaterialTheme.colorScheme.primary
+                    else
+                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        }
+    }
+}
+
+/**
  * 聊天界面内容 —— 消息列表 + 输入框。
  *
  * @param viewModel 伙伴 ViewModel
  * @param isVisible 面板可见性，用于自动滚动
  * @param onAvatarClick 点击头像时触发，切换到编辑伙伴信息页面
+ * @param onNewChat 点击新建对话图标时触发，清空当前对话开始新会话
  * @param onHistoryClick 点击历史图标时触发，切换到历史记录面板
  * @param onSwitchClick 点击切换图标时触发，切换到多配置选择面板
  */
@@ -1507,60 +1874,14 @@ private fun ChatContent(
             .padding(vertical = 24.dp, horizontal = 16.dp),
     ) {
         // 顶部标题栏：头像（点击编辑） + 伙伴名字 + 历史/切换按钮
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // 左侧：头像 + 名字 —— 点击任意一个进入编辑伙伴信息页面
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clickable { onAvatarClick() },
-            ) {
-                CompanionAvatar(
-                    name = viewModel.companionName,
-                    avatarUri = viewModel.companionAvatarUri,
-                    size = 36.dp,
-                )
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    viewModel.companionName,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            // 右侧按钮组：新对话 + 历史记录 + 切换配置
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // 新对话按钮：保存当前对话并开始新对话
-                IconButton(onClick = onNewChat) {
-                    Icon(
-                        Icons.Default.Add,
-                        contentDescription = "新对话",
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                // 历史记录按钮：查看历史对话列表
-                IconButton(onClick = onHistoryClick) {
-                    Icon(
-                        Icons.Default.History,
-                        contentDescription = "历史记录",
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                // 切换配置按钮：打开多配置选择面板
-                IconButton(onClick = onSwitchClick) {
-                    Icon(
-                        Icons.Default.SwapHoriz,
-                        contentDescription = "切换配置",
-                        modifier = Modifier.size(20.dp),
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
+        ChatHeader(
+            companionName = viewModel.companionName,
+            avatarUri = viewModel.companionAvatarUri,
+            onAvatarClick = onAvatarClick,
+            onNewChat = onNewChat,
+            onHistoryClick = onHistoryClick,
+            onSwitchClick = onSwitchClick,
+        )
         Spacer(modifier = Modifier.height(16.dp))
 
         // 消息列表 —— 为空时显示占位提示
@@ -1662,70 +1983,128 @@ private fun ChatContent(
             item { Spacer(modifier = Modifier.height(8.dp)) }
         }
 
-        // 输入框容器 —— 无焦点时灰色，有焦点时切换为主题色
-        val focusState = remember { mutableStateOf(false) }
-        val isFocused = focusState.value
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(
-                alpha = if (isFocused) 0.12f else 0f,
-            ),
-            border = androidx.compose.foundation.BorderStroke(
-                2.dp,
-                if (isFocused)
-                    MaterialTheme.colorScheme.primary
-                else
-                    MaterialTheme.colorScheme.outline,
-            ),
-            modifier = Modifier.fillMaxWidth(),
+        // 输入框容器
+        ChatInputBar(
+            inputText = inputText,
+            onInputTextChanged = { viewModel.inputText = it },
+            onSendClick = { viewModel.sendMessage() },
+            isLoading = isLoading,
+        )
+    }
+}
+
+/**
+ * 工具执行消息行 —— 简洁的状态行，显示执行中/已完成图标 + 操作描述。
+ * 不使用气泡样式，不支持长按操作。
+ *
+ * @param message 工具消息数据
+ */
+@Composable
+private fun ToolMessageRow(message: ChatMessage) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp, horizontal = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        if (message.toolDone) {
+            // 已完成：显示右箭头
+            Text(
+                "→",
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+            )
+        } else {
+            // 执行中：显示加载指示器
+            CircularProgressIndicator(
+                modifier = Modifier.size(12.dp),
+                strokeWidth = 1.5.dp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            message.text,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
+        )
+    }
+}
+
+/**
+ * 消息操作栏 —— 嵌入气泡内部底部的复制/重试/删除按钮组。
+ * 选中时淡入 + 高度展开，取消选中时淡出 + 高度收起。
+ *
+ * @param isVisible 操作栏是否可见（消息被长按选中时为 true）
+ * @param isUser 是否为用户消息（影响按钮颜色和是否显示重试按钮）
+ * @param onCopy 点击复制按钮时触发
+ * @param onRetry 点击重试按钮时触发（仅 AI 消息有效）
+ * @param onDelete 点击删除按钮时触发
+ */
+@Composable
+private fun MessageActionBar(
+    isVisible: Boolean,
+    isUser: Boolean,
+    onCopy: () -> Unit,
+    onRetry: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    // 使用 AnimatedVisibility 实现淡入淡出 + 高度展开/收起
+    AnimatedVisibility(
+        visible = isVisible,
+        enter = fadeIn(tween(200)) + expandVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium)),
+        exit = fadeOut(tween(150)) + shrinkVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium)),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 8.dp, end = 4.dp, bottom = 4.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
+            // 复制按钮
+            IconButton(
+                onClick = onCopy,
+                modifier = Modifier.size(32.dp),
             ) {
-                BasicTextField(
-                    value = inputText,
-                    onValueChange = { viewModel.inputText = it },
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(vertical = 10.dp)
-                        .onFocusChanged { focusState.value = it.isFocused },
-                    textStyle = MaterialTheme.typography.bodyLarge.copy(
-                        color = MaterialTheme.colorScheme.onSurface,
-                    ),
-                    maxLines = 3,
-                    // 启用状态跟随 isLoading：加载中时不可输入
-                    enabled = !isLoading,
-                    decorationBox = { innerTextField ->
-                        // 占位符：输入为空时显示提示文字，文字和输入框叠加
-                        Box(Modifier.fillMaxWidth()) {
-                            if (inputText.isEmpty()) {
-                                Text(
-                                    "说点什么...",
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
-                                )
-                            }
-                            innerTextField()
-                        }
-                    },
+                Icon(
+                    Icons.Default.ContentCopy,
+                    contentDescription = "复制",
+                    modifier = Modifier.size(16.dp),
+                    tint = if (isUser)
+                        MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
+                    else
+                        MaterialTheme.colorScheme.onSurfaceVariant,
                 )
-                // 发送按钮 —— 有内容时主题色高亮，无内容时灰色淡化
+            }
+            // 重试按钮：仅 AI 消息
+            if (!isUser) {
                 IconButton(
-                    onClick = { viewModel.sendMessage() },
-                    enabled = inputText.isNotBlank() && !isLoading,
+                    onClick = onRetry,
+                    modifier = Modifier.size(32.dp),
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "发送",
-                        tint = if (inputText.isNotBlank() && !isLoading)
-                            MaterialTheme.colorScheme.primary
-                        else
-                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
-                        modifier = Modifier.size(20.dp),
+                        Icons.Default.Refresh,
+                        contentDescription = "重试",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+            }
+            // 删除按钮
+            IconButton(
+                onClick = onDelete,
+                modifier = Modifier.size(32.dp),
+            ) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "删除",
+                    modifier = Modifier.size(16.dp),
+                    tint = if (isUser)
+                        MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f)
+                    else
+                        MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
+                )
             }
         }
     }
@@ -1760,36 +2139,9 @@ private fun MessageBubble(
     onDelete: () -> Unit = {},
 ) {
     val isUser = message.isFromUser
-    // 工具消息：简洁状态行（小字、灰色、左侧图标），不渲染气泡，不支持长按操作
+    // 工具消息：简洁状态行，不渲染气泡，不支持长按操作
     if (message.isToolMessage) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 2.dp, horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            if (message.toolDone) {
-                // 已完成：显示右箭头
-                Text(
-                    "→",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
-                )
-            } else {
-                // 执行中：显示加载指示器
-                CircularProgressIndicator(
-                    modifier = Modifier.size(12.dp),
-                    strokeWidth = 1.5.dp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
-                )
-            }
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                message.text,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
-            )
-        }
+        ToolMessageRow(message)
         return
     }
 
@@ -1866,65 +2218,13 @@ private fun MessageBubble(
                     }
                 }
                 // ── 操作栏（选中时显示，嵌入气泡内部底部）──
-                // 使用 AnimatedVisibility 实现淡入淡出 + 高度展开/收起
-                AnimatedVisibility(
-                    visible = isSelected,
-                    enter = fadeIn(tween(200)) + expandVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium)),
-                    exit = fadeOut(tween(150)) + shrinkVertically(spring(dampingRatio = 0.7f, stiffness = Spring.StiffnessMedium)),
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(start = 8.dp, end = 4.dp, bottom = 4.dp),
-                        horizontalArrangement = Arrangement.End,
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        // 复制按钮
-                        IconButton(
-                            onClick = onCopy,
-                            modifier = Modifier.size(32.dp),
-                        ) {
-                            Icon(
-                                Icons.Default.ContentCopy,
-                                contentDescription = "复制",
-                                modifier = Modifier.size(16.dp),
-                                tint = if (isUser)
-                                    MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.7f)
-                                else
-                                    MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                        // 重试按钮：仅 AI 消息
-                        if (!isUser) {
-                            IconButton(
-                                onClick = onRetry,
-                                modifier = Modifier.size(32.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Refresh,
-                                    contentDescription = "重试",
-                                    modifier = Modifier.size(16.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                        }
-                        // 删除按钮
-                        IconButton(
-                            onClick = onDelete,
-                            modifier = Modifier.size(32.dp),
-                        ) {
-                            Icon(
-                                Icons.Default.Delete,
-                                contentDescription = "删除",
-                                modifier = Modifier.size(16.dp),
-                                tint = if (isUser)
-                                    MaterialTheme.colorScheme.onPrimary.copy(alpha = 0.6f)
-                                else
-                                    MaterialTheme.colorScheme.error.copy(alpha = 0.7f),
-                            )
-                        }
-                    }
-                }
+                MessageActionBar(
+                    isVisible = isSelected,
+                    isUser = isUser,
+                    onCopy = onCopy,
+                    onRetry = onRetry,
+                    onDelete = onDelete,
+                )
             }
         }
         Spacer(modifier = Modifier.height(4.dp))

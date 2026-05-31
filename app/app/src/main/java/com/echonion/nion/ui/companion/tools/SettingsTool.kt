@@ -91,7 +91,13 @@ object SettingsTool : Tool {
                         put("delete_theme")
                         put("reset_theme")
                     })
-                    put("description", "操作类型：get_theme=获取当前配色, list_themes=列出所有主题, create_theme=创建自定义主题, switch_theme=切换主题, update_colors=修改颜色, rename_theme=重命名, delete_theme=删除, reset_theme=恢复预设默认")
+                    put(
+                        "description",
+                        "操作类型：get_theme=获取当前配色, list_themes=列出所有主题, " +
+                            "create_theme=创建自定义主题, switch_theme=切换主题, " +
+                            "update_colors=修改颜色, rename_theme=重命名, " +
+                            "delete_theme=删除, reset_theme=恢复预设默认"
+                    )
                 })
                 put("name", JSONObject().apply {
                     put("type", "string")
