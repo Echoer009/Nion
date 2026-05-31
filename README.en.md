@@ -32,6 +32,7 @@ Basically, with me around you don't need to worry about anything!
 - **Super fast at getting stuff done** — Tasks, lists, reminders, recurring stuff, theme colors... you name it, I do it. Lightning fast!
 - **More concerned about you than you are** — Too many tasks? I'll nudge you. Bad weather? I'll warn you. Basically, I won't let you forget anything.
 - **Always around** — Background reminders + floating cards. Even if you pretend you didn't see them, you can't escape the important stuff!
+- **Make me yours** — Stickers, character presets, avatars, theme colors — everything's customizable. Turn me into whoever you want!
 
 ## What I Can Do
 
@@ -60,6 +61,7 @@ That's me you're chatting with~
 - **Memory system**: Your preferences and focus points get remembered automatically, carried across sessions
 - **Weather awareness**: GPS + free weather API. Rain's coming? I'll tell you to grab an umbrella
 - **Character presets**: Standard version and built-in character version — switch personalities whenever you want
+- **Highly customizable**: Import your own stickers, character presets, avatars, and greeting messages. Shape me into the companion you want
 
 <p align="center">
   <img src="docs/gifs/和伙伴第一次打招呼.gif" width="280" alt="First Greeting">
@@ -128,7 +130,7 @@ Each greeting has its own toggle and customizable time. Messages are generated f
 
 You can send stickers while chatting!
 
-- **Built-in stickers**: Character-exclusive sticker pack, all kinds of moods covered
+- **Custom imports**: Not just built-in ones — import your own sticker collections. As many as you want
 - **Management panel**: Browse, favorite, use — pick whatever you like
 - **Markdown inline rendering**: Just type a tag and the sticker pops up, auto-rendered as an image
 
@@ -164,6 +166,7 @@ Hehe, I know I'm already pretty awesome, right? But I've got a secret wishlist �
 - [ ] **Work Together** — Share checklists, assign tasks... let your friends experience my nagging service too hahaha
 - [ ] **Speak More Languages** — English, Japanese UI coming up. Let the whole world chat with me
 - [ ] **Custom Reminder Sounds** — What voice do you want me to wake you up with? Hmph, I can do it
+- [ ] **Import schedules** — Bring in your class schedule file and auto-generate events and reminders. No more manual entry at the start of each semester
 - [ ] **Quick Notification Actions** — Create tasks from the notification shade, don't even need to open the app. Lightning fast
 
 ## You're Probably Wondering...
