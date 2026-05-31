@@ -3,6 +3,7 @@ package com.echonion.nion.ui.companion
 import com.echonion.nion.ui.theme.NionAlpha
 import android.util.Log
 import android.graphics.BitmapFactory
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -60,7 +61,7 @@ private const val TAG = "MarkdownText"
  *
  * 支持的语法：
  * - 标题：`#` ~ `######`（以不同字号 + 加粗展示）
- * - 粗体：`**text**`、斜体：`*text*`、高亮：`==text==`、内联代码：`` `code` ``、链接 `[text](url)`
+ * - 粗体：`**text**`、斜体：`*text*`、高亮：`==text==`、内联代码：`` `code` ``、链接 `[text](url)`、剧透：`||text||`
  * - 代码块：``` ``` ``` 包裹的多行代码块
  * - 无序列表：`- ` / `* `、有序列表：`1. `
  * - 任务列表：`- [ ]` / `- [x]`（带勾选框样式）
@@ -188,10 +189,16 @@ private sealed class MdBlock {
 
 /**
  * 任务列表条目 —— 对应 `- [x] 文字` 或 `- [ ] 文字`。
- * @param checked 是否已完成（`[x]` 为 true，`[ ]` 为 false）
- * @param text    条目文本（已去除 `- [x]` 前缀）
+ * @property checked 是否已完成（`[x]` 为 true，`[ ]` 为 false）
+ * @property text    条目文本（已去除 `- [x]` 前缀）
  */
 data class TaskItem(val checked: Boolean, val text: String)
+
+/**
+ * 块级解析的返回结果，包含解析得到的块对象和下一个待处理行的索引。
+ * 用于 parseBlocks 及其提取的子函数之间传递解析状态。
+ */
+private data class BlockParseResult(val block: MdBlock, val nextIndex: Int)
 
 
 // ──────────── 块级解析 ────────────
@@ -218,129 +225,190 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
     while (i < lines.size) {
         val line = lines[i]
 
-        when {
-            // ── 代码块 ──
-            line.trimStart().startsWith("```") -> {
-                val codeLines = mutableListOf<String>()
-                i++
-                // 收集代码行直到遇到结束的 ```
-                while (i < lines.size && !lines[i].trimStart().startsWith("```")) {
-                    codeLines.add(lines[i])
-                    i++
-                }
-                // 去掉末尾空行
-                while (codeLines.isNotEmpty() && codeLines.last().isBlank()) {
-                    codeLines.removeAt(codeLines.lastIndex)
-                }
-                val codeContent = codeLines.joinToString("\n")
-                blocks.add(MdBlock.CodeBlock(codeContent))
-                i++ // 跳过结束的 ```
-            }
-
-            // ── 标题 ──
+        // 按优先级依次尝试各类块级解析器，返回 null 表示跳过（空行）
+        val result: BlockParseResult? = when {
+            line.trimStart().startsWith("```") -> parseCodeBlock(lines, i)
             HEADER_REGEX.find(line) != null -> {
                 val match = HEADER_REGEX.find(line)!!
-                val level = match.groupValues[1].length
-                val text = match.groupValues[2].trim()
-                blocks.add(MdBlock.Header(level, text))
-                i++
+                BlockParseResult(
+                    MdBlock.Header(match.groupValues[1].length, match.groupValues[2].trim()),
+                    i + 1,
+                )
             }
+            isTableLine(line) -> parseTableBlock(lines, i)
+            line.trimStart().startsWith(">") -> parseBlockquoteBlock(lines, i)
+            TASK_LIST_REGEX.matches(line) -> parseTaskListBlock(lines, i)
+            UNORDERED_LIST_REGEX.matches(line) -> parseUnorderedListBlock(lines, i)
+            ORDERED_LIST_REGEX.matches(line) -> parseOrderedListBlock(lines, i)
+            HR_REGEX.matches(line) -> BlockParseResult(MdBlock.HorizontalRule, i + 1)
+            line.isBlank() -> null // 空行跳过
+            else -> parseParagraphBlock(lines, i)
+        }
 
-            // ── 表格 ──
-            isTableLine(line) -> {
-                val tableLines = mutableListOf<String>()
-                // 连续收集表格行
-                while (i < lines.size && isTableLine(lines[i])) {
-                    tableLines.add(lines[i])
-                    i++
-                }
-                val table = parseTable(tableLines)
-                if (table != null) blocks.add(table)
-                else blocks.add(MdBlock.Paragraph(tableLines.joinToString("\n")))
-            }
-
-            // ── 引用块 > ──
-            line.trimStart().startsWith(">") -> {
-                val quoteLines = mutableListOf<String>()
-                // 连续收集以 > 开头的行
-                while (i < lines.size && lines[i].trimStart().startsWith(">")) {
-                    // 去除 > 前缀和可能的一个空格
-                    val content = lines[i].trimStart().removePrefix(">").let {
-                        if (it.startsWith(" ")) it.substring(1) else it
-                    }
-                    quoteLines.add(content)
-                    i++
-                }
-                blocks.add(MdBlock.Blockquote(quoteLines))
-            }
-
-            // ── 任务列表 - [ ] / - [x] ──
-            TASK_LIST_REGEX.matches(line) -> {
-                val items = mutableListOf<TaskItem>()
-                // 连续收集任务列表行
-                while (i < lines.size && TASK_LIST_REGEX.matches(lines[i])) {
-                    val checked = lines[i].contains("[x]", ignoreCase = true)
-                    // 去除 `- [x] ` 或 `- [ ] ` 前缀
-                    val text = TASK_PREFIX_REGEX.replaceFirst(lines[i], "")
-                    items.add(TaskItem(checked = checked, text = text))
-                    i++
-                }
-                blocks.add(MdBlock.TaskListBlock(items))
-            }
-
-            // ── 无序列表（不匹配任务列表的 - [ ] 格式） ──
-            UNORDERED_LIST_REGEX.matches(line) -> {
-                val items = mutableListOf<String>()
-                while (i < lines.size && UNORDERED_LIST_REGEX.matches(lines[i])) {
-                    items.add(UNORDERED_PREFIX_REGEX.replaceFirst(lines[i], ""))
-                    i++
-                }
-                blocks.add(MdBlock.ListBlock(ordered = false, items = items))
-            }
-
-            // ── 有序列表 ──
-            ORDERED_LIST_REGEX.matches(line) -> {
-                val items = mutableListOf<String>()
-                while (i < lines.size && ORDERED_LIST_REGEX.matches(lines[i])) {
-                    items.add(ORDERED_PREFIX_REGEX.replaceFirst(lines[i], ""))
-                    i++
-                }
-                blocks.add(MdBlock.ListBlock(ordered = true, items = items))
-            }
-
-            // ── 水平分割线 ──
-            HR_REGEX.matches(line) -> {
-                blocks.add(MdBlock.HorizontalRule)
-                i++
-            }
-
-            // ── 空行 ──
-            line.isBlank() -> {
-                i++
-            }
-
-            // ── 普通段落（兜底：连续的非特殊行合并） ──
-            else -> {
-                val paragraphLines = mutableListOf<String>()
-                while (i < lines.size &&
-                    lines[i].isNotBlank() &&
-                    !lines[i].trimStart().startsWith("```") &&
-                    !PARAGRAPH_HEADER_REGEX.matches(lines[i]) &&
-                    !isTableLine(lines[i]) &&
-                    !lines[i].trimStart().startsWith(">") &&
-                    !UNORDERED_LIST_REGEX.matches(lines[i]) &&
-                    !ORDERED_LIST_REGEX.matches(lines[i])
-                ) {
-                    paragraphLines.add(lines[i])
-                    i++
-                }
-                if (paragraphLines.isNotEmpty()) {
-                    blocks.add(MdBlock.Paragraph(paragraphLines.joinToString("\n")))
-                }
-            }
+        if (result != null) {
+            blocks.add(result.block)
+            i = result.nextIndex
+        } else {
+            i++
         }
     }
     return blocks
+}
+
+// ──────────── 块级解析子函数 ────────────
+
+/**
+ * 解析代码块：从 ``` 开始到 ``` 结束的所有行。
+ * 自动去除末尾空行，保留代码内容原样（不做内联解析）。
+ *
+ * @param lines     Markdown 全部行
+ * @param startIndex 代码块起始行索引（``` 所在行）
+ * @return 解析结果，包含 CodeBlock 和下一个待处理行的索引
+ */
+private fun parseCodeBlock(lines: List<String>, startIndex: Int): BlockParseResult {
+    val codeLines = mutableListOf<String>()
+    var i = startIndex + 1
+    // 收集代码行直到遇到结束的 ```
+    while (i < lines.size && !lines[i].trimStart().startsWith("```")) {
+        codeLines.add(lines[i])
+        i++
+    }
+    // 去掉末尾空行，保持代码块整洁
+    while (codeLines.isNotEmpty() && codeLines.last().isBlank()) {
+        codeLines.removeAt(codeLines.lastIndex)
+    }
+    val codeContent = codeLines.joinToString("\n")
+    // i + 1 跳过结束的 ```
+    return BlockParseResult(MdBlock.CodeBlock(codeContent), i + 1)
+}
+
+/**
+ * 解析表格块：连续收集表格行并尝试解析为 TableBlock。
+ * 如果 parseTable 返回 null（格式不合法），降级为普通段落。
+ *
+ * @param lines     Markdown 全部行
+ * @param startIndex 表格起始行索引
+ * @return 解析结果，包含 TableBlock 或降级的 Paragraph
+ */
+private fun parseTableBlock(lines: List<String>, startIndex: Int): BlockParseResult {
+    val tableLines = mutableListOf<String>()
+    var i = startIndex
+    // 连续收集表格行
+    while (i < lines.size && isTableLine(lines[i])) {
+        tableLines.add(lines[i])
+        i++
+    }
+    val table = parseTable(tableLines)
+    // 解析失败时降级为普通段落
+    val block = if (table != null) table else MdBlock.Paragraph(tableLines.joinToString("\n"))
+    return BlockParseResult(block, i)
+}
+
+/**
+ * 解析引用块：连续收集以 > 开头的行。
+ * 自动去除每行的 > 前缀和可能的一个空格。
+ *
+ * @param lines     Markdown 全部行
+ * @param startIndex 引用块起始行索引
+ * @return 解析结果，包含 Blockquote 和下一个待处理行的索引
+ */
+private fun parseBlockquoteBlock(lines: List<String>, startIndex: Int): BlockParseResult {
+    val quoteLines = mutableListOf<String>()
+    var i = startIndex
+    // 连续收集以 > 开头的行
+    while (i < lines.size && lines[i].trimStart().startsWith(">")) {
+        // 去除 > 前缀和可能的一个空格
+        val content = lines[i].trimStart().removePrefix(">").let {
+            if (it.startsWith(" ")) it.substring(1) else it
+        }
+        quoteLines.add(content)
+        i++
+    }
+    return BlockParseResult(MdBlock.Blockquote(quoteLines), i)
+}
+
+/**
+ * 解析任务列表块：连续收集 `- [ ]` / `- [x]` 行。
+ * 每行提取勾选状态（checked）和去除前缀后的文本。
+ *
+ * @param lines     Markdown 全部行
+ * @param startIndex 任务列表起始行索引
+ * @return 解析结果，包含 TaskListBlock 和下一个待处理行的索引
+ */
+private fun parseTaskListBlock(lines: List<String>, startIndex: Int): BlockParseResult {
+    val items = mutableListOf<TaskItem>()
+    var i = startIndex
+    // 连续收集任务列表行
+    while (i < lines.size && TASK_LIST_REGEX.matches(lines[i])) {
+        val checked = lines[i].contains("[x]", ignoreCase = true)
+        // 去除 `- [x] ` 或 `- [ ] ` 前缀
+        val text = TASK_PREFIX_REGEX.replaceFirst(lines[i], "")
+        items.add(TaskItem(checked = checked, text = text))
+        i++
+    }
+    return BlockParseResult(MdBlock.TaskListBlock(items), i)
+}
+
+/**
+ * 解析无序列表块：连续收集 `- ` / `* ` 开头的行。
+ *
+ * @param lines     Markdown 全部行
+ * @param startIndex 无序列表起始行索引
+ * @return 解析结果，包含 ListBlock(ordered=false) 和下一个待处理行的索引
+ */
+private fun parseUnorderedListBlock(lines: List<String>, startIndex: Int): BlockParseResult {
+    val items = mutableListOf<String>()
+    var i = startIndex
+    while (i < lines.size && UNORDERED_LIST_REGEX.matches(lines[i])) {
+        items.add(UNORDERED_PREFIX_REGEX.replaceFirst(lines[i], ""))
+        i++
+    }
+    return BlockParseResult(MdBlock.ListBlock(ordered = false, items = items), i)
+}
+
+/**
+ * 解析有序列表块：连续收集 `1. ` 格式的行。
+ *
+ * @param lines     Markdown 全部行
+ * @param startIndex 有序列表起始行索引
+ * @return 解析结果，包含 ListBlock(ordered=true) 和下一个待处理行的索引
+ */
+private fun parseOrderedListBlock(lines: List<String>, startIndex: Int): BlockParseResult {
+    val items = mutableListOf<String>()
+    var i = startIndex
+    while (i < lines.size && ORDERED_LIST_REGEX.matches(lines[i])) {
+        items.add(ORDERED_PREFIX_REGEX.replaceFirst(lines[i], ""))
+        i++
+    }
+    return BlockParseResult(MdBlock.ListBlock(ordered = true, items = items), i)
+}
+
+/**
+ * 解析普通段落：连续收集非特殊行直到遇到空行或块级语法。
+ * 通过多条件判断确保段落不会吞入标题、代码块、表格、引用、列表等块级元素。
+ *
+ * @param lines     Markdown 全部行
+ * @param startIndex 段落起始行索引
+ * @return 解析结果；如果无内容可收集则返回 null（理论上不应发生）
+ */
+private fun parseParagraphBlock(lines: List<String>, startIndex: Int): BlockParseResult? {
+    val paragraphLines = mutableListOf<String>()
+    var i = startIndex
+    // 连续收集非特殊行：空行、代码块、标题、表格、引用、列表都会终止段落
+    while (i < lines.size &&
+        lines[i].isNotBlank() &&
+        !lines[i].trimStart().startsWith("```") &&
+        !PARAGRAPH_HEADER_REGEX.matches(lines[i]) &&
+        !isTableLine(lines[i]) &&
+        !lines[i].trimStart().startsWith(">") &&
+        !UNORDERED_LIST_REGEX.matches(lines[i]) &&
+        !ORDERED_LIST_REGEX.matches(lines[i])
+    ) {
+        paragraphLines.add(lines[i])
+        i++
+    }
+    if (paragraphLines.isEmpty()) return null
+    return BlockParseResult(MdBlock.Paragraph(paragraphLines.joinToString("\n")), i)
 }
 
 // ──────────── 表格解析 ────────────
@@ -706,14 +774,16 @@ private val STICKER_TAG_REGEX = Regex("""<([^<>]+)>""")
 /**
  * 表情包内联解析结果 —— 包含解析后的 AnnotatedString 和发现的表情包标签集合。
  *
- * @param annotatedString 解析后的富文本
- * @param foundStickerTags 文本中发现的表情包标签名集合
- * @param stickerOffsets \uFFFC 占位符在 AnnotatedString 中的偏移量 → 对应标签名
+ * @property annotatedString 解析后的富文本
+ * @property foundStickerTags 文本中发现的表情包标签名集合
+ * @property stickerOffsets \uFFFC 占位符在 AnnotatedString 中的偏移量 → 对应标签名
  */
 private data class InlineParseResult(
     val annotatedString: AnnotatedString,
     val foundStickerTags: Set<String>,
     val stickerOffsets: Map<Int, String>,
+    /** 所有 ||剧透|| 文本在 AnnotatedString 中的范围，供 StickerAwareText 按范围切换显示 */
+    val spoilerRanges: List<SpoilerRange> = emptyList(),
 )
 
 /**
@@ -740,8 +810,11 @@ private fun StickerAwareText(
     maxLines: Int = Int.MAX_VALUE,
     overflow: TextOverflow = TextOverflow.Clip,
 ) {
-    // 无表情包时使用普通 Text，避免 overlay 开销
-    if (result.stickerOffsets.isEmpty()) {
+    val hasStickers = result.stickerOffsets.isNotEmpty()
+    val hasSpoilers = result.spoilerRanges.isNotEmpty()
+
+    // 无表情包且无剧透时使用普通 Text，避免 overlay 开销
+    if (!hasStickers && !hasSpoilers) {
         Text(
             text = result.annotatedString,
             style = style,
@@ -755,12 +828,18 @@ private fun StickerAwareText(
         return
     }
 
-    // 从 TextLayoutResult 中获取每个 \uFFFC 占位符的像素矩形
     val density = LocalDensity.current
+    // 从 TextLayoutResult 中获取表情占位符的像素矩形
     var stickerRects by remember(result.annotatedString) {
         mutableStateOf<List<Rect>>(emptyList())
     }
     val offsetTagPairs = result.stickerOffsets.entries.sortedBy { it.key }
+
+    // 记录每次 Text 布局后的 TextLayoutResult，用于计算剧透区域矩形
+    var textLayoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
+
+    // 记录每个剧透区域是否已被用户点击揭示，key 为 SpoilerRange 的起始偏移
+    val revealedSpoilers = remember { mutableSetOf<Int>() }
 
     Box(modifier = modifier) {
         Text(
@@ -771,18 +850,19 @@ private fun StickerAwareText(
             maxLines = maxLines,
             overflow = overflow,
             softWrap = true,
-            onTextLayout = { textLayoutResult ->
-                // 遍历所有占位符偏移量，获取其像素矩形
+            onTextLayout = { layoutResult ->
+                textLayoutResult = layoutResult
+                // 遍历所有表情占位符偏移量，获取其像素矩形
                 val rects = offsetTagPairs.mapNotNull { (offset, _) ->
                     try {
-                        textLayoutResult.getBoundingBox(offset)
+                        layoutResult.getBoundingBox(offset)
                     } catch (_: Exception) { null }
                 }
                 stickerRects = rects
             },
         )
 
-        // 在占位符位置覆盖表情图片（通过 StickerService 自适应采样，消除锯齿）
+        // 在表情占位符位置覆盖表情图片（通过 StickerService 自适应采样，消除锯齿）
         for ((index, rect) in stickerRects.withIndex()) {
             if (index >= offsetTagPairs.size) break
             val tag = offsetTagPairs[index].value
@@ -810,7 +890,247 @@ private fun StickerAwareText(
                 )
             }
         }
+
+        // 在剧透区域覆盖主题色遮罩，点击后揭示全部文本
+        if (hasSpoilers && textLayoutResult != null) {
+            val layout = textLayoutResult!!
+            // 取文本渲染区域的总宽度，用于让遮罩铺满整行（不留右端缝隙）
+            val textWidth = with(density) { layout.size.width.toFloat() }
+            for (spoilerRange in result.spoilerRanges) {
+                val isRevealed = revealedSpoilers.contains(spoilerRange.start)
+                // 根据剧透首尾字符确定跨越的行号范围
+                val startLine = try { layout.getLineForOffset(spoilerRange.start) } catch (_: Exception) { continue }
+                val endLine = try { layout.getLineForOffset((spoilerRange.end - 1).coerceAtLeast(0)) } catch (_: Exception) { startLine }
+
+                for (lineNum in startLine..endLine) {
+                    // 每行取完整行高矩形，确保全覆盖无间隙
+                    val lineTop = layout.getLineTop(lineNum)
+                    val lineBottom = layout.getLineBottom(lineNum)
+                    val lineLeft = if (lineNum == startLine) {
+                        // 首行：从剧透首字符开始，避免遮住同一行前面的正常文字
+                        try { layout.getBoundingBox(spoilerRange.start).left } catch (_: Exception) { 0f }
+                    } else {
+                        0f
+                    }
+                    val lineRight = if (lineNum == endLine) {
+                        // 末行：只遮到剧透末字符，避免遮住同一行后面的正常文字
+                        try { layout.getBoundingBox((spoilerRange.end - 1).coerceAtLeast(0)).right } catch (_: Exception) { textWidth }
+                    } else {
+                        // 中间行：铺满整行宽度，不留缝隙
+                        textWidth
+                    }
+
+                    Box(
+                        modifier = Modifier
+                            .offset(
+                                x = with(density) { lineLeft.toDp() },
+                                y = with(density) { lineTop.toDp() },
+                            )
+                            .size(
+                                width = with(density) { (lineRight - lineLeft).toDp() },
+                                height = with(density) { (lineBottom - lineTop).toDp() },
+                            )
+                            .background(
+                                if (isRevealed) {
+                                    // 已揭示：轻微 primary 色底色提示这里曾是剧透
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.10f)
+                                } else {
+                                    // 未揭示：实心主题色色块，完全遮盖下方文字
+                                    MaterialTheme.colorScheme.primary
+                                },
+                                RoundedCornerShape(3.dp),
+                            )
+                            .run {
+                                if (!isRevealed) {
+                                    clickable { revealedSpoilers.add(spoilerRange.start) }
+                                } else {
+                                    this
+                                }
+                            },
+                    )
+                }
+            }
+        }
     }
+}
+
+// ──────────── 内联解析子函数 ────────────
+
+/**
+ * 尝试在位置 i 解析 **粗体** 语法。
+ * 匹配成功时追加粗体文本并返回下一个扫描位置；不匹配时返回 null。
+ *
+ * @param raw 原始 Markdown 文本
+ * @param i   当前扫描位置
+ * @return 下一个扫描位置，或 null 表示当前位置不匹配
+ */
+private fun AnnotatedString.Builder.tryAppendBold(raw: String, i: Int): Int? {
+    if (!raw.startsWith("**", i)) return null
+    val end = raw.indexOf("**", i + 2)
+    if (end == -1) return null
+    withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
+        append(raw.substring(i + 2, end))
+    }
+    return end + 2
+}
+
+/**
+ * 尝试在位置 i 解析 ~~删除线~~ 语法。
+ * 匹配成功时追加删除线文本并返回下一个扫描位置；不匹配时返回 null。
+ *
+ * @param raw 原始 Markdown 文本
+ * @param i   当前扫描位置
+ * @return 下一个扫描位置，或 null 表示当前位置不匹配
+ */
+private fun AnnotatedString.Builder.tryAppendStrikethrough(raw: String, i: Int): Int? {
+    if (!raw.startsWith("~~", i)) return null
+    val end = raw.indexOf("~~", i + 2)
+    if (end == -1) return null
+    withStyle(SpanStyle(
+        textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough,
+    )) {
+        append(raw.substring(i + 2, end))
+    }
+    return end + 2
+}
+
+/** 剧透文本的 AnnotatedString tag 标记，用于 StickerAwareText 中识别可点击的剧透区域 */
+private const val SPOILER_TAG = "SPOILER"
+
+/**
+ * 记录一段剧透文本在 AnnotatedString 中的字符范围，供 StickerAwareText 按范围切换显示。
+ *
+ * @property start 剧透文本在 AnnotatedString 中的起始偏移（含）
+ * @property end   剧透文本在 AnnotatedString 中的结束偏移（不含）
+ */
+private data class SpoilerRange(val start: Int, val end: Int)
+
+/**
+ * 尝试在位置 i 解析 ||剧透|| 语法。
+ * 匹配成功时将隐藏文本标记为 SPOILER_TAG 注释并记录范围，返回下一个扫描位置；不匹配时返回 null。
+ * 文本默认以与背景同色方式"隐藏"，用户点击后切换可见。
+ *
+ * @param raw           原始 Markdown 文本
+ * @param i             当前扫描位置
+ * @param spoilerRanges 可变列表，用于收集所有剧透范围（由 parseInline 传入）
+ * @return 下一个扫描位置，或 null 表示当前位置不匹配
+ */
+private fun AnnotatedString.Builder.tryAppendSpoiler(
+    raw: String,
+    i: Int,
+    spoilerRanges: MutableList<SpoilerRange>,
+): Int? {
+    if (!raw.startsWith("||", i)) return null
+    // 防止与表格分隔行 || 冲突：如果 || 后紧跟 | 则不是剧透
+    if (i + 2 < raw.length && raw[i + 2] == '|') return null
+    val end = raw.indexOf("||", i + 2)
+    if (end == -1) return null
+    // 空 || || 不算剧透
+    if (end <= i + 2) return null
+    val hiddenText = raw.substring(i + 2, end)
+    val startOffset = length
+    // 将剧透文本推入 pushStyle，使用 SPOILER_TAG 标记范围
+    // 注意：实际隐藏效果由 StickerAwareText 在渲染层面通过 Box overlay 实现
+    pushStringAnnotation(tag = SPOILER_TAG, annotation = hiddenText)
+    append(hiddenText)
+    pop()
+    spoilerRanges.add(SpoilerRange(startOffset, startOffset + hiddenText.length))
+    return end + 2
+}
+
+/**
+ * 尝试在位置 i 解析 ==高亮== 语法。
+ * 匹配成功时追加高亮背景文本并返回下一个扫描位置；不匹配时返回 null。
+ *
+ * @param raw           原始 Markdown 文本
+ * @param i             当前扫描位置
+ * @param highlightColor 高亮背景色（primary 色半透明，像荧光笔效果）
+ * @return 下一个扫描位置，或 null 表示当前位置不匹配
+ */
+private fun AnnotatedString.Builder.tryAppendHighlight(
+    raw: String,
+    i: Int,
+    highlightColor: androidx.compose.ui.graphics.Color,
+): Int? {
+    if (!raw.startsWith("==", i)) return null
+    val end = raw.indexOf("==", i + 2)
+    if (end == -1) return null
+    withStyle(SpanStyle(background = highlightColor)) {
+        append(raw.substring(i + 2, end))
+    }
+    return end + 2
+}
+
+/**
+ * 尝试在位置 i 解析 *斜体* 语法。
+ * 为避免与 ** 粗体冲突，要求：前一个字符不是 *，后一个 * 后面也不是 *。
+ * 匹配成功时追加斜体文本并返回下一个扫描位置；不匹配时返回 null。
+ *
+ * @param raw 原始 Markdown 文本
+ * @param i   当前扫描位置
+ * @return 下一个扫描位置，或 null 表示当前位置不匹配
+ */
+private fun AnnotatedString.Builder.tryAppendItalic(raw: String, i: Int): Int? {
+    if (raw[i] != '*') return null
+    // 前一个字符不能是 *，防止误匹配 ** 的后半部分
+    if (i > 0 && raw[i - 1] == '*') return null
+    val end = raw.indexOf('*', i + 1)
+    // 找不到闭合 *、闭合 * 在末尾、闭合 * 后紧跟 *（实际是 **）都视为不匹配
+    if (end == -1 || end >= raw.length - 1 || raw[end + 1] == '*') return null
+    // 空 * * 不算斜体
+    if (end <= i + 1) return null
+    withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
+        append(raw.substring(i + 1, end))
+    }
+    return end + 1
+}
+
+/**
+ * 尝试在位置 i 解析 `内联代码` 语法。
+ * 匹配成功时追加等宽字体 + 淡背景的代码文本并返回下一个扫描位置；不匹配时返回 null。
+ *
+ * @param raw   原始 Markdown 文本
+ * @param i     当前扫描位置
+ * @param style 基础文本样式，用于计算代码字体大小（0.9x）
+ * @param color 文本颜色，用于生成代码背景色
+ * @return 下一个扫描位置，或 null 表示当前位置不匹配
+ */
+private fun AnnotatedString.Builder.tryAppendCodeSpan(
+    raw: String,
+    i: Int,
+    style: TextStyle,
+    color: androidx.compose.ui.graphics.Color,
+): Int? {
+    if (raw[i] != '`') return null
+    val end = raw.indexOf('`', i + 1)
+    if (end == -1) return null
+    withStyle(SpanStyle(
+        fontFamily = FontFamily.Monospace,
+        fontSize = (style.fontSize.value * 0.9f).sp,
+        background = color.copy(alpha = NionAlpha.BG_HIGHLIGHT),
+    )) {
+        append(raw.substring(i + 1, end))
+    }
+    return end + 1
+}
+
+/**
+ * 尝试在位置 i 解析 [链接](url) 语法。
+ * 匹配成功时追加链接文字（暂不可点击跳转）并返回下一个扫描位置；不匹配时返回 null。
+ *
+ * @param raw 原始 Markdown 文本
+ * @param i   当前扫描位置
+ * @return 下一个扫描位置，或 null 表示当前位置不匹配
+ */
+private fun AnnotatedString.Builder.tryAppendLink(raw: String, i: Int): Int? {
+    if (raw[i] != '[') return null
+    val closeBracket = raw.indexOf("](", i + 1)
+    if (closeBracket == -1) return null
+    val closeParen = raw.indexOf(')', closeBracket + 2)
+    if (closeParen == -1) return null
+    // 仅显示链接文字，URL 暂不使用
+    append(raw.substring(i + 1, closeBracket))
+    return closeParen + 1
 }
 
 // ──────────── 内联解析 ────────────
@@ -818,9 +1138,13 @@ private fun StickerAwareText(
 /**
  * 字符级扫描器，解析段落内内联 Markdown 并构建 AnnotatedString。
  *
- * 支持：**粗体**、*斜体*、==高亮==、`代码`、~~删除线~~、[链接](url)、<表情包标签>
+ * 支持：**粗体**、*斜体*、==高亮==、`代码`、~~删除线~~、[链接](url)、<表情包标签>、||剧透||
  * 注意：本函数非 @Composable，不可调用 MaterialTheme 等 Composable API。
  *
+ * @param raw 原始 Markdown 文本
+ * @param style 基础文本样式（字体、大小等）
+ * @param color 文本颜色
+ * @param stickerMap 表情标签名 → 表情数据的映射，用于替换 <标签> 为表情图片
  * @param highlightColor ==高亮== 语法的背景色，由调用方从 MaterialTheme 主题获取
  */
 private fun parseInline(
@@ -842,6 +1166,8 @@ private fun parseInline(
     val foundTags = mutableSetOf<String>()
     // 记录每个 \uFFFC 占位符在 AnnotatedString 中的偏移量 → 标签名
     val stickerOffsetMap = mutableMapOf<Int, String>()
+    // 收集所有 ||剧透|| 的字符范围，供 StickerAwareText 按范围切换显示
+    val spoilerRanges = mutableListOf<SpoilerRange>()
 
     val annotated = buildAnnotatedString {
         var i = 0
@@ -872,89 +1198,23 @@ private fun parseInline(
             }
             // 非表情包内容，统一用基础颜色样式包裹
             withStyle(SpanStyle(color = color)) {
-                when {
-                    // **粗体**
-                    raw.startsWith("**", i) -> {
-                        val end = raw.indexOf("**", i + 2)
-                        if (end != -1) {
-                            withStyle(SpanStyle(fontWeight = FontWeight.Bold)) {
-                                append(raw.substring(i + 2, end))
-                            }
-                            i = end + 2
-                        } else { append(raw[i]); i++ }
-                    }
-
-                    // ~~删除线~~
-                    raw.startsWith("~~", i) -> {
-                        val end = raw.indexOf("~~", i + 2)
-                        if (end != -1) {
-                            withStyle(SpanStyle(
-                                textDecoration = androidx.compose.ui.text.style.TextDecoration.LineThrough,
-                            )) {
-                                append(raw.substring(i + 2, end))
-                            }
-                            i = end + 2
-                        } else { append(raw[i]); i++ }
-                    }
-
-                    // ==高亮==（primary 色半透明背景，像荧光笔效果）
-                    raw.startsWith("==", i) -> {
-                        val end = raw.indexOf("==", i + 2)
-                        if (end != -1) {
-                            withStyle(SpanStyle(
-                                background = highlightColor,
-                            )) {
-                                append(raw.substring(i + 2, end))
-                            }
-                            i = end + 2
-                        } else { append(raw[i]); i++ }
-                    }
-
-                    // *斜体*（不与 ** 冲突：确保 * 前后都不是 *）
-                    raw[i] == '*' && (i == 0 || raw[i - 1] != '*') -> {
-                        val end = raw.indexOf('*', i + 1)
-                        if (end != -1 && end < raw.length - 1 && raw[end + 1] != '*') {
-                            if (end > i + 1) {
-                                withStyle(SpanStyle(fontStyle = FontStyle.Italic)) {
-                                    append(raw.substring(i + 1, end))
-                                }
-                                i = end + 1
-                            } else { append('*'); i++ }
-                        } else { append('*'); i++ }
-                    }
-
-                    // `内联代码`
-                    raw[i] == '`' -> {
-                        val end = raw.indexOf('`', i + 1)
-                        if (end != -1) {
-                            withStyle(SpanStyle(
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = (style.fontSize.value * 0.9f).sp,
-                                background = color.copy(alpha = NionAlpha.BG_HIGHLIGHT),
-                            )) {
-                                append(raw.substring(i + 1, end))
-                            }
-                            i = end + 1
-                        } else { append('`'); i++ }
-                    }
-
-                    // [链接](url) —— 显示链接文字（暂不可点击跳转）
-                    raw.startsWith("[", i) -> {
-                        val closeBracket = raw.indexOf("](", i + 1)
-                        if (closeBracket != -1) {
-                            val closeParen = raw.indexOf(')', closeBracket + 2)
-                            if (closeParen != -1) {
-                                append(raw.substring(i + 1, closeBracket))
-                                i = closeParen + 1
-                            } else { append('['); i++ }
-                        } else { append('['); i++ }
-                    }
-
-                    // 普通字符
-                    else -> { append(raw[i]); i++ }
+                // 按优先级依次尝试各内联语法解析器，第一个成功的使用其返回的位置
+                val next = tryAppendBold(raw, i)
+                    ?: tryAppendStrikethrough(raw, i)
+                    ?: tryAppendSpoiler(raw, i, spoilerRanges)
+                    ?: tryAppendHighlight(raw, i, highlightColor)
+                    ?: tryAppendItalic(raw, i)
+                    ?: tryAppendCodeSpan(raw, i, style, color)
+                    ?: tryAppendLink(raw, i)
+                if (next != null) {
+                    i = next
+                } else {
+                    // 所有语法均不匹配，作为普通字符追加
+                    append(raw[i])
+                    i++
                 }
             }
         }
     }
-    return InlineParseResult(annotated, foundTags, stickerOffsetMap)
+    return InlineParseResult(annotated, foundTags, stickerOffsetMap, spoilerRanges)
 }
