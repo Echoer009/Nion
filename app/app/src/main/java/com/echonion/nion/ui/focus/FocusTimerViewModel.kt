@@ -30,8 +30,8 @@ import uniffi.nion_core.NionCore
  * 收集上下文数据（任务名、时长、今日统计等），通过 NionApp 事件总线
  * 发出 CompletionEvent，由 CompletionOverlay 接收并展示鼓励文案。
  *
- * @property app Application 实例，用于获取 NionCore 和发送事件
- * @property core NionCore 实例，用于持久化专注时长到数据库
+ * @param app Application 实例，用于获取 NionCore 和发送事件
+ * @param core NionCore 实例，用于持久化专注时长到数据库
  */
 class FocusTimerViewModel(private val app: Application, private val core: NionCore) : ViewModel() {
 
@@ -323,7 +323,7 @@ class FocusTimerViewModel(private val app: Application, private val core: NionCo
     /**
      * ViewModel 工厂 —— 注入 NionCore 实例。
      *
-     * @property app Application 实例，用于获取 NionCore 单例
+     * @param app Application 实例，用于获取 NionCore 单例
      */
     class Factory(private val app: Application) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")

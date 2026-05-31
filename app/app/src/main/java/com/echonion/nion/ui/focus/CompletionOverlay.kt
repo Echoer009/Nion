@@ -97,21 +97,17 @@ fun CompletionOverlay(
                 // 触发入场动画
                 cardVisible = true
 
-                // 异步调用 LLM 生成鼓励文案
+                // 异步调用 LLM 生成鼓励文案，文案加载完成后才开始 10 秒自动消失倒计时
+                // 这样无论 LLM 响应快慢，用户都有足够时间阅读完整文案
                 launch {
                     val result = CompletionMotivator.generate(core, event)
                     message = result
-                }
-
-                // 4 秒后自动消失
-                launch {
-                    delay(4000L)
+                    // 文案就绪后等待 10 秒再触发退出动画
+                    delay(10000L)
                     cardVisible = false
-                    MainScope().launch {
-                        delay(260L)
-                        currentEvent = null
-                        message = null
-                    }
+                    delay(260L)
+                    currentEvent = null
+                    message = null
                 }
             }
         }

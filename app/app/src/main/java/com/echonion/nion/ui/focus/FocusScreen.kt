@@ -452,17 +452,6 @@ fun FocusScreen(
 
                                 var dragged = false
 
-                                /** 根据触点位置计算对应的分钟数（1~120，未吸附） */
-                                fun minutesFromPosition(pos: Offset): Int {
-                                    val dx = pos.x - center.x
-                                    val dy = pos.y - center.y
-                                    val angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
-                                    var normalized = angle + 90f
-                                    if (normalized < 0) normalized += 360f
-                                    val fraction = (normalized / 360f).coerceIn(0f, 1f)
-                                    return (1 + fraction * 119).roundToInt().coerceIn(1, 120)
-                                }
-
                                 // 等待后续事件，判断是点击还是拖拽
                                 var lastPos = downPos
                                 while (true) {
@@ -472,7 +461,7 @@ fun FocusScreen(
                                         change.consume()
                                         dragged = true
                                         lastPos = change.position
-                                        val newMinutes = minutesFromPosition(change.position)
+                                        val newMinutes = minutesFromPosition(change.position, center)
                                         // 先更新时长再显示高亮，确保高亮出现在正确位置
                                         vm.setDuration(newMinutes)
                                         highlightVisible = true
@@ -494,7 +483,7 @@ fun FocusScreen(
                                     val dy = downPos.y - center.y
                                     val dist = kotlin.math.sqrt(dx * dx + dy * dy)
                                     if (dist >= tickZoneStart) {
-                                        val rawMinutes = minutesFromPosition(downPos)
+                                        val rawMinutes = minutesFromPosition(downPos, center)
                                         val snapped = ((rawMinutes + 2) / 5) * 5
                                         val newMinutes = snapped.coerceIn(5, 120)
                                         vm.setDuration(newMinutes)
@@ -520,165 +509,32 @@ fun FocusScreen(
                     contentAlignment = Alignment.Center,
                 ) {
                     // 圆角长条刻度 Canvas
-                    Canvas(modifier = Modifier.fillMaxSize()) {
-                        val cx = size.width / 2f
-                        val cy = size.height / 2f
-                        val outerRadius = size.minDimension / 2f - 8.dp.toPx()
-                        // 根据进度计算已点亮的刻度数
-                        val litCount = (animatedProgress.value * 60).roundToInt()
-
-                        // 第一层：绘制 60 根基础刻度
-                        for (i in 0 until 60) {
-                            // 从12点位置开始顺时针
-                            // 基础刻度在 Canvas 中初始位置就是 12 点方向，无需 -90° 偏移
-                            // rotate(0°) = 留在 12 点，rotate(90°) = 顺时针到 3 点
-                            val angleDeg = 360.0 * i / 60
-                            val isLit = i < litCount
-                            // 5 的倍数 = 时刻刻度，更长更宽
-                            val isMajor = i % 5 == 0
-
-                            val tickLength = if (isMajor) 22.dp.toPx() else 12.dp.toPx()
-                            val tickWidth = if (isMajor) 3.5f.dp.toPx() else 2f.dp.toPx()
-
-                            val tickColor = if (isLit) primaryColor
-                                else primaryColor.copy(alpha = if (isMajor) NionAlpha.BG_SUBTLE else NionAlpha.BG_HIGHLIGHT)
-                            rotate(angleDeg.toFloat(), pivot = Offset(cx, cy)) {
-                                drawRoundRect(
-                                    color = tickColor,
-                                    topLeft = Offset(
-                                        cx - tickWidth / 2f,
-                                        cy - outerRadius,
-                                    ),
-                                    size = Size(tickWidth, tickLength),
-                                    cornerRadius = CornerRadius(tickWidth / 2f),
-                                )
-                            }
-                        }
-
-                        // 第二层：高亮刻度（触摸时淡入，松手后延迟 300ms 淡出）
-                        // 使用 highlightPos 的连续角度值，精确跟随手指位置
-                        if (highlightAlpha > 0.01f) {
-                            // 高亮刻度角度与触摸计算的角度体系一致：0°=12点，顺时针递增
-                            val hlAngleDeg = 360.0 * highlightPos
-                            // 高亮刻度比普通刻度更长更粗，醒目的亮橙色
-                            val hlLength = 26.dp.toPx()
-                            val hlWidth = 4.5f.dp.toPx()
-                            val hlColor = primaryColor.copy(alpha = highlightAlpha)
-                            rotate(hlAngleDeg.toFloat(), pivot = Offset(cx, cy)) {
-                                drawRoundRect(
-                                    color = hlColor,
-                                    topLeft = Offset(
-                                        cx - hlWidth / 2f,
-                                        cy - outerRadius,
-                                    ),
-                                    size = Size(hlWidth, hlLength),
-                                    cornerRadius = CornerRadius(hlWidth / 2f),
-                                )
-                            }
-                        }
-                    }
+                    FocusTimerCanvas(
+                        progress = animatedProgress.value,
+                        highlightAlpha = highlightAlpha,
+                        highlightPos = highlightPos,
+                        primaryColor = primaryColor,
+                    )
 
                     // 中间内容：时间文字 + 任务名
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.padding(horizontal = 48.dp),
-                    ) {
-                        Text(
-                            timeText,
-                            style = MaterialTheme.typography.displayLarge.copy(
-                                fontWeight = FontWeight.Light,
-                                letterSpacing = 2.sp,
-                            ),
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        if (vm.selectedTaskTitle != null) {
-                            Text(
-                                vm.selectedTaskTitle!!,
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        } else {
-                            Text(
-                                "${vm.focusMinutes} 分钟",
-                                style = MaterialTheme.typography.labelLarge,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
+                    FocusTimerCenterText(
+                        timeText = timeText,
+                        selectedTaskTitle = vm.selectedTaskTitle,
+                        focusMinutes = vm.focusMinutes,
+                    )
                 }
 
                 // 播放控制行
                 Spacer(modifier = Modifier.height(40.dp))
-                Row(
-                    horizontalArrangement = Arrangement.Center,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    // 重置按钮：恢复到初始时长，清零已用秒数
-                    Surface(
-                        shape = CircleShape,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        modifier = Modifier.size(52.dp),
-                    ) {
-                        IconButton(
-                            onClick = { vm.reset() },
-                            modifier = Modifier.size(52.dp),
-                        ) {
-                            Icon(
-                                Icons.Default.Refresh,
-                                contentDescription = "重置",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(32.dp))
-                    // 播放/暂停按钮：切换计时器运行状态
-                    Surface(
-                        shape = CircleShape,
-                        color = primaryColor,
-                        modifier = Modifier
-                            .size(72.dp)
-                            .scale(playScale.value)
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = { vm.toggleRunning() },
-                            ),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                if (vm.isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
-                                contentDescription = if (vm.isRunning) "暂停" else "开始",
-                                tint = MaterialTheme.colorScheme.onPrimary,
-                                modifier = Modifier.size(36.dp),
-                            )
-                        }
-                    }
-                    Spacer(modifier = Modifier.width(32.dp))
-                    // 提前结束按钮：应用 5 分钟规则后重置
-                    Surface(
-                        shape = CircleShape,
-                        color = if (vm.isRunning) MaterialTheme.colorScheme.errorContainer
-                            else MaterialTheme.colorScheme.surfaceContainerHigh,
-                        modifier = Modifier.size(52.dp),
-                    ) {
-                        IconButton(
-                            onClick = { vm.stopEarly() },
-                            modifier = Modifier.size(52.dp),
-                            // 运行中或已消耗部分时间时才可点击
-                            enabled = vm.isRunning || vm.remainingSeconds < vm.focusMinutes * 60,
-                        ) {
-                            Icon(
-                                Icons.Default.Stop,
-                                contentDescription = "提前结束",
-                                tint = if (vm.isRunning) MaterialTheme.colorScheme.error
-                                    else MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                }
+                FocusControlBar(
+                    isRunning = vm.isRunning,
+                    remainingSeconds = vm.remainingSeconds,
+                    focusMinutes = vm.focusMinutes,
+                    playScaleValue = playScale.value,
+                    onToggleRunning = { vm.toggleRunning() },
+                    onReset = { vm.reset() },
+                    onStopEarly = { vm.stopEarly() },
+                )
             }
         }
 
@@ -780,40 +636,14 @@ private fun TaskPanelOverlay(
                 )
 
                 // 清单筛选 Chip 行：紧跟标题下方，横向滚动
-                // "全部" chip + 每个清单一个 chip，点击切换筛选并重新加载任务
                 if (vm.checklists.isNotEmpty()) {
                     Spacer(modifier = Modifier.height(12.dp))
-                    LazyRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        // "全部" chip：selectedChecklistId == null 时选中
-                        item {
-                            val isAll = vm.selectedChecklistId == null
-                            FilterChip(
-                                selected = isAll,
-                                onClick = { vm.setChecklistFilter(null) },
-                                label = { Text("全部") },
-                                colors = if (isAll) FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = primaryColor,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                                ) else FilterChipDefaults.filterChipColors(),
-                            )
-                        }
-                        // 各清单 chip
-                        items(vm.checklists, key = { it.id }) { checklist ->
-                            val isSelected = vm.selectedChecklistId == checklist.id
-                            FilterChip(
-                                selected = isSelected,
-                                onClick = { vm.setChecklistFilter(checklist.id) },
-                                label = { Text(checklist.name) },
-                                colors = if (isSelected) FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = primaryColor,
-                                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
-                                ) else FilterChipDefaults.filterChipColors(),
-                            )
-                        }
-                    }
+                    ChecklistFilterChips(
+                        checklists = vm.checklists,
+                        selectedChecklistId = vm.selectedChecklistId,
+                        onFilterChange = { vm.setChecklistFilter(it) },
+                        primaryColor = primaryColor,
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(4.dp))
@@ -841,45 +671,11 @@ private fun TaskPanelOverlay(
                     ) {
                         // "不关联任务"选项卡
                         item {
-                            val noneSelected = selectedTaskId == null
-                            Surface(
-                                modifier = Modifier.fillMaxWidth(),
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerLowest,
-                                border = if (noneSelected) BorderStroke(2.dp, primaryColor) else null,
-                                onClick = { onSelectTask(null, null) },
-                            ) {
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 20.dp, vertical = 16.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            "不关联任务",
-                                            style = MaterialTheme.typography.bodyLarge,
-                                            fontWeight = if (noneSelected) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (noneSelected) primaryColor else MaterialTheme.colorScheme.onSurface,
-                                        )
-                                        Spacer(modifier = Modifier.height(2.dp))
-                                        Text(
-                                            "空任务专注",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = if (noneSelected) primaryColor.copy(alpha = NionAlpha.TEXT_MEDIUM)
-                                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    if (noneSelected) {
-                                        Icon(
-                                            Icons.Default.Check,
-                                            contentDescription = null,
-                                            tint = primaryColor,
-                                            modifier = Modifier.size(22.dp),
-                                        )
-                                    }
-                                }
-                            }
+                            NoTaskOptionCard(
+                                isSelected = selectedTaskId == null,
+                                onSelect = { onSelectTask(null, null) },
+                                primaryColor = primaryColor,
+                            )
                         }
                         // 层级任务列表
                         items(vm.flatTasks, key = { it.task.id }) { item ->
@@ -891,6 +687,327 @@ private fun TaskPanelOverlay(
                         }
                     }
                 }
+            }
+        }
+    }
+}
+
+/**
+ * 播放控制栏 —— 包含重置、播放/暂停、提前结束三个按钮。
+ *
+ * @param isRunning 计时器是否运行中
+ * @param remainingSeconds 剩余秒数
+ * @param focusMinutes 专注时长（分钟）
+ * @param playScaleValue 播放按钮的当前缩放动画值
+ * @param onToggleRunning 点击播放/暂停时触发
+ * @param onReset 点击重置时触发
+ * @param onStopEarly 点击提前结束时触发
+ */
+@Composable
+private fun FocusControlBar(
+    isRunning: Boolean,
+    remainingSeconds: Int,
+    focusMinutes: Int,
+    playScaleValue: Float,
+    onToggleRunning: () -> Unit,
+    onReset: () -> Unit,
+    onStopEarly: () -> Unit,
+) {
+    Row(
+        horizontalArrangement = Arrangement.Center,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 重置按钮：恢复到初始时长，清零已用秒数
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.size(52.dp),
+        ) {
+            IconButton(
+                onClick = onReset,
+                modifier = Modifier.size(52.dp),
+            ) {
+                Icon(
+                    Icons.Default.Refresh,
+                    contentDescription = "重置",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(32.dp))
+        // 播放/暂停按钮：切换计时器运行状态
+        Surface(
+            shape = CircleShape,
+            color = MaterialTheme.colorScheme.primary,
+            modifier = Modifier
+                .size(72.dp)
+                .scale(playScaleValue)
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onToggleRunning,
+                ),
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    if (isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (isRunning) "暂停" else "开始",
+                    tint = MaterialTheme.colorScheme.onPrimary,
+                    modifier = Modifier.size(36.dp),
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(32.dp))
+        // 提前结束按钮：运行中显示错误色，运行中或已消耗部分时间时才可点击
+        Surface(
+            shape = CircleShape,
+            color = if (isRunning) MaterialTheme.colorScheme.errorContainer
+                else MaterialTheme.colorScheme.surfaceContainerHigh,
+            modifier = Modifier.size(52.dp),
+        ) {
+            IconButton(
+                onClick = onStopEarly,
+                modifier = Modifier.size(52.dp),
+                enabled = isRunning || remainingSeconds < focusMinutes * 60,
+            ) {
+                Icon(
+                    Icons.Default.Stop,
+                    contentDescription = "提前结束",
+                    tint = if (isRunning) MaterialTheme.colorScheme.error
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 计时器刻度盘 Canvas —— 60 根圆角长条刻度 + 高亮刻度。
+ *
+ * 第一层绘制 60 根基础刻度（5 的倍数更长更宽），根据进度点亮；
+ * 第二层绘制触摸高亮刻度（触摸时淡入，松手后延迟淡出）。
+ *
+ * @param progress 当前进度（0=完成，1=未开始），控制点亮刻度数
+ * @param highlightAlpha 高亮刻度透明度（0=隐藏，1=完全可见）
+ * @param highlightPos 高亮刻度位置（0~1 对应 12点到一圈回来）
+ * @param primaryColor 主题色，用于刻度和高亮
+ */
+@Composable
+private fun FocusTimerCanvas(
+    progress: Float,
+    highlightAlpha: Float,
+    highlightPos: Float,
+    primaryColor: Color,
+) {
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val cx = size.width / 2f
+        val cy = size.height / 2f
+        val outerRadius = size.minDimension / 2f - 8.dp.toPx()
+        val litCount = (progress * 60).roundToInt()
+
+        // 第一层：绘制 60 根基础刻度
+        for (i in 0 until 60) {
+            val angleDeg = 360.0 * i / 60
+            val isLit = i < litCount
+            val isMajor = i % 5 == 0
+
+            val tickLength = if (isMajor) 22.dp.toPx() else 12.dp.toPx()
+            val tickWidth = if (isMajor) 3.5f.dp.toPx() else 2f.dp.toPx()
+
+            val tickColor = if (isLit) primaryColor
+                else primaryColor.copy(alpha = if (isMajor) NionAlpha.BG_SUBTLE else NionAlpha.BG_HIGHLIGHT)
+            rotate(angleDeg.toFloat(), pivot = Offset(cx, cy)) {
+                drawRoundRect(
+                    color = tickColor,
+                    topLeft = Offset(
+                        cx - tickWidth / 2f,
+                        cy - outerRadius,
+                    ),
+                    size = Size(tickWidth, tickLength),
+                    cornerRadius = CornerRadius(tickWidth / 2f),
+                )
+            }
+        }
+
+        // 第二层：高亮刻度（触摸时淡入，松手后延迟 300ms 淡出）
+        if (highlightAlpha > 0.01f) {
+            val hlAngleDeg = 360.0 * highlightPos
+            val hlLength = 26.dp.toPx()
+            val hlWidth = 4.5f.dp.toPx()
+            val hlColor = primaryColor.copy(alpha = highlightAlpha)
+            rotate(hlAngleDeg.toFloat(), pivot = Offset(cx, cy)) {
+                drawRoundRect(
+                    color = hlColor,
+                    topLeft = Offset(
+                        cx - hlWidth / 2f,
+                        cy - outerRadius,
+                    ),
+                    size = Size(hlWidth, hlLength),
+                    cornerRadius = CornerRadius(hlWidth / 2f),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 计时器中心文字 —— 显示倒计时时间和任务名/时长。
+ *
+ * @param timeText 格式化的时间文本 "MM:SS"
+ * @param selectedTaskTitle 已选任务的标题，null 时显示时长
+ * @param focusMinutes 专注时长（分钟）
+ */
+@Composable
+private fun FocusTimerCenterText(
+    timeText: String,
+    selectedTaskTitle: String?,
+    focusMinutes: Int,
+) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier.padding(horizontal = 48.dp),
+    ) {
+        Text(
+            timeText,
+            style = MaterialTheme.typography.displayLarge.copy(
+                fontWeight = FontWeight.Light,
+                letterSpacing = 2.sp,
+            ),
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        if (selectedTaskTitle != null) {
+            Text(
+                selectedTaskTitle,
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        } else {
+            Text(
+                "$focusMinutes 分钟",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * 根据触点在时钟上的位置计算对应的分钟数（1~120，未吸附）。
+ * 以时钟中心为原点，12 点方向为 0°，顺时针递增。
+ *
+ * @param pos 触点位置
+ * @param center 时钟中心坐标
+ * @return 分钟数（1~120）
+ */
+private fun minutesFromPosition(pos: Offset, center: Offset): Int {
+    val dx = pos.x - center.x
+    val dy = pos.y - center.y
+    val angle = Math.toDegrees(atan2(dy.toDouble(), dx.toDouble())).toFloat()
+    var normalized = angle + 90f
+    if (normalized < 0) normalized += 360f
+    val fraction = (normalized / 360f).coerceIn(0f, 1f)
+    return (1 + fraction * 119).roundToInt().coerceIn(1, 120)
+}
+
+/**
+ * 清单筛选 Chip 行 —— "全部" + 各清单横向滚动列表。
+ *
+ * @param checklists 所有清单列表
+ * @param selectedChecklistId 当前选中的清单 ID，null 表示"全部"
+ * @param onFilterChange 切换清单筛选时触发，传入清单 ID 或 null
+ * @param primaryColor 主题色，用于选中态 Chip 背景
+ */
+@Composable
+private fun ChecklistFilterChips(
+    checklists: List<ChecklistItem>,
+    selectedChecklistId: String?,
+    onFilterChange: (String?) -> Unit,
+    primaryColor: Color,
+) {
+    LazyRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        // "全部" chip：selectedChecklistId == null 时选中
+        item {
+            val isAll = selectedChecklistId == null
+            FilterChip(
+                selected = isAll,
+                onClick = { onFilterChange(null) },
+                label = { Text("全部") },
+                colors = if (isAll) FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = primaryColor,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                ) else FilterChipDefaults.filterChipColors(),
+            )
+        }
+        // 各清单 chip
+        items(checklists, key = { it.id }) { checklist ->
+            val isSelected = selectedChecklistId == checklist.id
+            FilterChip(
+                selected = isSelected,
+                onClick = { onFilterChange(checklist.id) },
+                label = { Text(checklist.name) },
+                colors = if (isSelected) FilterChipDefaults.filterChipColors(
+                    selectedContainerColor = primaryColor,
+                    selectedLabelColor = MaterialTheme.colorScheme.onPrimary,
+                ) else FilterChipDefaults.filterChipColors(),
+            )
+        }
+    }
+}
+
+/**
+ * "不关联任务"选项卡 —— 用于任务选择面板中取消任务关联。
+ *
+ * @param isSelected 是否已选中"不关联"（即当前无关联任务）
+ * @param onSelect 点击时触发，传入 null 取消关联
+ * @param primaryColor 主题色，用于选中态边框和文字
+ */
+@Composable
+private fun NoTaskOptionCard(
+    isSelected: Boolean,
+    onSelect: () -> Unit,
+    primaryColor: Color,
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainerLowest,
+        border = if (isSelected) BorderStroke(2.dp, primaryColor) else null,
+        onClick = onSelect,
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 20.dp, vertical = 16.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "不关联任务",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                    color = if (isSelected) primaryColor else MaterialTheme.colorScheme.onSurface,
+                )
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    "空任务专注",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = if (isSelected) primaryColor.copy(alpha = NionAlpha.TEXT_MEDIUM)
+                        else MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (isSelected) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    tint = primaryColor,
+                    modifier = Modifier.size(22.dp),
+                )
             }
         }
     }

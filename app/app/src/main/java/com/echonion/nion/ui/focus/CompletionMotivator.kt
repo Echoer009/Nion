@@ -2,6 +2,7 @@ package com.echonion.nion.ui.focus
 
 import android.util.Log
 import com.echonion.nion.reminder.ReminderLlmClient
+import com.echonion.nion.reminder.ReminderUtils
 import com.echonion.nion.ui.companion.PromptDefaults
 import com.echonion.nion.ui.companion.tools.ToolPhrasePool
 import uniffi.nion_core.NionCore
@@ -53,11 +54,6 @@ object CompletionMotivator {
     private suspend fun tryLlm(core: NionCore, event: CompletionEvent): String? {
         val client = ReminderLlmClient.fromCore(core) ?: return null
 
-        // 读取人设 prompt 作为 system prompt，和问候系统一致
-        val companionName = core.getSetting("companion_name") ?: PromptDefaults.DEFAULT_COMPANION_NAME
-        val persona = (core.getSetting(PromptDefaults.KEY_PERSONA) ?: PromptDefaults.PERSONA)
-            .replace("{name}", companionName)
-
         // 根据完成/中断选择 prompt 模板
         val promptKey = if (event.isEarlyStop) {
             PromptDefaults.KEY_FOCUS_INTERRUPTED
@@ -73,7 +69,7 @@ object CompletionMotivator {
         // 从 settings 读取用户自定义的 prompt（可能被用户编辑过），缺失则用默认值
         val promptTemplate = core.getSetting(promptKey) ?: defaultPrompt
 
-        // 替换模板变量
+        // 替换模板变量，作为 user message
         val userMessage = promptTemplate
             .replace("{taskName}", event.taskName ?: "自由专注")
             .replace("{sessionMinutes}", event.sessionMinutes.toString())
@@ -82,8 +78,9 @@ object CompletionMotivator {
             .replace("{todaySessions}", event.todaySessions.toString())
             .replace("{todayMinutes}", event.todayMinutes.toString())
 
-        // 调用 LLM：system = 人设，user = 专注数据
-        val result = client.chat(persona, userMessage)
+        // 使用统一方法构建与聊天对话完全一致的 system prompt 前缀（无场景模板）
+        val systemPrompt = ReminderUtils.buildSystemPrompt(core)
+        val result = client.chat(systemPrompt, userMessage)
         if (result != null) return result
 
         Log.w(TAG, "LLM 返回空结果，使用模板兜底")

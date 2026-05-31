@@ -74,6 +74,11 @@ class FocusStatsViewModel(
     var selectedDays by mutableIntStateOf(1)
         private set
 
+    /** 首次加载数据 */
+    init {
+        loadStats()
+    }
+
     /**
      * 切换统计周期并重新加载数据。
      *
@@ -100,11 +105,6 @@ class FocusStatsViewModel(
                 state = state.copy(isLoading = false)
             }
         }
-    }
-
-    /** 首次加载数据 */
-    init {
-        loadStats()
     }
 
     companion object {
