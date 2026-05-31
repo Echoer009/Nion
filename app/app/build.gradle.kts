@@ -1,6 +1,7 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.plugin.compose")
+    id("dev.detekt")
 }
 
 android {
@@ -11,8 +12,8 @@ android {
         applicationId = "com.echonion.nion"
         minSdk = 26
         targetSdk = 36
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 7
+        versionName = "0.1.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -73,6 +74,20 @@ android {
     buildFeatures {
         compose = true
     }
+}
+
+detekt {
+    // 配置文件路径
+    config.setFrom(file("$rootDir/detekt-config.yml"))
+    // 构建失败时不阻止编译，只生成报告
+    ignoreFailures = true
+    // 并行分析
+    parallel = true
+    // 排除 UniFFI 自动生成的绑定代码
+    basePath = layout.projectDirectory.dir("src/main/java")
+    source.setFrom(
+        files("src/main/java/com")
+    )
 }
 
 dependencies {
