@@ -489,6 +489,8 @@ private fun ProfileContent(
     var editingGreetingEvening by remember { mutableStateOf(viewModel.promptGreetingEvening) }
     var editingReminder by remember { mutableStateOf(viewModel.promptReminder) }
     var editingWeatherAlert by remember { mutableStateOf(viewModel.promptWeatherAlert) }
+    var editingFocusComplete by remember { mutableStateOf(viewModel.promptFocusComplete) }
+    var editingFocusInterrupted by remember { mutableStateOf(viewModel.promptFocusInterrupted) }
 
     // 当前展开的卡片 key，null 表示全部折叠
     var expandedCard by remember { mutableStateOf<String?>(null) }
@@ -518,6 +520,8 @@ private fun ProfileContent(
         viewModel.updatePrompt(PromptDefaults.KEY_GREETING_EVENING, editingGreetingEvening.trim())
         viewModel.updatePrompt(PromptDefaults.KEY_REMINDER, editingReminder.trim())
         viewModel.updatePrompt(PromptDefaults.KEY_WEATHER_ALERT, editingWeatherAlert.trim())
+        viewModel.updatePrompt(PromptDefaults.KEY_FOCUS_COMPLETE, editingFocusComplete.trim())
+        viewModel.updatePrompt(PromptDefaults.KEY_FOCUS_INTERRUPTED, editingFocusInterrupted.trim())
         onBack()
     }
 
@@ -757,6 +761,49 @@ private fun ProfileContent(
                 val default = PromptDefaults.GREETING_EVENING
                 editingGreetingEvening = default
                 viewModel.updatePrompt(PromptDefaults.KEY_GREETING_EVENING, default)
+            },
+            sharedTransitionScope = sts,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 专注鼓励卡片（开关 + 提示词，无时间）
+        ExpandableReminderCard(
+            cardKey = "focus_completion",
+            title = "专注",
+            description = if (viewModel.focusCompletionEnabled) "完成专注时 ${viewModel.companionName} 会给你一句鼓励" else "已关闭",
+            enabled = viewModel.focusCompletionEnabled,
+            time = null,
+            promptText = editingFocusComplete,
+            isExpanded = expandedCard == PromptDefaults.KEY_FOCUS_COMPLETE,
+            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_FOCUS_COMPLETE) null else PromptDefaults.KEY_FOCUS_COMPLETE },
+            onEnabledChange = { viewModel.updateFocusCompletionEnabled(it) },
+            onTimeChange = null,
+            onPromptChange = { editingFocusComplete = it },
+            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_FOCUS_COMPLETE].orEmpty(),
+            onReset = {
+                val default = PromptDefaults.FOCUS_COMPLETE
+                editingFocusComplete = default
+                viewModel.updatePrompt(PromptDefaults.KEY_FOCUS_COMPLETE, default)
+            },
+            sharedTransitionScope = sts,
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // 专注中断提示词卡片（仅提示词，无开关/时间，作为专注鼓励的补充）
+        ExpandablePromptCard(
+            cardKey = "focus_interrupted",
+            title = "专注中断",
+            text = editingFocusInterrupted,
+            isExpanded = expandedCard == PromptDefaults.KEY_FOCUS_INTERRUPTED,
+            onToggleExpand = { expandedCard = if (expandedCard == PromptDefaults.KEY_FOCUS_INTERRUPTED) null else PromptDefaults.KEY_FOCUS_INTERRUPTED },
+            onTextChange = { editingFocusInterrupted = it },
+            variables = PromptDefaults.VARIABLES[PromptDefaults.KEY_FOCUS_INTERRUPTED].orEmpty(),
+            onReset = {
+                val default = PromptDefaults.FOCUS_INTERRUPTED
+                editingFocusInterrupted = default
+                viewModel.updatePrompt(PromptDefaults.KEY_FOCUS_INTERRUPTED, default)
             },
             sharedTransitionScope = sts,
         )
@@ -1421,11 +1468,36 @@ private fun ChatContent(
     }
 
     // 新消息到达时自动滚动到底部（仅面板打开时）
-    // 只在 messages.size 变化时触发，不监听 streamingText（避免流式输出时和手指滑动打架）
     // 用户发消息或 AI 回复完成后，无条件滚到底部
     LaunchedEffect(messages.size) {
         if (messages.size > 0 && isVisible) {
             listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
+        }
+    }
+
+    // 流式输出跟随：AI 正在输出 token 时持续滚到底部
+    // 跟随策略：
+    //   - 流式刚开始（streamingText 从 null 变为有值）→ 无条件滚到底部，确保用户看到 AI 回复
+    //   - 后续 token 到达 → 检查 isUserAtBottom，只在底部附近时跟随
+    //   - 用户主动上滑 → canScrollForward 变 true → 停止跟随，不打扰阅读历史消息
+    //   - 用户滑回底部 → 下一个 token 到达时恢复跟随
+    // canScrollForward == false 表示已滚到最底部（没有更多内容可向下滚）
+    val isUserAtBottom = !listState.canScrollForward
+    // 记录上一次 streamingText 是否为空，用于判断是否为流式输出"刚启动"
+    val wasStreaming = remember { mutableStateOf(false) }
+    val isStreaming = !streamingText.isNullOrEmpty()
+
+    LaunchedEffect(streamingText, isVisible) {
+        if (isVisible && isStreaming) {
+            val justStarted = !wasStreaming.value
+            wasStreaming.value = true
+            // 流式刚启动时无条件滚底；之后只在用户处于底部时跟随
+            if (justStarted || isUserAtBottom) {
+                listState.scrollToItem(listState.layoutInfo.totalItemsCount - 1)
+            }
+        } else if (!isStreaming) {
+            // 流式结束，重置标记，下次开始时可以再次无条件滚底
+            wasStreaming.value = false
         }
     }
 

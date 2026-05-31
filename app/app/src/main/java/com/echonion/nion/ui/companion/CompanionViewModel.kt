@@ -197,6 +197,12 @@ class CompanionViewModel(
     /** 天气预警提示词 */
     var promptWeatherAlert by mutableStateOf("")
         private set
+    /** 专注完成鼓励提示词（自然完成） */
+    var promptFocusComplete by mutableStateOf("")
+        private set
+    /** 专注中断鼓励提示词（提前结束 ≥5 分钟） */
+    var promptFocusInterrupted by mutableStateOf("")
+        private set
 
     // ── 问候调度设置（从 SettingsScreen 迁移） ──
 
@@ -223,6 +229,10 @@ class CompanionViewModel(
 
     /** 天气预警是否启用 */
     var weatherAlertEnabled by mutableStateOf(true)
+        private set
+
+    /** 专注完成鼓励是否启用 */
+    var focusCompletionEnabled by mutableStateOf(true)
         private set
 
     /**
@@ -419,6 +429,8 @@ class CompanionViewModel(
             val promptGreetingEvening: String?,
             val promptReminder: String?,
             val promptWeatherAlert: String?,
+            val promptFocusComplete: String?,
+            val promptFocusInterrupted: String?,
             val morningEnabled: String?,
             val morningTime: String?,
             val noonEnabled: String?,
@@ -426,6 +438,7 @@ class CompanionViewModel(
             val eveningEnabled: String?,
             val eveningTime: String?,
             val weatherAlertEnabled: String?,
+            val focusCompletionEnabled: String?,
             val companionStyle: String?,
         )
 
@@ -453,6 +466,8 @@ class CompanionViewModel(
                     promptGreetingEvening = core.getSetting(PromptDefaults.KEY_GREETING_EVENING),
                     promptReminder = core.getSetting(PromptDefaults.KEY_REMINDER),
                     promptWeatherAlert = core.getSetting(PromptDefaults.KEY_WEATHER_ALERT),
+                    promptFocusComplete = core.getSetting(PromptDefaults.KEY_FOCUS_COMPLETE),
+                    promptFocusInterrupted = core.getSetting(PromptDefaults.KEY_FOCUS_INTERRUPTED),
                     morningEnabled = core.getSetting("greeting_morning_enabled"),
                     morningTime = core.getSetting("greeting_morning_time"),
                     noonEnabled = core.getSetting("greeting_noon_enabled"),
@@ -460,13 +475,14 @@ class CompanionViewModel(
                     eveningEnabled = core.getSetting("greeting_evening_enabled"),
                     eveningTime = core.getSetting("greeting_evening_time"),
                     weatherAlertEnabled = core.getSetting("weather_alert_enabled"),
+                    focusCompletionEnabled = core.getSetting("focus_completion_enabled"),
                     companionStyle = core.getSetting(PromptDefaults.KEY_COMPANION_STYLE),
                 )
             } catch (e: Exception) {
                 Log.e(TAG, "loadSettings DB 读取异常", e)
                 RawData(null, null, null, null, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null,
-                    null, null, null, null, null, null, null, null)
+                    null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null, null)
             }
         }
 
@@ -527,6 +543,8 @@ class CompanionViewModel(
             promptGreetingEvening = loaded.promptGreetingEvening ?: defs[PromptDefaults.KEY_GREETING_EVENING]!!
             promptReminder = loaded.promptReminder ?: defs[PromptDefaults.KEY_REMINDER]!!
             promptWeatherAlert = loaded.promptWeatherAlert ?: defs[PromptDefaults.KEY_WEATHER_ALERT]!!
+            promptFocusComplete = loaded.promptFocusComplete ?: defs[PromptDefaults.KEY_FOCUS_COMPLETE]!!
+            promptFocusInterrupted = loaded.promptFocusInterrupted ?: defs[PromptDefaults.KEY_FOCUS_INTERRUPTED]!!
 
             // ── 加载问候调度设置 ──
             morningEnabled = loaded.morningEnabled != "false"
@@ -538,6 +556,9 @@ class CompanionViewModel(
 
             // ── 加载天气预警设置 ──
             weatherAlertEnabled = loaded.weatherAlertEnabled != "false"
+
+            // ── 加载专注完成鼓励设置 ──
+            focusCompletionEnabled = loaded.focusCompletionEnabled != "false"
 
             // ── 加载用户偏好 ──
             if (!loaded.prefsJson.isNullOrEmpty()) {
@@ -564,6 +585,8 @@ class CompanionViewModel(
                 PromptDefaults.KEY_GREETING_EVENING to loaded.promptGreetingEvening,
                 PromptDefaults.KEY_REMINDER to loaded.promptReminder,
                 PromptDefaults.KEY_WEATHER_ALERT to loaded.promptWeatherAlert,
+                PromptDefaults.KEY_FOCUS_COMPLETE to loaded.promptFocusComplete,
+                PromptDefaults.KEY_FOCUS_INTERRUPTED to loaded.promptFocusInterrupted,
             ))
         } catch (e: Exception) {
             // 兜底：内层未捕获异常
@@ -1057,6 +1080,8 @@ class CompanionViewModel(
             PromptDefaults.KEY_GREETING_EVENING -> promptGreetingEvening = value
             PromptDefaults.KEY_REMINDER -> promptReminder = value
             PromptDefaults.KEY_WEATHER_ALERT -> promptWeatherAlert = value
+            PromptDefaults.KEY_FOCUS_COMPLETE -> promptFocusComplete = value
+            PromptDefaults.KEY_FOCUS_INTERRUPTED -> promptFocusInterrupted = value
         }
         try { core.setSetting(key, value) } catch (_: Exception) {}
     }
@@ -1137,6 +1162,16 @@ class CompanionViewModel(
         } else {
             com.echonion.nion.reminder.WeatherAlertScheduler.stop(context)
         }
+    }
+
+    /**
+     * 更新专注完成鼓励开关。
+     *
+     * @param enabled 是否启用
+     */
+    fun updateFocusCompletionEnabled(enabled: Boolean) {
+        focusCompletionEnabled = enabled
+        try { core.setSetting("focus_completion_enabled", if (enabled) "true" else "false") } catch (_: Exception) {}
     }
 
     /**

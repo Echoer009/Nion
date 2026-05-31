@@ -29,6 +29,10 @@ object PromptDefaults {
     const val KEY_REMINDER = "prompt_reminder"
     /** 天气预警提示词 key */
     const val KEY_WEATHER_ALERT = "prompt_weather_alert"
+    /** 专注完成鼓励提示词 key（自然完成时使用） */
+    const val KEY_FOCUS_COMPLETE = "prompt_focus_complete"
+    /** 专注中断鼓励提示词 key（提前结束 ≥5 分钟时使用） */
+    const val KEY_FOCUS_INTERRUPTED = "prompt_focus_interrupted"
     /** 密集提醒提示词 key */
     const val KEY_BATCH_REMINDER = "prompt_batch_reminder"
     /** 伙伴风格 key —— 决定工具执行完成后的拟人话术风格 */
@@ -134,6 +138,30 @@ object PromptDefaults {
 - 给出实用建议（如带伞、加衣服、避免户外活动等）
     """.trimIndent()
 
+    /** 专注完成鼓励 —— 通用回退值（自然完成时使用） */
+    private val FALLBACK_FOCUS_COMPLETE = """
+用户刚刚完成了一次专注。
+
+任务：{taskName}
+本次专注：{sessionMinutes} 分钟
+该任务累计专注：{totalMinutes} 分钟
+今日已完成 {todaySessions} 次专注，共 {todayMinutes} 分钟
+
+请根据以上数据给用户一句鼓励。
+    """.trimIndent()
+
+    /** 专注中断鼓励 —— 通用回退值（提前结束 ≥5 分钟时使用） */
+    private val FALLBACK_FOCUS_INTERRUPTED = """
+用户中断了一次专注，但已经坚持了 {sessionMinutes} 分钟。
+
+任务：{taskName}
+本次专注：{sessionMinutes} 分钟（未完成计划的 {plannedMinutes} 分钟）
+该任务累计专注：{totalMinutes} 分钟
+今日已完成 {todaySessions} 次专注，共 {todayMinutes} 分钟
+
+请根据以上数据给用户一句鼓励。
+    """.trimIndent()
+
     // ── 对外暴露的默认值（优先 preset，回退通用）─────────────────────
 
     /** 人设 —— 优先使用角色预设，无预设则使用通用默认 */
@@ -156,6 +184,12 @@ object PromptDefaults {
 
     /** 天气预警 */
     val WEATHER_ALERT: String get() = preset.weatherAlertPrompt ?: FALLBACK_WEATHER_ALERT
+
+    /** 专注完成鼓励（自然完成） */
+    val FOCUS_COMPLETE: String get() = FALLBACK_FOCUS_COMPLETE
+
+    /** 专注中断鼓励（提前结束 ≥5 分钟） */
+    val FOCUS_INTERRUPTED: String get() = FALLBACK_FOCUS_INTERRUPTED
 
     // ── 模板变量说明（UI 展示用） ────────────────────────────────────
 
@@ -186,6 +220,21 @@ object PromptDefaults {
             "{name}" to "伙伴名字",
             "{severity}" to "严重程度（紧急/提醒/提示）",
         ),
+        KEY_FOCUS_COMPLETE to listOf(
+            "{taskName}" to "任务名称",
+            "{sessionMinutes}" to "本次专注分钟数",
+            "{totalMinutes}" to "该任务累计专注分钟数",
+            "{todaySessions}" to "今日完成专注次数",
+            "{todayMinutes}" to "今日专注总分钟数",
+        ),
+        KEY_FOCUS_INTERRUPTED to listOf(
+            "{taskName}" to "任务名称",
+            "{sessionMinutes}" to "本次专注分钟数",
+            "{plannedMinutes}" to "计划专注分钟数",
+            "{totalMinutes}" to "该任务累计专注分钟数",
+            "{todaySessions}" to "今日完成专注次数",
+            "{todayMinutes}" to "今日专注总分钟数",
+        ),
     )
 
     // ── key → 默认值映射 ────────────────────────────────────────────
@@ -204,6 +253,8 @@ object PromptDefaults {
             KEY_GREETING_EVENING to GREETING_EVENING,
             KEY_REMINDER to REMINDER,
             KEY_WEATHER_ALERT to WEATHER_ALERT,
+            KEY_FOCUS_COMPLETE to FOCUS_COMPLETE,
+            KEY_FOCUS_INTERRUPTED to FOCUS_INTERRUPTED,
         )
     }
 

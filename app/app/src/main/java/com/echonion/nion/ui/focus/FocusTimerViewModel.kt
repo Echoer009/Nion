@@ -1,6 +1,7 @@
 package com.echonion.nion.ui.focus
 
 import android.app.Application
+import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -8,6 +9,7 @@ import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.echonion.nion.NionApp
 import com.echonion.nion.core
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -24,9 +26,14 @@ import uniffi.nion_core.NionCore
  * 因用户切换导航页而被销毁，计时器仍持续工作，用户切回专注页时
  * 自动恢复显示。
  *
+ * 专注完成/中断（≥5分钟）时，检查 focus_completion_enabled 开关，
+ * 收集上下文数据（任务名、时长、今日统计等），通过 NionApp 事件总线
+ * 发出 CompletionEvent，由 CompletionOverlay 接收并展示鼓励文案。
+ *
+ * @property app Application 实例，用于获取 NionCore 和发送事件
  * @property core NionCore 实例，用于持久化专注时长到数据库
  */
-class FocusTimerViewModel(private val core: NionCore) : ViewModel() {
+class FocusTimerViewModel(private val app: Application, private val core: NionCore) : ViewModel() {
 
     /** 计时器是否正在运行 */
     var isRunning by mutableStateOf(false)
@@ -175,8 +182,13 @@ class FocusTimerViewModel(private val core: NionCore) : ViewModel() {
      * - 已专注 >= 5 分钟 → 按实际耗时累加到关联任务的 focus_seconds
      *
      * 设置 needsProgressSnap 让 Composable 瞬间重置进度动画。
+     * 符合条件时发出 CompletionEvent（isEarlyStop=true）。
      */
     fun stopEarly() {
+        // 保存本次专注分钟数，用于发事件（reset 前必须先取值）
+        val elapsedMin = elapsedSeconds / 60
+        val shouldEmit = elapsedSeconds >= 300
+
         // 不再要求 isRunning，暂停后点停止也要检查 5 分钟规则
         if (elapsedSeconds >= 300 && selectedTaskId != null) {
             viewModelScope.launch {
@@ -194,11 +206,79 @@ class FocusTimerViewModel(private val core: NionCore) : ViewModel() {
         remainingSeconds = focusMinutes * 60
         elapsedSeconds = 0
         needsProgressSnap = true
+
+        // 中断但 ≥5 分钟，发出完成事件
+        if (shouldEmit) {
+            emitCompletionEvent(elapsedMin, isEarlyStop = true)
+        }
     }
 
     /** 清除进度瞬间重置标记（由 Composable 在执行 snapTo 后调用） */
     fun clearProgressSnap() {
         needsProgressSnap = false
+    }
+
+    /**
+     * 专注完成/中断后收集上下文数据并发出 CompletionEvent。
+     *
+     * 工作流程：
+     * 1. 检查 focus_completion_enabled 开关，关闭则跳过
+     * 2. 在 IO 线程收集数据：今日专注统计、任务累计时长
+     * 3. 构建 CompletionEvent 并通过 NionApp.postCompletionEvent 发出
+     *
+     * @param elapsedMinutes 本次实际专注分钟数
+     * @param isEarlyStop 是否提前结束
+     */
+    private fun emitCompletionEvent(elapsedMinutes: Int, isEarlyStop: Boolean) {
+        viewModelScope.launch {
+            try {
+                // 检查专注鼓励开关，关闭则不发事件
+                val enabled = core.getSetting("focus_completion_enabled")
+                if (enabled == "false") return@launch
+
+                val nionApp = app as? NionApp ?: return@launch
+
+                // 在 IO 线程收集数据
+                val data = withContext(Dispatchers.IO) {
+                    // 查询今日专注统计（最近 1 天）
+                    val stats = core.getFocusStats(1)
+                    val today = java.time.LocalDate.now().toString()
+                    val todayStat = stats.daily.find { it.date == today }
+                    val todaySessions = todayStat?.sessionCount?.toInt() ?: 0
+                    val todayMinutes = (todayStat?.totalSeconds?.toInt() ?: 0) / 60
+
+                    // 查询任务累计专注时长
+                    val totalMinutes = if (selectedTaskId != null) {
+                        try {
+                            val task = core.getTask(selectedTaskId!!)
+                            (task.focusSeconds / 60).toInt()
+                        } catch (_: Exception) {
+                            elapsedMinutes
+                        }
+                    } else {
+                        elapsedMinutes
+                    }
+
+                    Triple(todaySessions, todayMinutes, totalMinutes)
+                }
+
+                val (todaySessions, todayMinutes, totalMinutes) = data
+
+                nionApp.postCompletionEvent(
+                    CompletionEvent(
+                        taskName = selectedTaskTitle,
+                        sessionMinutes = elapsedMinutes,
+                        plannedMinutes = focusMinutes,
+                        totalMinutes = totalMinutes,
+                        todaySessions = todaySessions,
+                        todayMinutes = todayMinutes,
+                        isEarlyStop = isEarlyStop,
+                    )
+                )
+            } catch (e: Exception) {
+                Log.w("FocusTimerViewModel", "发送专注完成事件失败", e)
+            }
+        }
     }
 
     /**
@@ -231,6 +311,8 @@ class FocusTimerViewModel(private val core: NionCore) : ViewModel() {
                             }
                         }
                     }
+                    // 自然完成，发出鼓励事件
+                    emitCompletionEvent(focusMinutes, isEarlyStop = false)
                     elapsedSeconds = 0
                     break
                 }
@@ -246,7 +328,7 @@ class FocusTimerViewModel(private val core: NionCore) : ViewModel() {
     class Factory(private val app: Application) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            return FocusTimerViewModel(app.core()) as T
+            return FocusTimerViewModel(app, app.core()) as T
         }
     }
 }

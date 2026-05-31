@@ -12,6 +12,7 @@ import com.echonion.nion.reminder.ReminderScheduler
 import com.echonion.nion.reminder.WeatherAlertEvent
 import com.echonion.nion.reminder.WeatherAlertScheduler
 import com.echonion.nion.ui.companion.tools.DataType
+import com.echonion.nion.ui.focus.CompletionEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -104,6 +105,22 @@ class NionApp : Application() {
      */
     fun postWeatherAlertEvent(event: WeatherAlertEvent) {
         _weatherAlertEvents.tryEmit(event)
+    }
+
+    /**
+     * 专注完成事件总线 —— 专注计时完成/中断时通过此总线通知 UI 层。
+     *
+     * CompletionOverlay 监听此事件流，收到事件后弹出鼓励悬浮卡片。
+     */
+    private val _completionEvents = MutableSharedFlow<CompletionEvent>(extraBufferCapacity = 4)
+    val completionEvents: SharedFlow<CompletionEvent> = _completionEvents.asSharedFlow()
+
+    /**
+     * 发送专注完成事件到 UI 层。
+     * 由 FocusTimerViewModel 在专注完成/中断时调用。
+     */
+    fun postCompletionEvent(event: CompletionEvent) {
+        _completionEvents.tryEmit(event)
     }
 
     /**
