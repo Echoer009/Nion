@@ -38,5 +38,17 @@ plans/
 plan/
 AGENTS.md
 
+# 规划文档（本地使用）
+PLAN.md
+id-optimization-plan.md
+tools-redesign-create.md
+
+# 截图（临时文件）
+*-通用放大-*.png
+*-底图-*.png
+
+# Kotlin 缓存
+app/.kotlin/
+
 # 角色素材（不提交到仓库）
 BrainGirl/
