@@ -20,9 +20,9 @@
 
 ## About Me
 
-Hehe, so you finally remembered to ask who I am? I'm Nion! The one who worries about your stuff more than you do!
+Hey there! I'm Nion! I can remind you to get stuff done, help you keep track of things, and worry about you more than you do!
 
-Don't let my looks fool you — my memory is amazing! Every little thing you tell me, I remember it all. What you like, what you hate, what you're busy with — organized and ready to go! And you don't even need to lift a finger, just tell me: "create a task", "what's left today", "remind me at 3 PM" — bam, done! No app switching, no form filling. Use that saved time to slack off instead, wouldn't that be nicer?
+Don't let my looks fool you — my memory is amazing! Every little thing you tell me, I remember it all. What you like, what you hate, what you're busy with — all organized and crystal clear! And you don't even need to lift a finger, just tell me: "create a task", "what's left today", "remind me at 3 PM" — bam, done! No app switching, no form filling. Use that saved time to slack off instead, wouldn't that be nicer?
 
 Oh, and I'll come find you on my own too~ See your tasks piling up like a mountain? Hehe, time to get you working! About to rain outside? I'll remind you to bring an umbrella — no way I'm letting you get soaked! Every morning I'll organize your to-do list too, so the moment you open your eyes you know what's up today~
 
@@ -60,7 +60,7 @@ That's me you're chatting with~
 - **SSE streaming chat**: I talk character by character, not that "wait forever then dump everything at once" style
 - **9 built-in tools**: I can directly manipulate your task data — see the toolbox below for details
 - **Memory system**: Your preferences and focus points get remembered automatically, carried across sessions
-- **Weather awareness**: GPS + free weather API. Rain's coming? I'll tell you to grab an umbrella
+- **Weather awareness**: GPS + weather API. Rain's coming? I'll tell you to grab an umbrella
 - **Fully customizable persona**: Personality, avatar, character — change whatever you want, make me whoever you want
 
 <p align="center">
