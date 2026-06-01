@@ -57,6 +57,17 @@ fun String?.isReminderOverdue(): Boolean {
     }
 }
 
+/** 判断提醒字符串中的日期部分是否就是今天，解析失败返回 false */
+fun String?.isReminderToday(): Boolean {
+    if (this.isNullOrBlank()) return false
+    return try {
+        val dateStr = substringBefore("T")
+        LocalDate.parse(dateStr, DateTimeFormatter.ISO_LOCAL_DATE) == LocalDate.now()
+    } catch (_: Exception) {
+        false
+    }
+}
+
 /** 从提醒字符串中提取日期部分，格式化为中文（如 "6月15日"），解析失败返回 null */
 fun String?.formatReminderDate(): String? {
     if (this.isNullOrBlank()) return null

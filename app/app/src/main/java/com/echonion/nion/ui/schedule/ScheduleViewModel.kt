@@ -222,12 +222,17 @@ class ScheduleViewModel(
         }
     }
 
-    /** 更新一次性提醒时间 */
+    /** 更新一次性提醒时间，传 null 时清除提醒 */
     fun updateReminder(taskId: String, reminder: String?) {
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
-                    core.updateTask(taskId, null, null, null, null, null, reminder, null, null, null)
+                    // null 表示清除提醒，调用 clearTaskReminder 将 reminder 设为 NULL
+                    if (reminder == null) {
+                        core.clearTaskReminder(taskId)
+                    } else {
+                        core.updateTask(taskId, null, null, null, null, null, reminder, null, null, null)
+                    }
                 }
                 loadTasksForDate(selectedDate)
                 app.notifyDataChanged(setOf(DataType.TASK_DATA))

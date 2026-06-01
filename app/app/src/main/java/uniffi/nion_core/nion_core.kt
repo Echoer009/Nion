@@ -640,6 +640,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_add_focus_time(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_clear_task_reminder(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_complete_daily_task(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_complete_daily_task_instance(
@@ -764,6 +766,8 @@ external fun uniffi_nion_core_fn_method_nioncore_add_attachment(`ptr`: Long,`tas
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_add_focus_time(`ptr`: Long,`taskId`: RustBuffer.ByValue,`seconds`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_nion_core_fn_method_nioncore_clear_task_reminder(`ptr`: Long,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_complete_daily_task(`ptr`: Long,`taskId`: RustBuffer.ByValue,`date`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_complete_daily_task_instance(`ptr`: Long,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -981,6 +985,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_add_focus_time() != 58450.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_clear_task_reminder() != 7702.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_complete_daily_task() != 44576.toShort()) {
@@ -1519,6 +1526,11 @@ public interface NionCoreInterface {
     fun `addFocusTime`(`taskId`: kotlin.String, `seconds`: kotlin.Long)
     
     /**
+     * 清除任务的一次性提醒（将 reminder 设为 NULL）
+     */
+    fun `clearTaskReminder`(`taskId`: kotlin.String): TaskData
+    
+    /**
      * 标记每日任务在指定日期已完成
      * 插入 daily_completions 记录；如果已存在则更新 completed_at
      * 每日任务不修改 tasks.status，status 永远保持 "todo"
@@ -1894,6 +1906,23 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
 }
     }
     
+    
+
+    
+    /**
+     * 清除任务的一次性提醒（将 reminder 设为 NULL）
+     */
+    @Throws(NionException::class)override fun `clearTaskReminder`(`taskId`: kotlin.String): TaskData {
+            return FfiConverterTypeTaskData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_clear_task_reminder(
+        it,
+        FfiConverterString.lower(`taskId`),_status)
+}
+    }
+    )
+    }
     
 
     

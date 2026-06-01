@@ -733,6 +733,8 @@ class TaskViewModel(
         var subtaskCount = 0
         fun walk(items: List<TaskItem>, depth: Int) {
             for (item in items) {
+                // 已完成的任务不计入统计，只显示未完成数量
+                if (item.isDone) continue
                 if (depth == 0) taskCount++ else subtaskCount++
                 walk(item.subtasks, depth + 1)
             }
@@ -998,7 +1000,13 @@ class TaskViewModel(
         viewModelScope.launch {
             try {
                 val updated = withContext(Dispatchers.IO) {
-                    core.updateTask(id, null, null, null, null, null, reminder, null, null, null)
+                    // null 表示清除提醒，需要调用 clearTaskReminder 将 reminder 字段设为 NULL；
+                    // 非 null 表示设置新的提醒时间，走 updateTask 正常更新
+                    if (reminder == null) {
+                        core.clearTaskReminder(id)
+                    } else {
+                        core.updateTask(id, null, null, null, null, null, reminder, null, null, null)
+                    }
                 }
                 // 更新提醒后重新调度闹钟
                 scheduleReminderIfNeeded(updated)

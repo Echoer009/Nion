@@ -46,7 +46,9 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.echonion.nion.ui.task.formatReminder
+import com.echonion.nion.ui.task.formatReminderDate
 import com.echonion.nion.ui.task.isReminderOverdue
+import com.echonion.nion.ui.task.isReminderToday
 import com.echonion.nion.ui.task.priorityColor
 import com.echonion.nion.ui.theme.LocalPriorityColors
 
@@ -282,8 +284,8 @@ private fun TaskReminderInfoRow(
     model: TaskCardModel,
 ) {
     val hasReminderTime = !model.reminderTime.isNullOrBlank()
-    // 每日循环任务不显示铃铛部分，避免与时钟图标重复
-    val hasReminder = !model.reminder.isNullOrBlank() && !model.isDaily
+    // 非每日任务：有 reminder 就显示铃铛；每日任务：reminder 日期不是今天时也显示日期
+    val hasReminder = !model.reminder.isNullOrBlank() && (!model.isDaily || !model.reminder.isReminderToday())
     // 每日任务的逾期判断：通过 reminder 字段（自动设为今天日期+时间）检测是否已过时
     val isDailyOverdue = model.isDaily && model.reminder.isReminderOverdue() && !model.isDone
     if (hasReminder || hasReminderTime) {
@@ -293,15 +295,21 @@ private fun TaskReminderInfoRow(
             if (hasReminder) {
                 val isOverdue = model.reminder.isReminderOverdue() && !model.isDone
                 Icon(
-                    Icons.Outlined.Notifications,
+                    if (model.isDaily) Icons.Outlined.CalendarToday else Icons.Outlined.Notifications,
                     contentDescription = null,
                     modifier = Modifier.size(12.dp),
                     tint = if (isOverdue) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),
                 )
                 Spacer(modifier = Modifier.width(4.dp))
+                // 每日循环任务只显示日期（如"6月3日"），非每日任务显示完整日期时间
+                val displayText = if (model.isDaily) {
+                    model.reminder.formatReminderDate() ?: ""
+                } else {
+                    model.reminder.formatReminder() ?: ""
+                }
                 Text(
-                    text = model.reminder.formatReminder() ?: "",
+                    text = displayText,
                     style = MaterialTheme.typography.bodySmall,
                     color = if (isOverdue) MaterialTheme.colorScheme.error
                     else MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),

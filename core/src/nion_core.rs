@@ -1183,6 +1183,22 @@ impl NionCore {
         )
     }
 
+    /// 清除任务的一次性提醒（将 reminder 设为 NULL）
+    pub fn clear_task_reminder(&self, task_id: String) -> Result<TaskData, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        let now = chrono::Utc::now().to_rfc3339();
+        db.execute(
+            "UPDATE tasks SET reminder = NULL, updated_at = ?1 WHERE id = ?2",
+            rusqlite::params![now, task_id],
+        )
+        .map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        query_task(&db, &task_id)
+    }
+
     /// 移除任务的每日循环（将 recurrence_rule 和 recurrence_reminder_time 设为 NULL）
     pub fn remove_task_recurrence(&self, task_id: String) -> Result<TaskData, NionError> {
         let db = self.db.lock().map_err(|e| NionError::DatabaseError {
