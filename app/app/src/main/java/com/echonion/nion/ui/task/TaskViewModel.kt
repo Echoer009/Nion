@@ -189,18 +189,29 @@ class TaskViewModel(
         selectedTaskIds = emptySet()
     }
 
+    /**
+     * 批量删除选中的任务。
+     * 使用递归的 removeTaskFromList 确保任意深度的子任务都能被正确移除，
+     * 删除完成后从数据库重新加载任务列表以保证 UI 与数据一致。
+     */
     fun deleteSelectedTasks() {
         val ids = selectedTaskIds
         if (ids.isEmpty()) return
         val snapshot = tasks
-        tasks = tasks.filter { it.id !in ids }
-            .map { it.copy(subtasks = it.subtasks.filter { sub -> sub.id !in ids }) }
+        // 逐个递归移除选中的任务（支持任意嵌套深度）
+        var updated = tasks
+        for (id in ids) {
+            updated = removeTaskFromList(updated, id)
+        }
+        tasks = updated
         selectedTaskIds = emptySet()
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     for (id in ids) { core.deleteTask(id) }
                 }
+                // 从数据库重新加载，确保 UI 与实际数据一致
+                tasks = loadTasksForCurrentView()
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("批量删除失败: ${e.message}")

@@ -660,11 +660,15 @@ private fun AddTaskOverlay(
     // 当前面板状态，默认为 FORM 主表单
     var panel by remember { mutableStateOf(AddPanel.FORM) }
 
-    // 自动聚焦标题输入框，展开后立即呼出输入法
+    // 自动聚焦标题输入框，仅在首次展示 FORM 面板时呼出键盘
+    // 从设置重复/提醒等子面板返回时不会重复聚焦
     val focusRequester = remember { FocusRequester() }
-    // FORM 面板显示时才聚焦标题，切换到其他面板时不重新聚焦
+    var hasAutoFocused by remember { mutableStateOf(false) }
     LaunchedEffect(panel == AddPanel.FORM) {
-        if (panel == AddPanel.FORM) focusRequester.requestFocus()
+        if (panel == AddPanel.FORM && !hasAutoFocused) {
+            focusRequester.requestFocus()
+            hasAutoFocused = true
+        }
     }
 
     // 半透明背景 + 点击外部关闭

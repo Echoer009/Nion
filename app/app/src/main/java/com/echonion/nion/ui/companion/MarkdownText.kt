@@ -839,7 +839,7 @@ private fun StickerAwareText(
     var textLayoutResult by remember { mutableStateOf<androidx.compose.ui.text.TextLayoutResult?>(null) }
 
     // 记录每个剧透区域是否已被用户点击揭示，key 为 SpoilerRange 的起始偏移
-    val revealedSpoilers = remember { mutableSetOf<Int>() }
+    val revealedSpoilers = remember { mutableStateOf(emptySet<Int>()) }
 
     Box(modifier = modifier) {
         Text(
@@ -897,7 +897,7 @@ private fun StickerAwareText(
             // 取文本渲染区域的总宽度，用于让遮罩铺满整行（不留右端缝隙）
             val textWidth = with(density) { layout.size.width.toFloat() }
             for (spoilerRange in result.spoilerRanges) {
-                val isRevealed = revealedSpoilers.contains(spoilerRange.start)
+                val isRevealed = revealedSpoilers.value.contains(spoilerRange.start)
                 // 根据剧透首尾字符确定跨越的行号范围
                 val startLine = try { layout.getLineForOffset(spoilerRange.start) } catch (_: Exception) { continue }
                 val endLine = try { layout.getLineForOffset((spoilerRange.end - 1).coerceAtLeast(0)) } catch (_: Exception) { startLine }
@@ -942,7 +942,10 @@ private fun StickerAwareText(
                             )
                             .run {
                                 if (!isRevealed) {
-                                    clickable { revealedSpoilers.add(spoilerRange.start) }
+                                    clickable {
+                                        revealedSpoilers.value =
+                                            revealedSpoilers.value + spoilerRange.start
+                                    }
                                 } else {
                                     this
                                 }
