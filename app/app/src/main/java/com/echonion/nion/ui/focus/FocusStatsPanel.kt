@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -463,7 +464,8 @@ private fun DailyBarRow(
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize(fraction)
+                    .fillMaxWidth(fraction)
+                    .fillMaxHeight()
                     .clip(RoundedCornerShape(6.dp))
                     .background(
                         // 今日柱状图使用 primary，历史柱状图使用 tertiary（装饰性区分）
@@ -527,7 +529,8 @@ private fun TaskBarRow(
         ) {
             Box(
                 modifier = Modifier
-                    .fillMaxSize(fraction)
+                    .fillMaxWidth(fraction)
+                    .fillMaxHeight()
                     .clip(RoundedCornerShape(4.dp))
                     .background(MaterialTheme.colorScheme.tertiary),
             )
@@ -535,12 +538,13 @@ private fun TaskBarRow(
 
         Spacer(modifier = Modifier.width(8.dp))
 
-        // 时长
+        // 时长文字，固定宽度保证柱状图起始位置对齐（与 DailyBarRow 一致）
         Text(
             formatDuration(seconds),
             style = MaterialTheme.typography.bodySmall,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurface,
+            modifier = Modifier.width(52.dp),
         )
     }
 }
