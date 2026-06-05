@@ -454,7 +454,8 @@ private fun ScheduleRoute(
  * @param preselectedDuration 预选专注时长（分钟），null 表示未设置
  * @param autoStart 是否自动启动计时器
  * @param onPreselectedConsumed 预选任务信息被 FocusScreen 消费后触发，
- *   调用方应清除 preselectedTaskId 等状态，防止回退时重复预选
+ *   调用方应清除 preselectedTaskId 等状态，防止回退时重复预选。
+ *   由 FocusScreen 内部在 applyPreselection 成功后回调，避免竞态。
  */
 @Composable
 private fun FocusRoute(
@@ -471,13 +472,8 @@ private fun FocusRoute(
         preselectedTaskTitle = preselectedTaskTitle,
         preselectedDuration = preselectedDuration,
         autoStart = autoStart,
+        onPreselectedConsumed = onPreselectedConsumed,
     )
-    // 预选任务信息在传递给 FocusScreen 后消费掉，避免导航回退时重复预选
-    LaunchedEffect(preselectedTaskId) {
-        if (preselectedTaskId != null) {
-            onPreselectedConsumed()
-        }
-    }
 }
 
 /**

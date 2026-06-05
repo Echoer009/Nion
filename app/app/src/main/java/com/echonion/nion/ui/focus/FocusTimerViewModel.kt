@@ -77,17 +77,15 @@ class FocusTimerViewModel(private val app: Application, private val core: NionCo
     val progress: Float
         get() = if (totalSeconds > 0) remainingSeconds.toFloat() / totalSeconds.toFloat() else 1f
 
-    /** 已消费的预选任务 ID，防止重复应用同一预选 */
-    private var consumedPreselectedId: String? = null
-
     /** 倒计时协程的 Job，用于暂停/重置时取消 */
     private var countdownJob: Job? = null
 
     /**
      * 应用从外部（任务详情页）传入的预选任务信息。
      *
-     * 通过 consumedPreselectedId 去重，确保同一个预选只应用一次，
-     * 即使 FocusScreen 因导航被重建也不会重复触发。
+     * 由 FocusScreen 的 LaunchedEffect(preselectedTaskId) 调用，
+     * LaunchedEffect 的 key 机制保证同一个 preselectedTaskId 不会重复触发，
+     * 因此不再需要额外的去重字段。
      *
      * @param taskId 预选任务 ID，null 则跳过
      * @param taskTitle 预选任务标题
@@ -100,9 +98,7 @@ class FocusTimerViewModel(private val app: Application, private val core: NionCo
         duration: Int?,
         autoStart: Boolean,
     ) {
-        // taskId 为空或已经被消费过 → 跳过
-        if (taskId == null || taskId == consumedPreselectedId) return
-        consumedPreselectedId = taskId
+        if (taskId == null) return
 
         selectedTaskId = taskId
         selectedTaskTitle = taskTitle
@@ -185,16 +181,17 @@ class FocusTimerViewModel(private val app: Application, private val core: NionCo
      * 符合条件时发出 CompletionEvent（isEarlyStop=true）。
      */
     fun stopEarly() {
-        // 保存本次专注分钟数，用于发事件（reset 前必须先取值）
-        val elapsedMin = elapsedSeconds / 60
-        val shouldEmit = elapsedSeconds >= 300
+        // reset 前必须先取值，否则协程执行时 state 已被重置为 0
+        val capturedElapsed = elapsedSeconds
+        val elapsedMin = capturedElapsed / 60
+        val shouldEmit = capturedElapsed >= 300
 
         // 不再要求 isRunning，暂停后点停止也要检查 5 分钟规则
-        if (elapsedSeconds >= 300 && selectedTaskId != null) {
+        if (capturedElapsed >= 300 && selectedTaskId != null) {
             viewModelScope.launch {
                 withContext(Dispatchers.IO) {
                     try {
-                        core.addFocusTime(selectedTaskId!!, elapsedSeconds.toLong())
+                        core.addFocusTime(selectedTaskId!!, capturedElapsed.toLong())
                     } catch (_: Exception) {
                     }
                 }
@@ -313,7 +310,10 @@ class FocusTimerViewModel(private val app: Application, private val core: NionCo
                     }
                     // 自然完成，发出鼓励事件
                     emitCompletionEvent(focusMinutes, isEarlyStop = false)
+                    // 重置计时器回到就绪状态，等待下一轮
                     elapsedSeconds = 0
+                    remainingSeconds = totalSeconds
+                    needsProgressSnap = true
                     break
                 }
             }

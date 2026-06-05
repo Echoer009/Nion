@@ -266,6 +266,9 @@ private fun focusSetupViewModel(): FocusSetupViewModel {
  * @param preselectedTaskTitle 预选任务的标题
  * @param preselectedDuration 从外部传入的预选专注时长（分钟），覆盖默认 25 分钟
  * @param autoStart 是否自动启动计时器（从任务详情跳转时为 true）
+ * @param onPreselectedConsumed 预选任务信息被成功消费后触发，
+ *   用于通知上层清除 preselectedTaskId 等状态，防止回退时重复预选。
+ *   在 applyPreselection 执行完毕后调用，确保时序正确。
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -275,13 +278,20 @@ fun FocusScreen(
     preselectedTaskTitle: String? = null,
     preselectedDuration: Int? = null,
     autoStart: Boolean = false,
+    onPreselectedConsumed: () -> Unit = {},
 ) {
     // Activity 作用域的 ViewModel，导航切换不丢失计时器状态
     val vm = focusTimerViewModel()
 
-    // 处理外部传入的预选任务信息（ViewModel 内部通过 consumedPreselectedId 去重，仅应用一次）
+    // 处理外部传入的预选任务信息：
+    // 1. 先执行 applyPreselection 设置 VM 状态（时长、任务、自动启动）
+    // 2. 成功后立即通知上层清除 preselected 状态，避免竞态导致状态被提前清空
+    // LaunchedEffect 的 key 机制保证同一 preselectedTaskId 只触发一次
     LaunchedEffect(preselectedTaskId) {
         vm.applyPreselection(preselectedTaskId, preselectedTaskTitle, preselectedDuration, autoStart)
+        if (preselectedTaskId != null) {
+            onPreselectedConsumed()
+        }
     }
 
     // showTaskPanel: 是否显示任务选择面板（纯 UI 状态，留在 Composable 中）
