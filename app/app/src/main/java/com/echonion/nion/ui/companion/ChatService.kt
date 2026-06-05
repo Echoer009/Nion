@@ -51,6 +51,19 @@ val builtInProviders = listOf(
 )
 
 /**
+ * 根据名称查找 Provider 配置，优先使用内置定义，但若内置的 baseUrl 为空（如"自定义"），
+ * 则用存储的 baseUrl 覆盖。未匹配到内置 Provider 时使用存储值构造新配置。
+ *
+ * @param name Provider 名称
+ * @param storedBaseUrl DB / SavedConfig 中存储的 baseUrl
+ * @param storedApiType DB / SavedConfig 中存储的 apiType
+ */
+fun resolveProvider(name: String, storedBaseUrl: String, storedApiType: ApiType): ProviderConfig =
+    builtInProviders.find { it.name == name }
+        ?.let { if (it.baseUrl.isEmpty()) it.copy(baseUrl = storedBaseUrl) else it }
+        ?: ProviderConfig(name, storedBaseUrl, storedApiType)
+
+/**
  * 聊天服务 —— 负责与 LLM API 通信，支持 Tool Calling。
  *
  * 支持两种 API 格式：

@@ -4,7 +4,7 @@ import android.util.Log
 import com.echonion.nion.ui.companion.ApiType
 import com.echonion.nion.ui.companion.ChatService
 import com.echonion.nion.ui.companion.ProviderConfig
-import com.echonion.nion.ui.companion.builtInProviders
+import com.echonion.nion.ui.companion.resolveProvider
 import org.json.JSONObject
 import uniffi.nion_core.NionCore
 
@@ -40,9 +40,7 @@ object ReminderLlmClient {
         val model = core.getSetting("llm_model") ?: return null
         val baseUrl = core.getSetting("llm_base_url") ?: ""
 
-        // 从内置 Provider 列表中查找匹配的配置（获取正确的 baseUrl 和 apiType）
-        val providerConfig = builtInProviders.find { it.name == providerName }
-            ?: ProviderConfig(providerName, baseUrl, ApiType.OPENAI_COMPATIBLE)
+        val providerConfig = resolveProvider(providerName, baseUrl, ApiType.OPENAI_COMPATIBLE)
 
         return Instance(providerConfig, apiKey, model)
     }

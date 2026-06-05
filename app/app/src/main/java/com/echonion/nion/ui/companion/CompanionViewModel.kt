@@ -611,8 +611,7 @@ class CompanionViewModel(
             } catch (_: Exception) {
                 ApiType.OPENAI_COMPATIBLE
             }
-            currentProvider = builtInProviders.find { it.name == pName }
-                ?: ProviderConfig(name = pName, baseUrl = loaded.baseUrl ?: "", apiType = apiType)
+            currentProvider = resolveProvider(pName, loaded.baseUrl ?: "", apiType)
             if (savedConfigs.isEmpty()) {
                 migrateToMultiConfig(pName, pKey, pModel, loaded.baseUrl ?: "", loaded.apiTypeName ?: "OPENAI_COMPATIBLE")
             }
@@ -1069,12 +1068,7 @@ class CompanionViewModel(
         } catch (_: Exception) {
             ApiType.OPENAI_COMPATIBLE
         }
-        currentProvider = builtInProviders.find { it.name == config.provider }
-            ?: ProviderConfig(
-                name = config.provider,
-                baseUrl = config.baseUrl,
-                apiType = apiType,
-            )
+        currentProvider = resolveProvider(config.provider, config.baseUrl, apiType)
 
         // 持久化当前激活配置到单键（向后兼容）
         try {
