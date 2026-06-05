@@ -51,6 +51,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.echonion.nion.NionApp
 import com.echonion.nion.core
+import com.echonion.nion.ui.companion.MarkdownText
 import com.echonion.nion.ui.companion.PromptDefaults
 import com.echonion.nion.ui.theme.NionAlpha
 import kotlinx.coroutines.MainScope
@@ -254,13 +255,15 @@ fun CompletionOverlay(
                             }
                         }
 
-                        // ── 鼓励文案（LLM 加载中显示占位文本）──
+                        // ── 鼓励文案（LLM 加置中显示占位文本）──
                         val displayText = message ?: "..."
-                        Text(
-                            displayText,
+                        val stickers = remember { app.core.getStickers() }
+                        MarkdownText(
+                            content = displayText,
                             style = MaterialTheme.typography.bodyMedium.copy(
                                 color = onCardColor.copy(alpha = NionAlpha.TEXT_HIGH),
                             ),
+                            stickers = stickers,
                         )
 
                         // ── "谢谢" 按钮：实心填充，使用强调色 ──
