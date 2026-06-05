@@ -271,6 +271,10 @@ fun TaskScreen(
                         onUpdateNotes = { notes ->
                             viewModel.updateTask(taskId, description = notes)
                         },
+                        /** 任务标题重命名：调用 ViewModel 更新标题 */
+                        onRename = { newName ->
+                            viewModel.updateTask(taskId, name = newName)
+                        },
                         onUpdateRecurrence = { rule, time ->
                             viewModel.updateRecurrence(taskId, rule, time)
                         },

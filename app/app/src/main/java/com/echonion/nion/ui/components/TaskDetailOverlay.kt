@@ -58,8 +58,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.unit.dp
 import com.echonion.nion.ui.task.AttachmentButton
 import com.echonion.nion.ui.task.AttachmentList
@@ -104,6 +108,7 @@ enum class DetailPanel { DETAIL, ADD_SUBTASK, RECURRENCE, REMINDER }
  * @param onPickFile 点击添加文件附件时触发
  * @param onRemoveAttachment 删除附件时触发，传入附件 ID
  * @param onPreviewImage 预览图片附件时触发，传入附件 UI 模型
+ * @param onRename 任务标题重命名回调，传入新标题
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -132,6 +137,8 @@ fun TaskDetailOverlay(
     onRemoveAttachment: (String) -> Unit = {},
     /** 预览图片附件时触发 */
     onPreviewImage: (AttachmentUiItem) -> Unit = {},
+    /** 任务标题重命名回调，传入新标题 */
+    onRename: (String) -> Unit = {},
 ) {
     // 备注内容：初始值为任务描述，可随时编辑，每次变更自动保存
     var notes by remember(task.id) { mutableStateOf(task.description ?: "") }
@@ -228,10 +235,11 @@ fun TaskDetailOverlay(
                                 .padding(20.dp),
                             verticalArrangement = Arrangement.spacedBy(16.dp),
                         ) {
-                            // 顶部标题行
+                            // 顶部标题行，支持点击标题进入编辑模式
                             DetailPanelHeader(
                                 taskName = task.name,
                                 onDismiss = onDismiss,
+                                onRename = onRename,
                             )
 
                             // 循环 + 提醒快捷入口行
@@ -581,27 +589,97 @@ private fun ReminderPanel(
 }
 
 /**
- * 任务详情面板顶部标题行 —— 显示任务标题和关闭按钮。
+ * 任务详情面板顶部标题行 —— 显示任务标题和关闭按钮，支持点击标题进入内联编辑模式。
+ *
+ * 点击标题文字后切换为 OutlinedTextField，键盘 Done 或失焦时保存新标题。
+ * 参考 SettingsScreen 的主题重命名模式：isEditing 状态 + focusRequester + hasBeenFocused 防误触。
  *
  * @param taskName 任务标题文本
  * @param onDismiss 关闭浮层回调，点击关闭按钮时触发
+ * @param onRename 标题修改后的保存回调，传入新标题
  */
 @Composable
 private fun DetailPanelHeader(
     taskName: String,
     onDismiss: () -> Unit,
+    onRename: (String) -> Unit,
 ) {
+    // isEditing: 是否处于标题编辑模式
+    var isEditing by remember { mutableStateOf(false) }
+    // editName: 编辑中的标题文本
+    var editName by remember { mutableStateOf(taskName) }
+    // focusRequester: 用于编辑态自动聚焦输入框
+    val focusRequester = remember { FocusRequester() }
+    // hasBeenFocused: 防止初次组合时 onFocusChanged 误触发保存（焦点从未获得→失焦不应保存）
+    var hasBeenFocused by remember { mutableStateOf(false) }
+
+    // 进入编辑态时自动聚焦并弹出键盘
+    LaunchedEffect(isEditing) {
+        if (isEditing) {
+            focusRequester.requestFocus()
+        }
+    }
+
+    /**
+     * 提交标题修改：标题非空且与原标题不同时才保存，然后退出编辑态。
+     */
+    fun submitRename() {
+        if (!isEditing) return
+        val trimmed = editName.trim()
+        if (trimmed.isNotBlank() && trimmed != taskName) {
+            onRename(trimmed)
+        }
+        isEditing = false
+        hasBeenFocused = false
+    }
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Text(
-            taskName,
-            style = MaterialTheme.typography.titleLarge,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.weight(1f),
-        )
+        if (isEditing) {
+            // 编辑态：显示输入框，支持 Done / 失焦保存
+            OutlinedTextField(
+                value = editName,
+                onValueChange = { editName = it },
+                singleLine = true,
+                modifier = Modifier
+                    .weight(1f)
+                    .focusRequester(focusRequester)
+                    .onFocusChanged { focusState ->
+                        if (focusState.isFocused) {
+                            // 标记已获得过焦点，后续失焦才触发保存
+                            hasBeenFocused = true
+                        } else if (hasBeenFocused) {
+                            // 失焦且有变更 → 提交保存
+                            submitRename()
+                        }
+                    },
+                textStyle = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
+                keyboardActions = KeyboardActions(
+                    onDone = { submitRename() },
+                ),
+            )
+        } else {
+            // 展示态：只读标题，点击进入编辑
+            Text(
+                taskName,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier
+                    .weight(1f)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                    ) {
+                        editName = taskName
+                        hasBeenFocused = false
+                        isEditing = true
+                    },
+            )
+        }
         IconButton(onClick = onDismiss) {
             Icon(Icons.Default.Close, contentDescription = "关闭")
         }
