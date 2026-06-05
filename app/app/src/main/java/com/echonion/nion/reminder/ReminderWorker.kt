@@ -129,19 +129,31 @@ class ReminderWorker(
     /**
      * 调度每日任务的明天闹钟。
      * 从 DB 读取 recurrence_reminder_time，解析 HH:MM 后调度明天同一时刻。
+     * 如果当前任务已被标记 done（用户提前完成），会查找同名、同清单、同分组的
+     * 下一天自动生成实例，为新实例注册闹钟。
      */
     private fun scheduleNextDaily(context: Context, core: NionCore, taskId: String) {
         try {
             val task = core.getTask(taskId)
             val time = task.recurrenceReminderTime ?: return
             val parts = time.split(":")
-            if (parts.size == 2) {
-                val hour = parts[0].toIntOrNull() ?: return
-                val minute = parts[1].toIntOrNull() ?: return
-                ReminderScheduler.cancelReminder(context, taskId)
-                ReminderScheduler.scheduleDailyReminder(context, taskId, hour, minute)
-                Log.d(TAG, "已调度明天每日提醒: taskId=$taskId, $hour:$minute")
+            if (parts.size != 2) return
+            val hour = parts[0].toIntOrNull() ?: return
+            val minute = parts[1].toIntOrNull() ?: return
+
+            // 先取消当前任务的闹钟
+            ReminderScheduler.cancelReminder(context, taskId)
+
+            if (task.status == "done") {
+                // 任务已完成（用户提前点了完成），自动生成的新实例已有不同 ID。
+                // 新实例已由 TaskViewModel 在完成时注册了闹钟，此处无需重复注册。
+                Log.d(TAG, "每日任务已完成，跳过调度: taskId=$taskId（新实例闹钟已由 ViewModel 注册）")
+                return
             }
+
+            // 任务未完成（闹钟正常触发），为同一任务调度明天的闹钟
+            ReminderScheduler.scheduleDailyReminder(context, taskId, hour, minute)
+            Log.d(TAG, "已调度明天每日提醒: taskId=$taskId, $hour:$minute")
         } catch (e: Exception) {
             Log.w(TAG, "调度明天每日提醒失败: $taskId", e)
         }

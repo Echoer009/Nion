@@ -447,9 +447,21 @@ class TaskViewModel(
             try {
                 withContext(Dispatchers.IO) {
                     if (isCompleted) {
-                        core.uncompleteDailyTaskInstance(taskId)
+                        // 取消完成：恢复任务，删除明天自动生成的实例
+                        val result = core.uncompleteDailyTaskInstance(taskId)
+                        // 恢复原任务的提醒闹钟
+                        scheduleReminderIfNeeded(result)
                     } else {
-                        core.completeDailyTaskInstance(taskId)
+                        // 完成：标记 done，自动创建明天的实例
+                        val result = core.completeDailyTaskInstance(taskId)
+                        // 取消已完成任务的提醒
+                        ReminderStore.resetTriggerCount(app, taskId)
+                        ReminderScheduler.cancelReminder(app, taskId)
+                        NotificationHelper.dismissNotification(app, taskId)
+                        // 为自动生成的明天实例注册提醒闹钟
+                        result.newTask?.let { newTask ->
+                            scheduleReminderIfNeeded(newTask)
+                        }
                     }
                 }
                 // 重新加载过期列表和今日任务
@@ -486,14 +498,23 @@ class TaskViewModel(
                 withContext(Dispatchers.IO) {
                     if (markDone) {
                         // 完成并自动创建明天的实例
-                        core.completeDailyTaskInstance(task.id)
+                        val result = core.completeDailyTaskInstance(task.id)
                         // 取消今天的提醒闹钟
                         ReminderStore.resetTriggerCount(app, task.id)
                         ReminderScheduler.cancelReminder(app, task.id)
                         NotificationHelper.dismissNotification(app, task.id)
+                        // 为自动生成的明天实例注册提醒闹钟
+                        result.newTask?.let { newTask ->
+                            scheduleReminderIfNeeded(newTask)
+                            Log.d("TaskViewModel", "已为新每日实例注册提醒: ${newTask.id}")
+                        }
                     } else {
                         // 取消完成并删除明天的实例
-                        core.uncompleteDailyTaskInstance(task.id)
+                        // uncomplete 会删除明天自动创建的实例，需取消其闹钟
+                        val result = core.uncompleteDailyTaskInstance(task.id)
+                        // 恢复原任务的提醒闹钟
+                        scheduleReminderIfNeeded(result)
+                        Log.d("TaskViewModel", "已恢复每日任务提醒: ${result.id}")
                     }
                 }
                 // "今天"视图：跳过全量刷新，避免打断 animateItem 动画。

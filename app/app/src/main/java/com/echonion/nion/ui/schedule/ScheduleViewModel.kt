@@ -132,9 +132,20 @@ class ScheduleViewModel(
                     if (isDaily) {
                         // 新模型：实例化完成/取消
                         if (isCompleted) {
-                            core.uncompleteDailyTaskInstance(taskId)
+                            // 取消完成：恢复任务，删除明天实例，恢复原任务闹钟
+                            val result = core.uncompleteDailyTaskInstance(taskId)
+                            scheduleReminderIfNeeded(result)
                         } else {
-                            core.completeDailyTaskInstance(taskId)
+                            // 完成：标记 done，自动创建明天实例
+                            val result = core.completeDailyTaskInstance(taskId)
+                            // 取消已完成任务的提醒
+                            com.echonion.nion.reminder.ReminderStore.resetTriggerCount(app, taskId)
+                            com.echonion.nion.reminder.ReminderScheduler.cancelReminder(app, taskId)
+                            com.echonion.nion.reminder.NotificationHelper.dismissNotification(app, taskId)
+                            // 为自动生成的明天实例注册提醒闹钟
+                            result.newTask?.let { newTask ->
+                                scheduleReminderIfNeeded(newTask)
+                            }
                         }
                     } else {
                         val newStatus = if (isCompleted) "todo" else "done"
@@ -146,6 +157,41 @@ class ScheduleViewModel(
                 onError("更新任务失败: ${e.message}")
                 // 失败时回退：重新从 DB 加载
                 loadTasksForDate(date)
+            }
+        }
+    }
+
+    /**
+     * 根据任务数据调度提醒闹钟。
+     * 每日循环任务调度每日重复闹钟，普通任务调度一次性精确闹钟。
+     */
+    private fun scheduleReminderIfNeeded(task: TaskData) {
+        // 先取消已有闹钟，避免重复
+        com.echonion.nion.reminder.ReminderScheduler.cancelReminder(app, task.id)
+
+        // 每日循环任务：解析 HH:MM 并调度每日闹钟
+        if (task.recurrenceRule == "daily" && task.recurrenceReminderTime != null) {
+            val parts = task.recurrenceReminderTime!!.split(":")
+            if (parts.size == 2) {
+                val hour = parts[0].toIntOrNull()
+                val minute = parts[1].toIntOrNull()
+                if (hour != null && minute != null) {
+                    com.echonion.nion.reminder.ReminderScheduler.scheduleDailyReminder(app, task.id, hour, minute)
+                }
+            }
+        }
+
+        // 普通任务：解析 reminder 时间戳并调度一次性闹钟
+        if (task.reminder != null) {
+            try {
+                val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm")
+                val ldt = java.time.LocalDateTime.parse(task.reminder, formatter)
+                val millis = ldt.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                if (millis > System.currentTimeMillis()) {
+                    com.echonion.nion.reminder.ReminderScheduler.scheduleExactReminder(app, task.id, millis)
+                }
+            } catch (_: Exception) {
+                // 解析失败静默忽略
             }
         }
     }
