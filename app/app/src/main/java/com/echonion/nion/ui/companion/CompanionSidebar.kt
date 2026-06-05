@@ -206,10 +206,14 @@ fun CompanionSidebar(
             "provider=${viewModel.currentProvider?.name}"
     )
 
-    // 当从设置页保存配置后（currentProvider 从 null 变为非 null），自动回到聊天页
-    LaunchedEffect(viewModel.currentProvider) {
-        if (viewModel.currentProvider != null && panelMode == "setup") {
-            panelMode = null
+    // 监听 ViewModel 的配置保存事件，每次 saveApiConfig 成功后自动从 setup 回到 chat
+    // 使用 SharedFlow 事件而非 LaunchedEffect(currentProvider)，避免同 Provider 不同模型时
+    // currentProvider 结构相等导致 effect 不触发、面板卡在 setup 的问题
+    LaunchedEffect(Unit) {
+        viewModel.configSavedEvent.collect {
+            if (panelMode == "setup") {
+                panelMode = null
+            }
         }
     }
 

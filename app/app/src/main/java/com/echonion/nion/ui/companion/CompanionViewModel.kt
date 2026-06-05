@@ -23,6 +23,9 @@ import com.echonion.nion.preset.CharacterPresetInitializer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -146,6 +149,13 @@ class CompanionViewModel(
     /** 面板关闭时记录的消息数量，用于判断面板打开时是否有新消息需要滚到底部 */
     var lastSeenMessageCount by mutableStateOf(0)
         private set
+
+    /**
+     * 配置保存完成事件 —— saveApiConfig 执行完毕后 emit，通知 UI 层重置面板状态。
+     * 使用 SharedFlow 而非依赖 currentProvider 的结构相等比较，确保每次保存都能触发过渡。
+     */
+    private val _configSavedEvent = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    val configSavedEvent: SharedFlow<Unit> = _configSavedEvent.asSharedFlow()
 
     /** 当前已配置的 Provider，null 表示尚未配置 API key */
     var currentProvider by mutableStateOf<ProviderConfig?>(null)
@@ -1040,6 +1050,9 @@ class CompanionViewModel(
         }
         savedConfigs = newConfigs
         saveConfigsToStorage()
+
+        // 通知 UI 层配置已保存，触发 setup → chat 面板过渡
+        _configSavedEvent.tryEmit(Unit)
     }
 
     /**
