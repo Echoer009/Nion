@@ -70,25 +70,25 @@ class ReminderWorker(
                 applicationContext, taskId, taskTitle, message, triggerCount,
             )
 
-            // 5. 通过 OverlayDispatcher 三模分发：前台 SharedFlow / 后台悬浮窗 / 兜底通知
-            // 通知栏通知已在第 4 步发送，前台/悬浮窗接管后会主动取消
+            // 5. 通过 OverlayDispatcher 分发：有权限→悬浮窗 / 无权限+前台→Overlay / 兜底通知
+            // 通知栏通知已在第 4 步发送，悬浮窗/Overlay 接管后会主动取消
             OverlayDispatcher.dispatch(
                 context = applicationContext,
                 onForeground = {
-                    // 前台：发 SharedFlow 事件 → Compose ReminderOverlay 显示 App 内悬浮卡片
-                    app.postReminderEvent(ReminderEvent(taskId, taskTitle, type, message, triggerCount))
+                    // 无权限 + 前台：发 SharedFlow 事件 → Compose ReminderOverlay 显示 App 内悬浮卡片
+                    app.postReminderEvent(ReminderEvent(taskId, taskTitle, type, message, triggerCount, taskPriority))
                     // 前台 Overlay 已接管，取消系统通知避免双重提醒
                     NotificationHelper.dismissNotification(applicationContext, taskId)
                     Log.d(TAG, "已发送提醒事件到 UI（前台模式）")
                 },
                 onBackgroundOverlay = {
-                    // 后台 + 有悬浮窗权限 → 启动 ReminderFloatingService
+                    // 有悬浮窗权限（不论前后台）→ 启动 ReminderFloatingService
                     ReminderFloatingService.start(
-                        applicationContext, taskId, taskTitle, message, triggerCount,
+                        applicationContext, taskId, taskTitle, message, triggerCount, taskPriority,
                     )
                     // 悬浮窗已接管，取消系统通知避免双重提醒
                     NotificationHelper.dismissNotification(applicationContext, taskId)
-                    Log.d(TAG, "已启动悬浮窗 Service（后台模式）")
+                    Log.d(TAG, "已启动悬浮窗 Service（模式=${if (app.isInForeground) "前台" else "后台"}）")
                 },
                 onFallback = {
                     // 兜底：保留系统通知（上面已发送）

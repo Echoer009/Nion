@@ -189,6 +189,9 @@ class GreetingFloatingService : Service() {
             removeFloatingWindow(animated = false)
         }
 
+        // 轻震反馈：问候场景使用轻柔的短震动
+        VibrationHelper.vibrateLight(this)
+
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
         // 初始化 LifecycleOwner，ComposeView 需要

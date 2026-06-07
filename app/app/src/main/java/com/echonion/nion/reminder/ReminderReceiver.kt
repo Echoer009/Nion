@@ -42,6 +42,7 @@ class ReminderReceiver : BroadcastReceiver() {
  * @property type 闹钟类型："exact" 或 "daily"
  * @property message Nion 的个性化提醒文案
  * @property triggerCount 当前触发次数（1-5），用于 UI 展示紧迫度
+ * @property priority 任务优先级："low" / "medium" / "high"
  */
 data class ReminderEvent(
     val taskId: String,
@@ -49,4 +50,5 @@ data class ReminderEvent(
     val type: String,
     val message: String = "",
     val triggerCount: Int = 1,
+    val priority: String = "medium",
 )

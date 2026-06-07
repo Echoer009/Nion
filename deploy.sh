@@ -3,33 +3,53 @@ set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
-# ── Flavor 参数 ──
-# 用法: ./deploy.sh [standard|character]
-# 默认: standard
+# ── 参数解析 ──
+# 用法: ./deploy.sh [flavor] [build_type]
+#   flavor:     standard | character  (默认: standard)
+#   build_type: debug | release       (默认: debug)
+#
+# 示例:
+#   ./deploy.sh                        # standard debug
+#   ./deploy.sh character              # character debug
+#   ./deploy.sh character release      # character release
+#   ./deploy.sh standard release       # standard release
+
 FLAVOR="${1:-standard}"
+BUILD_TYPE="${2:-debug}"
+
+# 如果第一个参数是 release/debug，说明用户省略了 flavor，用默认值
+if [[ "$FLAVOR" == "debug" || "$FLAVOR" == "release" ]]; then
+    BUILD_TYPE="$FLAVOR"
+    FLAVOR="standard"
+fi
+
 if [[ "$FLAVOR" != "standard" && "$FLAVOR" != "character" ]]; then
-    echo "用法: $0 [standard|character]"
+    echo "用法: $0 [standard|character] [debug|release]"
     echo "  standard  —— 通用 Nion 版本（默认）"
     echo "  character —— 类脑娘内置版本"
+    echo "  debug     —— Debug 构建（默认）"
+    echo "  release   —— Release 构建（R8 压缩 + 签名）"
     exit 1
 fi
 
-# 将 flavor 首字母大写，用于 Gradle task 命名（如 assembleStandardDebug）
-FLAVOR_CAPITALIZED="${FLAVOR^}"
-
-# 自动检测环境：Git Bash（Windows 原生 adb.exe）或 WSL2（usbipd 透传）
-# Git Bash 下 uname 输出 MINGW，WSL 下输出 Linux
-if [[ "$(uname)" == MINGW* || "$(uname)" == MSYS* ]]; then
-    # ---------- Windows Git Bash 环境 ----------
-    ADB="$HOME/AppData/Local/Android/Sdk/platform-tools/adb.exe"
-    APK_PATH="$PROJECT_DIR/app/app/build/outputs/apk/$FLAVOR/debug/app-$FLAVOR-debug.apk"
-else
-    # ---------- WSL2 环境 ----------
-    ADB=~/android-sdk/platform-tools/adb
-    APK_PATH="$PROJECT_DIR/app/app/build/outputs/apk/$FLAVOR/debug/app-$FLAVOR-debug.apk"
+if [[ "$BUILD_TYPE" != "debug" && "$BUILD_TYPE" != "release" ]]; then
+    echo "用法: $0 [standard|character] [debug|release]"
+    exit 1
 fi
 
-# character flavor 使用不同的 applicationId，需要对应不同的包名
+# 将 flavor 首字母大写，用于 Gradle task 命名（如 assembleStandardRelease）
+FLAVOR_CAPITALIZED="${FLAVOR^}"
+BUILD_TYPE_CAPITALIZED="${BUILD_TYPE^}"
+
+# 自动检测环境：Git Bash（Windows 原生 adb.exe）或 WSL2（usbipd 透传）
+if [[ "$(uname)" == MINGW* || "$(uname)" == MSYS* ]]; then
+    ADB="$HOME/AppData/Local/Android/Sdk/platform-tools/adb.exe"
+else
+    ADB=~/android-sdk/platform-tools/adb
+fi
+APK_PATH="$PROJECT_DIR/app/app/build/outputs/apk/$FLAVOR/$BUILD_TYPE/app-$FLAVOR-$BUILD_TYPE.apk"
+
+# character flavor 使用不同的 applicationId
 if [[ "$FLAVOR" == "character" ]]; then
     PACKAGE="com.echonion.nion.character"
 else
@@ -48,7 +68,7 @@ ok()   { echo -e "${GREEN}  ✓ $1${NC}"; }
 warn() { echo -e "${YELLOW}  ⚠ $1${NC}"; }
 fail() { echo -e "${RED}  ✗ $1${NC}"; }
 
-echo -e "${CYAN}Flavor: $FLAVOR (${FLAVOR_CAPITALIZED})${NC}"
+echo -e "${CYAN}Flavor: $FLAVOR | Build: $BUILD_TYPE${NC}"
 echo ""
 
 TOTAL_STEPS=4
@@ -56,7 +76,6 @@ TOTAL_STEPS=4
 # ---------- 1. 检查设备 ----------
 step 1/$TOTAL_STEPS "检查设备"
 
-# WSL2 环境需要先通过 usbipd 将 USB 从 Windows 透传到 WSL
 if [[ "$(uname)" == Linux ]]; then
     POWERSHELL="/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe"
 
@@ -75,13 +94,11 @@ if [[ "$(uname)" == Linux ]]; then
     }
 fi
 
-# 检查 adb 是否存在
 if ! command -v "$ADB" &>/dev/null && [ ! -f "$ADB" ]; then
     fail "未找到 adb，请确认 Android SDK 路径正确: $ADB"
     exit 1
 fi
 
-# WSL2: 尝试 usbipd 透传
 if [[ "$(uname)" == Linux ]]; then
     if ! is_attached 2>/dev/null && ! "$ADB" devices 2>/dev/null | grep -v 'List of devices' | grep -v '^$' | grep -q .; then
         BUSID=$(find_phone_busid)
@@ -95,7 +112,6 @@ if [[ "$(uname)" == Linux ]]; then
     fi
 fi
 
-# 验证设备已连接
 DEVICE_OUTPUT=$("$ADB" devices 2>/dev/null)
 DEVICE_LIST=$(echo "$DEVICE_OUTPUT" | grep -E '[[:space:]]+device$' | awk '{print $1}')
 DEVICE_COUNT=$(echo "$DEVICE_LIST" | grep -c . || true)
@@ -130,8 +146,8 @@ else
 fi
 
 # ---------- 3. 构建 APK ----------
-step 3/$TOTAL_STEPS "构建 APK ($FLAVOR)"
-if ! (cd "$PROJECT_DIR/app" && ./gradlew "assemble${FLAVOR_CAPITALIZED}Debug" 2>&1); then
+step 3/$TOTAL_STEPS "构建 APK ($FLAVOR $BUILD_TYPE)"
+if ! (cd "$PROJECT_DIR/app" && ./gradlew "assemble${FLAVOR_CAPITALIZED}${BUILD_TYPE_CAPITALIZED}" 2>&1); then
     fail "构建失败，中止部署"
     exit 1
 fi
@@ -148,11 +164,10 @@ fi
 
 "$ADB" "${ADB_TARGET[@]}" shell am force-stop "$PACKAGE" 2>/dev/null || true
 
-# adb install 在部分厂商 ROM（如 vivo 深度检查）下可能误报失败，
+# adb install 在部分厂商 ROM 下可能误报失败，
 # 实际安装成功但 adb 返回非零退出码。因此用 pm path 二次确认是否真正装上。
 install_and_verify() {
     "$ADB" "${ADB_TARGET[@]}" install -r "$APK_PATH" 2>&1 || true
-    # 无论 adb install 返回什么，用 pm path 确认 App 是否已安装
     sleep 2
     "$ADB" "${ADB_TARGET[@]}" shell pm path "$PACKAGE" 2>/dev/null | grep -q "package:" 2>/dev/null
 }
@@ -178,5 +193,5 @@ fi
 ok "应用已启动"
 
 echo ""
-echo -e "${GREEN}部署完成！Flavor: $FLAVOR${NC}"
+echo -e "${GREEN}部署完成！Flavor: $FLAVOR | Build: $BUILD_TYPE${NC}"
 echo -e "${GREEN}查看日志: $ADB logcat -s NionApp:D TaskViewModel:D${NC}"

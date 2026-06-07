@@ -13,6 +13,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <!-- Android 14+ specialUse 前台 Service 必须声明此权限，否则 startForeground 会抛 SecurityException -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <!-- 震动权限：悬浮窗提醒/专注完成时震动反馈 -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- 位置权限：天气功能需要 GPS 定位获取用户所在城市 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />

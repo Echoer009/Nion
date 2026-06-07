@@ -189,6 +189,9 @@ class WeatherAlertFloatingService : Service() {
             removeFloatingWindow(animated = false)
         }
 
+        // 震动反馈：根据天气严重程度决定震动强度（info 不震动，warning 中震，urgent 强震）
+        VibrationHelper.vibrateForWeatherAlert(this, severity)
+
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
         // 初始化 LifecycleOwner，ComposeView 需要

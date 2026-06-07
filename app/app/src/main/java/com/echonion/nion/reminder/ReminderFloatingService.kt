@@ -105,6 +105,7 @@ class ReminderFloatingService : Service() {
     private var taskTitle: String = ""
     private var message: String = ""
     private var triggerCount: Int = 1
+    private var taskPriority: String = "medium"
 
     // ComposeView 所需的 Lifecycle 和 SavedState 支持
     private lateinit var lifecycleOwner: FloatingLifecycleOwner
@@ -128,6 +129,7 @@ class ReminderFloatingService : Service() {
         taskTitle = intent.getStringExtra(EXTRA_TASK_TITLE) ?: ""
         message = intent.getStringExtra(EXTRA_MESSAGE) ?: ""
         triggerCount = intent.getIntExtra(EXTRA_TRIGGER_COUNT, 1)
+        taskPriority = intent.getStringExtra(EXTRA_PRIORITY) ?: "medium"
 
         Log.d(TAG, "显示悬浮窗: taskId=$taskId, title=$taskTitle, trigger=$triggerCount")
 
@@ -203,6 +205,9 @@ class ReminderFloatingService : Service() {
             // 已存在悬浮窗，先移除旧的（直接移除，不播放动画）
             removeFloatingWindow(animated = false)
         }
+
+        // 震动反馈：根据任务优先级和提醒次数递进
+        VibrationHelper.vibrateForReminder(this, taskPriority, triggerCount)
 
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
@@ -420,10 +425,18 @@ class ReminderFloatingService : Service() {
         const val EXTRA_TASK_TITLE = "task_title"
         const val EXTRA_MESSAGE = "message"
         const val EXTRA_TRIGGER_COUNT = "trigger_count"
+        const val EXTRA_PRIORITY = "priority"
 
         /**
          * 启动悬浮窗 Service。
          * 只有在拥有悬浮窗权限时才应调用。
+         *
+         * @param context 上下文
+         * @param taskId 任务 ID
+         * @param taskTitle 任务标题
+         * @param message 提醒文案
+         * @param triggerCount 当前提醒次数（1-5）
+         * @param priority 任务优先级："low" / "medium" / "high"
          */
         fun start(
             context: Context,
@@ -431,12 +444,14 @@ class ReminderFloatingService : Service() {
             taskTitle: String,
             message: String,
             triggerCount: Int,
+            priority: String = "medium",
         ) {
             val intent = Intent(context, ReminderFloatingService::class.java).apply {
                 putExtra(EXTRA_TASK_ID, taskId)
                 putExtra(EXTRA_TASK_TITLE, taskTitle)
                 putExtra(EXTRA_MESSAGE, message)
                 putExtra(EXTRA_TRIGGER_COUNT, triggerCount)
+                putExtra(EXTRA_PRIORITY, priority)
             }
             // Android 12+ 后台启动 Service 需要前台 Service
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

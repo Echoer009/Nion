@@ -1,6 +1,7 @@
 package com.echonion.nion.ui.focus
 
 import android.app.Application
+import com.echonion.nion.reminder.VibrationHelper
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.Spring
@@ -97,6 +98,9 @@ fun CompletionOverlay(
                 message = null
                 // 触发入场动画
                 cardVisible = true
+
+                // 专注完成轻震反馈
+                VibrationHelper.vibrateLight(app)
 
                 // 异步调用 LLM 生成鼓励文案，文案加载完成后才开始 10 秒自动消失倒计时
                 // 这样无论 LLM 响应快慢，用户都有足够时间阅读完整文案
