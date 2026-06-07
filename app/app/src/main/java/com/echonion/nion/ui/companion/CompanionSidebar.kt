@@ -31,6 +31,8 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -59,11 +61,13 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.Bookmarks
 import androidx.compose.material.icons.outlined.SentimentSatisfied
 import androidx.compose.material3.CircularProgressIndicator
@@ -122,6 +126,17 @@ import com.echonion.nion.util.BitmapUtils
 import androidx.compose.ui.platform.LocalDensity
 
 /**
+ * 聊天图片数据 —— 消息中携带的一张图片，含 base64 编码和 MIME 类型。
+ *
+ * @property base64 图片的 base64 编码数据（不含 data: 前缀）
+ * @property mimeType 图片的 MIME 类型，如 "image/jpeg"、"image/png"
+ */
+data class ChatImage(
+    val base64: String,
+    val mimeType: String,
+)
+
+/**
  * 聊天消息数据类 —— 单条消息的展示模型。
  *
  * @param id 唯一标识，用于 LazyColumn 的 key
@@ -130,6 +145,7 @@ import androidx.compose.ui.platform.LocalDensity
  * @param timestamp 显示时间，格式 HH:mm
  * @param isToolMessage 是否为工具执行消息（显示为小型状态行而非完整气泡）
  * @param toolDone 工具是否已执行完成（用对勾替换加载图标）
+ * @param images 消息携带的图片列表，支持多图
  */
 data class ChatMessage(
     val id: String,
@@ -140,6 +156,8 @@ data class ChatMessage(
     val isToolMessage: Boolean = false,
     /** 工具是否已执行完成（用对勾替换加载图标） */
     val toolDone: Boolean = false,
+    /** 消息携带的图片列表，每项含 base64 数据和 MIME 类型 */
+    val images: List<ChatImage> = emptyList(),
 )
 
 /**
@@ -174,6 +192,9 @@ fun CompanionSidebar(
     // 面板当前模式：null=自动根据 API 配置决定，其余为手动切换的面板
     var panelMode by remember { mutableStateOf<String?>(null) }
 
+    // 编辑模式时记住正在编辑的配置，从切换面板进入编辑页时设置
+    var editingConfig by remember { mutableStateOf<SavedConfig?>(null) }
+
     /**
      * 根据 API 配置和模式决定显示哪个界面。
      *
@@ -188,6 +209,7 @@ fun CompanionSidebar(
         !viewModel.isInitialized -> "loading"
         panelMode == "profile" -> "profile"
         panelMode == "setup" -> "setup"
+        panelMode == "edit" -> "edit"
         panelMode == "history" -> "history"
         panelMode == "switch" -> "switch"
         panelMode == "memories" -> "memories"
@@ -290,6 +312,10 @@ fun CompanionSidebar(
                         viewModel.switchToConfig(configId)
                         panelMode = null
                     },
+                    onEdit = { config ->
+                        editingConfig = config
+                        panelMode = "edit"
+                    },
                     onDelete = { configId -> viewModel.deleteConfig(configId) },
                     onAddNew = { panelMode = "setup" },
                     onClose = { panelMode = null },
@@ -317,6 +343,20 @@ fun CompanionSidebar(
                     viewModel = viewModel,
                     onBack = if (hasConfigured) { { panelMode = "switch" } } else { null },
                     onAvatarClick = onAvatarClick,
+                )
+                // 编辑已有配置：复用 SetupContent，传入初始配置和编辑专用回调
+                "edit" -> SetupContent(
+                    viewModel = viewModel,
+                    onBack = { panelMode = "switch" },
+                    onAvatarClick = onAvatarClick,
+                    editingConfig = editingConfig,
+                    onEditSave = { provider, apiKey, model, baseUrl ->
+                        editingConfig?.let { config ->
+                            viewModel.updateConfig(config.id, provider, apiKey, model, baseUrl)
+                        }
+                        editingConfig = null
+                        panelMode = "switch"
+                    },
                 )
                 else -> ChatContent(
                     viewModel = viewModel,
@@ -346,12 +386,16 @@ fun CompanionSidebar(
  * @param viewModel 伙伴 ViewModel
  * @param onBack 可选的返回按钮回调（从切换面板进入时提供），null 时不显示返回按钮
  * @param onAvatarClick 点击头像时触发，切换到编辑伙伴信息页面
+ * @param editingConfig 编辑模式时传入的初始配置，非 null 时进入编辑模式
+ * @param onEditSave 编辑模式下的保存回调，传入修改后的配置
  */
 @Composable
 private fun SetupContent(
     viewModel: CompanionViewModel,
     onBack: (() -> Unit)? = null,
     onAvatarClick: () -> Unit,
+    editingConfig: SavedConfig? = null,
+    onEditSave: ((provider: ProviderConfig, apiKey: String, model: String, baseUrl: String) -> Unit)? = null,
 ) {
     Column(
         modifier = Modifier
@@ -395,10 +439,18 @@ private fun SetupContent(
         Spacer(modifier = Modifier.height(20.dp))
 
         // Provider 选择 + API Key 输入表单
+        // 编辑模式时传入 initialConfig 预填充字段，保存时调用 onEditSave
         ApiProviderSetup(
             companionName = viewModel.companionName,
-            onSave = { provider, apiKey, model, baseUrl ->
-                viewModel.saveApiConfig(provider, apiKey, model, baseUrl)
+            initialConfig = editingConfig,
+            onSave = if (editingConfig != null && onEditSave != null) {
+                { provider, apiKey, model, baseUrl ->
+                    onEditSave(provider, apiKey, model, baseUrl)
+                }
+            } else {
+                { provider, apiKey, model, baseUrl ->
+                    viewModel.saveApiConfig(provider, apiKey, model, baseUrl)
+                }
             },
         )
     }
@@ -1695,12 +1747,15 @@ private fun ChatHeader(
 
 /**
  * 聊天输入框 —— 无焦点时灰色边框，有焦点时主题色边框 + 底色。
- * 包含多行文本输入框和发送按钮。
+ * 包含多行文本输入框、图片选择按钮和发送按钮。
  *
  * @param inputText 当前输入文本
  * @param onInputTextChanged 输入内容变更回调
  * @param onSendClick 点击发送按钮时触发
  * @param isLoading 是否正在加载（加载时禁用输入和发送）
+ * @param pendingImageUri 待发送的图片 URI（用户已选但未发送），null 表示无图片
+ * @param onPickImage 用户点击图片选择按钮时触发
+ * @param onRemoveImage 用户移除已选图片时触发
  */
 @Composable
 private fun ChatInputBar(
@@ -1708,70 +1763,158 @@ private fun ChatInputBar(
     onInputTextChanged: (String) -> Unit,
     onSendClick: () -> Unit,
     isLoading: Boolean,
+    pendingImageUris: List<Uri> = emptyList(),
+    onPickImage: () -> Unit = {},
+    onRemoveImage: (Uri) -> Unit = {},
 ) {
-    // 焦点状态：控制边框和底色样式切换
     val focusState = remember { mutableStateOf(false) }
     val isFocused = focusState.value
-    Surface(
-        shape = RoundedCornerShape(24.dp),
-        color = MaterialTheme.colorScheme.primaryContainer.copy(
-            alpha = if (isFocused) 0.12f else 0f,
-        ),
-        border = androidx.compose.foundation.BorderStroke(
-            2.dp,
-            if (isFocused)
-                MaterialTheme.colorScheme.primary
-            else
-                MaterialTheme.colorScheme.outline,
-        ),
-        modifier = Modifier.fillMaxWidth(),
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(start = 16.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            BasicTextField(
-                value = inputText,
-                onValueChange = onInputTextChanged,
+    val hasImages = pendingImageUris.isNotEmpty()
+    val canSend = (inputText.isNotBlank() || hasImages) && !isLoading
+    // Box 包裹输入框 + 悬浮缩略图行，缩略图不占布局空间
+    Box {
+        // 悬浮缩略图行：绝对定位在输入框上方，横向可滚动，不占布局空间
+        if (hasImages) {
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .padding(vertical = 10.dp)
-                    .onFocusChanged { focusState.value = it.isFocused },
-                textStyle = MaterialTheme.typography.bodyLarge.copy(
-                    color = MaterialTheme.colorScheme.onSurface,
-                ),
-                maxLines = 3,
-                // 启用状态跟随 isLoading：加载中时不可输入
-                enabled = !isLoading,
-                decorationBox = { innerTextField ->
-                    // 占位符：输入为空时显示提示文字，文字和输入框叠加
-                    Box(Modifier.fillMaxWidth()) {
-                        if (inputText.isEmpty()) {
-                            Text(
-                                "说点什么...",
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
-                            )
-                        }
-                        innerTextField()
-                    }
-                },
-            )
-            // 发送按钮 —— 有内容时主题色高亮，无内容时灰色淡化
-            IconButton(
-                onClick = onSendClick,
-                enabled = inputText.isNotBlank() && !isLoading,
+                    .align(Alignment.BottomStart)
+                    .offset(y = (-72).dp)
+                    .padding(start = 16.dp)
+                    .horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                Icon(
-                    Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "发送",
-                    tint = if (inputText.isNotBlank() && !isLoading)
-                        MaterialTheme.colorScheme.primary
-                    else
-                        MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
-                    modifier = Modifier.size(20.dp),
+                for (uri in pendingImageUris) {
+                    // 单张缩略图 + 删除按钮
+                    Box {
+                        Box(
+                            modifier = Modifier
+                                .size(64.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                        ) {
+                            val context = LocalContext.current
+                            val bitmap = remember(uri) {
+                                try {
+                                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                                        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                                        BitmapFactory.decodeStream(stream, null, bounds)
+                                        val targetSize = 256
+                                        val minDim = minOf(bounds.outWidth, bounds.outHeight)
+                                        var sampleSize = 1
+                                        while (minDim / (sampleSize * 2) >= targetSize) {
+                                            sampleSize *= 2
+                                        }
+                                        context.contentResolver.openInputStream(uri)?.use { s2 ->
+                                            val opts = BitmapFactory.Options().apply { inSampleSize = sampleSize }
+                                            BitmapFactory.decodeStream(s2, null, opts)
+                                        }
+                                    }
+                                } catch (_: Exception) { null }
+                            }
+                            if (bitmap != null) {
+                                Image(
+                                    bitmap = bitmap.asImageBitmap(),
+                                    contentDescription = "待发送图片",
+                                    modifier = Modifier.fillMaxSize(),
+                                    contentScale = ContentScale.Crop,
+                                )
+                            }
+                            // 删除按钮：在缩略图内部右上角，不超出边界
+                            Box(
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(4.dp)
+                                    .size(18.dp)
+                                    .background(Color.Black.copy(alpha = 0.5f), CircleShape)
+                                    .clickable(onClick = { onRemoveImage(uri) }),
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "移除图片",
+                                    modifier = Modifier.size(10.dp),
+                                    tint = Color.White,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        // 输入框 Surface
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.primaryContainer.copy(
+                alpha = if (isFocused) 0.12f else 0f,
+            ),
+            border = androidx.compose.foundation.BorderStroke(
+                2.dp,
+                if (isFocused)
+                    MaterialTheme.colorScheme.primary
+                else
+                    MaterialTheme.colorScheme.outline,
+            ),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(
+                    onClick = onPickImage,
+                    enabled = !isLoading,
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Outlined.AttachFile,
+                        contentDescription = "选择图片",
+                        tint = if (hasImages)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+                BasicTextField(
+                    value = inputText,
+                    onValueChange = onInputTextChanged,
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(vertical = 10.dp)
+                        .onFocusChanged { focusState.value = it.isFocused },
+                    textStyle = MaterialTheme.typography.bodyLarge.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    maxLines = 3,
+                    enabled = !isLoading,
+                    decorationBox = { innerTextField ->
+                        Box(Modifier.fillMaxWidth()) {
+                            if (inputText.isEmpty()) {
+                                Text(
+                                    "说点什么...",
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+                                )
+                            }
+                            innerTextField()
+                        }
+                    },
                 )
+                IconButton(
+                    onClick = onSendClick,
+                    enabled = canSend,
+                ) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "发送",
+                        tint = if (canSend)
+                            MaterialTheme.colorScheme.primary
+                        else
+                            MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
             }
         }
     }
@@ -1986,12 +2129,28 @@ private fun ChatContent(
             item { Spacer(modifier = Modifier.height(8.dp)) }
         }
 
+        // 图片选择器 launcher —— 每次选一张，累积到列表
+        val pickImageLauncher = rememberLauncherForActivityResult(
+            contract = ActivityResultContracts.PickVisualMedia(),
+        ) { uri: Uri? ->
+            if (uri != null) {
+                viewModel.addPendingImage(uri)
+            }
+        }
+
         // 输入框容器
         ChatInputBar(
             inputText = inputText,
             onInputTextChanged = { viewModel.inputText = it },
             onSendClick = { viewModel.sendMessage() },
             isLoading = isLoading,
+            pendingImageUris = viewModel.pendingImageUris,
+            onPickImage = {
+                pickImageLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                )
+            },
+            onRemoveImage = { uri -> viewModel.removePendingImage(uri) },
         )
     }
 }
@@ -2197,15 +2356,83 @@ private fun MessageBubble(
                 // ── 消息正文 ──
                 val bubbleModifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
                 if (isUser) {
-                    Text(
-                        message.text,
-                        modifier = bubbleModifier,
-                        style = MaterialTheme.typography.bodyMedium.copy(
-                            fontSize = 15.sp,
-                            lineHeight = 22.sp,
-                        ),
-                        color = textColor,
-                    )
+                    // 用户消息：图片 + 文本
+                    Column(modifier = bubbleModifier) {
+                        // 多图显示：网格排列，最多 2 列
+                        if (message.images.isNotEmpty()) {
+                            val imgCount = message.images.size
+                            // 1 张图：占满宽度；2+ 张图：网格 2 列
+                            if (imgCount == 1) {
+                                val imageBitmap = remember(message.id) {
+                                    try {
+                                        val bytes = android.util.Base64.decode(message.images[0].base64, android.util.Base64.DEFAULT)
+                                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                    } catch (_: Exception) { null }
+                                }
+                                if (imageBitmap != null) {
+                                    Image(
+                                        bitmap = imageBitmap,
+                                        contentDescription = "发送的图片",
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(8.dp)),
+                                        contentScale = ContentScale.FillWidth,
+                                    )
+                                }
+                            } else {
+                                // 多图：2 列网格
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    message.images.chunked(2).forEach { row ->
+                                        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            row.forEachIndexed { idx, img ->
+                                                val imageBitmap = remember("${message.id}_$idx") {
+                                                    try {
+                                                        val bytes = android.util.Base64.decode(img.base64, android.util.Base64.DEFAULT)
+                                                        BitmapFactory.decodeByteArray(bytes, 0, bytes.size)?.asImageBitmap()
+                                                    } catch (_: Exception) { null }
+                                                }
+                                                Box(
+                                                    modifier = Modifier
+                                                        .weight(1f)
+                                                        .aspectRatio(1f)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                                                ) {
+                                                    if (imageBitmap != null) {
+                                                        Image(
+                                                            bitmap = imageBitmap,
+                                                            contentDescription = "发送的图片",
+                                                            modifier = Modifier.fillMaxSize(),
+                                                            contentScale = ContentScale.Crop,
+                                                        )
+                                                    }
+                                                }
+                                            }
+                                            // 奇数行最后一格留空
+                                            if (row.size < 2) {
+                                                Spacer(modifier = Modifier.weight(1f))
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            // 图片和文本之间有间距
+                            if (message.text.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                            }
+                        }
+                        // 文本内容
+                        if (message.text.isNotEmpty()) {
+                            Text(
+                                message.text,
+                                style = MaterialTheme.typography.bodyMedium.copy(
+                                    fontSize = 15.sp,
+                                    lineHeight = 22.sp,
+                                ),
+                                color = textColor,
+                            )
+                        }
+                    }
                 } else {
                     Log.d("MarkdownText", "MessageBubble AI msg(${message.text.take(50)}...) length=${message.text.length}")
                     Box(modifier = bubbleModifier) {
@@ -2474,20 +2701,22 @@ private fun ConversationItem(
 }
 
 /**
- * 多配置切换面板 —— 展示已保存的所有 Provider 配置，风格对齐设置页。
+ * 配置切换面板 —— 展示所有已保存的 API 配置，支持切换、编辑、删除、新增。
  *
- * @param configs        所有已保存的配置
- * @param activeConfigId 当前激活的配置 ID（用于高亮），null 表示无激活配置
- * @param onSelect       选择某个配置时触发，传入该配置的 ID
- * @param onDelete       删除某个配置时触发，传入该配置的 ID
- * @param onAddNew       点击"新增配置"时触发
- * @param onClose        关闭面板时触发
+ * @param configs 已保存的配置列表
+ * @param activeConfigId 当前激活的配置 id，用于高亮显示
+ * @param onSelect 点击某条配置时触发，切换到该配置
+ * @param onEdit 点击某条配置的编辑图标时触发，传入完整的 SavedConfig
+ * @param onDelete 点击某条配置的删除图标时触发
+ * @param onAddNew 点击新增按钮时触发
+ * @param onClose 点击关闭按钮时触发
  */
 @Composable
 private fun SwitchProviderPanel(
     configs: List<SavedConfig>,
     activeConfigId: String?,
     onSelect: (String) -> Unit,
+    onEdit: (SavedConfig) -> Unit,
     onDelete: (String) -> Unit,
     onAddNew: () -> Unit,
     onClose: () -> Unit,
@@ -2552,6 +2781,7 @@ private fun SwitchProviderPanel(
                         config = config,
                         isActive = config.id == activeConfigId,
                         onSelect = { onSelect(config.id) },
+                        onEdit = { onEdit(config) },
                         onDelete = { onDelete(config.id) },
                     )
                 }
@@ -2589,12 +2819,19 @@ private fun SwitchProviderPanel(
 
 /**
  * 单条配置项 —— 显示 Provider 名称 + 模型名，激活状态有对勾标识。
+ *
+ * @param config 配置数据
+ * @param isActive 是否为当前激活的配置
+ * @param onSelect 点击整行时触发，用于切换到该配置
+ * @param onEdit 点击编辑图标时触发，用于进入编辑页面
+ * @param onDelete 点击删除图标时触发，用于删除该配置
  */
 @Composable
 private fun ConfigItem(
     config: SavedConfig,
     isActive: Boolean,
     onSelect: () -> Unit,
+    onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
     Row(
@@ -2632,15 +2869,28 @@ private fun ConfigItem(
             )
             Spacer(modifier = Modifier.width(6.dp))
         }
+        // 编辑按钮
+        IconButton(
+            onClick = onEdit,
+            modifier = Modifier.size(28.dp),
+        ) {
+            Icon(
+                Icons.Default.Edit,
+                contentDescription = "编辑配置",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTLE),
+            )
+        }
+        // 删除按钮
         IconButton(
             onClick = onDelete,
             modifier = Modifier.size(28.dp),
         ) {
             Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "删除配置",
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTLE),
+                Icons.Default.Delete,
+                contentDescription = "删除配置",
+                modifier = Modifier.size(16.dp),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTLE),
             )
         }
     }

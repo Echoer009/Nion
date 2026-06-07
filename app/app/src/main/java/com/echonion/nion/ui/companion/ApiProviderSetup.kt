@@ -64,36 +64,46 @@ import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 
 /**
- * API 配置引导页 —— 当用户尚未配置 API key 时显示。
+ * API 配置引导页 —— 当用户尚未配置 API key 时显示，也可用于编辑已保存的配置。
  *
  * 配置流程：
  * 1. 从预置列表中选择 Provider（OpenAI / Anthropic / DeepSeek / 自定义）
  * 2. 输入 API Key，点击"获取模型列表"从 API 拉取可用模型
  * 3. 从下拉列表中选择模型（自定义 provider 可手动输入）
- * 4. 点击"开始对话"保存配置
+ * 4. 点击保存按钮保存配置
  *
  * @param companionName 伙伴名称，显示在页面标题中
- * @param onSave 保存按钮回调，传入完整配置信息（含用户选中的模型名）
+ * @param initialConfig 可选的初始配置，传入时进入编辑模式，预填充所有字段
+ * @param onSave 保存按钮回调，传入完整配置信息（含用户选中的模型名）；
+ *               编辑模式下额外传入原配置的 id
  */
 @Composable
 fun ApiProviderSetup(
     companionName: String = "Nion",
+    initialConfig: SavedConfig? = null,
     onSave: (provider: ProviderConfig, apiKey: String, model: String, baseUrl: String) -> Unit,
 ) {
     val focusManager = LocalFocusManager.current
     val scope = rememberCoroutineScope()
 
+    val isEditMode = initialConfig != null
+
+    // 根据 initialConfig 查找对应的内置 provider 索引，未匹配则回退到 0
+    val initialProviderIndex = if (initialConfig != null) {
+        builtInProviders.indexOfFirst { it.name == initialConfig.provider }.takeIf { it >= 0 } ?: 0
+    } else 0
+
     // provider 下拉菜单展开状态
     var dropdownExpanded by remember { mutableStateOf(false) }
-    // 当前选中的 provider 索引，默认选中第一个（OpenAI）
-    var selectedProviderIndex by remember { mutableStateOf(0) }
-    // API key 输入值
-    var apiKeyInput by remember { mutableStateOf("") }
+    // 当前选中的 provider 索引，编辑模式下初始化为原配置的 provider
+    var selectedProviderIndex by remember { mutableStateOf(initialProviderIndex) }
+    // API key 输入值，编辑模式下预填充
+    var apiKeyInput by remember { mutableStateOf(initialConfig?.apiKey ?: "") }
     // API key 是否明文显示
     var apiKeyVisible by remember { mutableStateOf(false) }
 
-    // 自定义 baseUrl（仅"自定义"provider 时使用）
-    var customBaseUrl by remember { mutableStateOf("") }
+    // 自定义 baseUrl（仅"自定义"provider 时使用），编辑模式下预填充
+    var customBaseUrl by remember { mutableStateOf(initialConfig?.baseUrl ?: "") }
 
     // 模型获取相关状态
     var isFetchingModels by remember { mutableStateOf(false) }
@@ -103,10 +113,10 @@ fun ApiProviderSetup(
     var fetchError by remember { mutableStateOf<String?>(null) }
     // 模型下拉菜单展开状态（从获取到的列表中选取）
     var modelDropdownExpanded by remember { mutableStateOf(false) }
-    // 用户选中的模型名（从获取列表中选择，或自定义时手动输入）
-    var selectedModelName by remember { mutableStateOf("") }
-    // 自定义 provider 时手动输入模型名
-    var customModelInput by remember { mutableStateOf("") }
+    // 用户选中的模型名（从获取列表中选择，或自定义时手动输入），编辑模式下预填充
+    var selectedModelName by remember { mutableStateOf(initialConfig?.model ?: "") }
+    // 自定义 provider 时手动输入模型名，编辑模式下预填充
+    var customModelInput by remember { mutableStateOf(initialConfig?.model ?: "") }
 
     val selectedProvider = builtInProviders[selectedProviderIndex]
     val isCustom = selectedProvider.name == "自定义"
@@ -141,15 +151,16 @@ fun ApiProviderSetup(
             .padding(horizontal = 8.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        // 标题区
+        // 标题区：编辑模式显示"编辑配置"，新增模式显示欢迎语
         Text(
-            "欢迎使用 $companionName",
+            if (isEditMode) "编辑配置" else "欢迎使用 $companionName",
             style = MaterialTheme.typography.titleMedium,
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface,
         )
         Text(
-            "选择一个 AI Provider 并输入 API Key，然后获取可用模型即可开始对话。",
+            if (isEditMode) "修改 Provider、API Key 或模型后保存即可生效。"
+            else "选择一个 AI Provider 并输入 API Key，然后获取可用模型即可开始对话。",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -271,6 +282,7 @@ fun ApiProviderSetup(
 
         SaveConfigButton(
             enabled = canSave,
+            text = if (isEditMode) "保存修改" else "开始对话",
             onClick = {
                 focusManager.clearFocus()
                 onSave(
@@ -657,12 +669,14 @@ private fun CustomModelInputField(
  *
  * @param enabled 按钮是否可点击；
  *                条件为 API key 非空 + 已选择模型 + 自定义模式下 baseUrl 非空
+ * @param text 按钮文案（"开始对话"或"保存修改"）
  * @param onClick 用户点击按钮时触发；
  *                调用方在此收集所有配置数据并调用外层 onSave 回调
  */
 @Composable
 private fun SaveConfigButton(
     enabled: Boolean,
+    text: String,
     onClick: () -> Unit,
 ) {
     Button(
@@ -675,7 +689,7 @@ private fun SaveConfigButton(
         colors = ButtonDefaults.buttonColors(),
     ) {
         Text(
-            "开始对话",
+            text,
             style = MaterialTheme.typography.labelLarge,
         )
     }

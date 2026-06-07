@@ -269,12 +269,15 @@ object ChatService {
             readTimeout = 60_000
         }
 
+        // 将 OpenAI 多模态格式转换为 Anthropic 原生格式
+        val convertedMessages = convertToAnthropicFormat(messages)
+
         // 收集所有 system 消息并拼接（不丢弃末尾的时间等 system 信息）
-        val systemParts = messages.filter { it.optString("role") == "system" }
+        val systemParts = convertedMessages.filter { it.optString("role") == "system" }
             .map { it.optString("content", "") }
         val systemPrompt = systemParts.joinToString("\n\n")
         val conversationMessages = JSONArray().apply {
-            for (msg in messages) {
+            for (msg in convertedMessages) {
                 if (msg.optString("role") != "system") put(msg)
             }
         }
@@ -508,13 +511,16 @@ object ChatService {
     ): Result<ChatResponse> {
         val url = "$baseUrl/messages"
 
+        // 将 OpenAI 多模态格式（image_url）转换为 Anthropic 原生格式（image + source）
+        val convertedMessages = convertToAnthropicFormat(messages)
+
         // 分离 system 提示词和对话消息（Anthropic 特有格式）
         // 收集所有 system 消息，拼接为完整 system 字符串（包含末尾的时间信息）
-        val systemParts = messages.filter { it.optString("role") == "system" }
+        val systemParts = convertedMessages.filter { it.optString("role") == "system" }
             .map { it.optString("content", "") }
         val systemPrompt = systemParts.joinToString("\n\n")
         val conversationMessages = JSONArray().apply {
-            for (msg in messages) {
+            for (msg in convertedMessages) {
                 val role = msg.optString("role", "")
                 if (role != "system") put(msg)
             }
@@ -984,13 +990,16 @@ object ChatService {
             readTimeout = 60_000
         }
 
+        // 将 OpenAI 多模态格式转换为 Anthropic 原生格式
+        val convertedMessages = convertToAnthropicFormat(messages)
+
         // 分离 system 提示词和对话消息
         // 收集所有 system 消息并拼接，避免丢失末尾的时间信息
-        val systemParts = messages.filter { it.optString("role") == "system" }
+        val systemParts = convertedMessages.filter { it.optString("role") == "system" }
             .map { it.optString("content", "") }
         val systemPrompt = systemParts.joinToString("\n\n")
         val conversationMessages = JSONArray().apply {
-            for (msg in messages) {
+            for (msg in convertedMessages) {
                 val role = msg.optString("role", "")
                 if (role != "system") {
                     put(msg)
@@ -1083,6 +1092,72 @@ object ChatService {
             text = text,
             toolCalls = toolCalls.takeIf { it.isNotEmpty() },
         )
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // 多模态内容格式转换 —— 将 OpenAI 格式转为 Anthropic 原生格式
+    // ═══════════════════════════════════════════════════════════════════
+
+    /**
+     * 将消息列表中的 OpenAI 多模态格式转换为 Anthropic 原生格式。
+     *
+     * OpenAI 使用 `image_url` + data URI，Anthropic 使用 `image` + `source.base64`。
+     * 此方法遍历所有消息，将 content 中的 image_url 块转换为 Anthropic 的 image 块。
+     * 纯文本消息（content 为 String）保持不变。
+     *
+     * 转换规则：
+     * - content 为 String → 不变
+     * - content 为 JSONArray → 遍历每个元素：
+     *   - type == "image_url" → 提取 data URI 中的 base64 和 MIME，转为 Anthropic 的 image 块
+     *   - type == "text" → 保持不变
+     *   - 其他类型 → 保持不变
+     *
+     * @param messages 原始消息列表
+     * @return 转换后的消息列表（新对象，不修改原始消息）
+     */
+    private fun convertToAnthropicFormat(messages: List<JSONObject>): List<JSONObject> {
+        return messages.map { msg ->
+            val content = msg.opt("content")
+            // content 为 JSONArray 时，可能包含多模态内容，需要转换
+            if (content is JSONArray) {
+                val converted = JSONArray()
+                for (i in 0 until content.length()) {
+                    val part = content.getJSONObject(i)
+                    val type = part.optString("type", "")
+                    if (type == "image_url") {
+                        // 从 OpenAI 的 image_url 格式提取 data URI
+                        val imageUrlObj = part.getJSONObject("image_url")
+                        val dataUri = imageUrlObj.getString("url")
+                        // 解析 data URI：data:image/jpeg;base64,xxxxx
+                        val mimeAndData = dataUri.removePrefix("data:")
+                        val semiIdx = mimeAndData.indexOf(";base64,")
+                        if (semiIdx >= 0) {
+                            val mimeType = mimeAndData.substring(0, semiIdx)
+                            val base64Data = mimeAndData.substring(semiIdx + ";base64,".length)
+                            // 转为 Anthropic 原生格式
+                            converted.put(JSONObject().apply {
+                                put("type", "image")
+                                put("source", JSONObject().apply {
+                                    put("type", "base64")
+                                    put("media_type", mimeType)
+                                    put("data", base64Data)
+                                })
+                            })
+                        }
+                    } else {
+                        // 文本块和其他类型块保持不变
+                        converted.put(part)
+                    }
+                }
+                // 返回新 JSONObject，content 已转换
+                JSONObject(msg.toString()).apply {
+                    put("content", converted)
+                }
+            } else {
+                // 纯文本消息，不需要转换
+                msg
+            }
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════════

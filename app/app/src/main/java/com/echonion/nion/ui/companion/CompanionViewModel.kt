@@ -146,6 +146,20 @@ class CompanionViewModel(
     var toolExecutionStatus by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * 待发送的图片 URI 列表 —— 用户已选但尚未发送的多张图片。
+     * 非空时 ChatInputBar 上方显示缩略预览条，sendMessage 时一并处理。
+     * 发送完成后自动清空。
+     */
+    var pendingImageUris by mutableStateOf<List<android.net.Uri>>(emptyList())
+        private set
+
+    /**
+     * 预编码缓存 —— 选图时立即在后台编码为 base64，发送时直接取用无延迟。
+     * key = 图片 URI，value = 编码后的 ChatImage。
+     */
+    private val preEncodedImages = mutableMapOf<android.net.Uri, ChatImage>()
+
     /** 面板关闭时记录的消息数量，用于判断面板打开时是否有新消息需要滚到底部 */
     var lastSeenMessageCount by mutableStateOf(0)
         private set
@@ -802,6 +816,17 @@ class CompanionViewModel(
                     put("timestamp", msg.timestamp)
                     put("isToolMessage", msg.isToolMessage)
                     put("toolDone", msg.toolDone)
+                    // 持久化多图数据
+                    if (msg.images.isNotEmpty()) {
+                        val imagesArr = JSONArray()
+                        for (img in msg.images) {
+                            imagesArr.put(JSONObject().apply {
+                                put("base64", img.base64)
+                                put("mimeType", img.mimeType)
+                            })
+                        }
+                        put("images", imagesArr)
+                    }
                 })
             }
             val jsonStr = jsonArr.toString()
@@ -882,6 +907,18 @@ class CompanionViewModel(
         val loaded = mutableListOf<ChatMessage>()
         for (i in 0 until jsonArr.length()) {
             val obj = jsonArr.getJSONObject(i)
+            // 解析多图数据
+            val images = mutableListOf<ChatImage>()
+            val imagesArr = obj.optJSONArray("images")
+            if (imagesArr != null) {
+                for (j in 0 until imagesArr.length()) {
+                    val imgObj = imagesArr.getJSONObject(j)
+                    images.add(ChatImage(
+                        base64 = imgObj.getString("base64"),
+                        mimeType = imgObj.getString("mimeType"),
+                    ))
+                }
+            }
             loaded.add(ChatMessage(
                 id = obj.getString("id"),
                 text = obj.getString("text"),
@@ -889,6 +926,7 @@ class CompanionViewModel(
                 timestamp = obj.getString("timestamp"),
                 isToolMessage = obj.optBoolean("isToolMessage", false),
                 toolDone = obj.optBoolean("toolDone", false),
+                images = images,
             ))
         }
         return loaded
@@ -901,7 +939,12 @@ class CompanionViewModel(
         val firstUserMsg = messages.firstOrNull { it.isFromUser }
         return if (firstUserMsg != null) {
             val text = firstUserMsg.text.trim()
-            if (text.length > 30) text.take(30) + "..." else text
+            when {
+                text.isEmpty() && firstUserMsg.images.isNotEmpty() -> "图片消息"
+                text.length > 30 -> text.take(30) + "..."
+                text.isNotEmpty() -> text
+                else -> "新对话"
+            }
         } else {
             "新对话"
         }
@@ -1095,6 +1138,52 @@ class CompanionViewModel(
             apiKey = null
             modelName = null
             currentProvider = null
+        }
+    }
+
+    /**
+     * 更新已保存的配置 —— 修改 provider / apiKey / model / baseUrl 等字段。
+     * 如果修改的是当前激活的配置，同步更新内存中的活跃状态并持久化到 settings 表。
+     *
+     * @param configId 要更新的配置 ID
+     * @param provider 用户新选中的 Provider
+     * @param key      新的 API 密钥
+     * @param model    新的模型名
+     * @param baseUrl  新的自定义 baseUrl（仅"自定义"provider 需要）
+     */
+    fun updateConfig(
+        configId: String,
+        provider: ProviderConfig,
+        key: String,
+        model: String,
+        baseUrl: String,
+    ) {
+        val old = savedConfigs.find { it.id == configId } ?: return
+        val actualBaseUrl = if (provider.name == "自定义") baseUrl else provider.baseUrl
+        val actualModel = model
+
+        val updated = old.copy(
+            provider = provider.name,
+            apiKey = key,
+            model = actualModel,
+            baseUrl = actualBaseUrl,
+            apiType = provider.apiType.name,
+        )
+        savedConfigs = savedConfigs.map { if (it.id == configId) updated else it }
+        saveConfigsToStorage()
+
+        // 如果编辑的是当前激活的配置，同步更新内存中的活跃状态
+        if (currentProvider?.name == old.provider && apiKey == old.apiKey && modelName == old.model) {
+            try {
+                core.setSetting("llm_provider", provider.name)
+                core.setSetting("llm_api_key", key)
+                core.setSetting("llm_model", actualModel)
+                core.setSetting("llm_base_url", actualBaseUrl)
+                core.setSetting("llm_api_type", provider.apiType.name)
+            } catch (_: Exception) {}
+            apiKey = key
+            modelName = actualModel
+            currentProvider = provider.copy(baseUrl = actualBaseUrl)
         }
     }
 
@@ -1369,7 +1458,51 @@ class CompanionViewModel(
     }
 
     /**
+     * 添加待发送的图片 —— 立即启动后台编码，发送时无延迟。
+     *
+     * @param uri 用户选中的图片 URI
+     */
+    fun addPendingImage(uri: android.net.Uri) {
+        pendingImageUris = pendingImageUris + uri
+        // 立即在后台编码，结果存入缓存
+        viewModelScope.launch(Dispatchers.IO) {
+            val imageData = ImageHelper.loadAndEncode(app, uri)
+            if (imageData != null) {
+                preEncodedImages[uri] = ChatImage(imageData.base64, imageData.mimeType)
+            }
+        }
+    }
+
+    /**
+     * 移除指定待发送的图片 —— 同时清理预编码缓存。
+     *
+     * @param uri 要移除的图片 URI
+     */
+    fun removePendingImage(uri: android.net.Uri) {
+        pendingImageUris = pendingImageUris.filter { it != uri }
+        preEncodedImages.remove(uri)
+    }
+
+    /**
+     * 清除所有待发送的图片。
+     */
+    fun clearPendingImages() {
+        pendingImageUris = emptyList()
+        preEncodedImages.clear()
+    }
+
+    /**
      * 发送用户消息并启动 Agent Loop。
+     *
+     * 支持纯文本和图文混合消息：
+     * - 纯文本：content 为字符串（兼容旧格式）
+     * - 含图片：content 为 content parts 数组（多模态格式）
+     *
+     * 图片处理流程：
+     * 1. 从 pendingImageUri 读取图片 → 压缩 → base64 编码
+     * 2. 创建带图片的 ChatMessage（imageBase64 + imageMimeType）
+     * 3. 构建多模态 content 数组追加到 API 对话历史
+     * 4. 清除 pendingImageUri
      *
      * Agent Loop 流程：
      * 1. 将用户消息追加到 UI 消息列表和 API 对话历史
@@ -1381,32 +1514,25 @@ class CompanionViewModel(
      */
     fun sendMessage() {
         val text = inputText.trim()
-        if (text.isEmpty() || isLoading) {
-            Log.d(TAG, "[sendMessage] 拦截 → textEmpty=${text.isEmpty()}, isLoading=$isLoading")
-            return
-        }
+        val hasImages = pendingImageUris.isNotEmpty()
+        if ((text.isEmpty() && !hasImages) || isLoading) return
 
         val provider = currentProvider ?: return
         val key = apiKey ?: return
         val model = modelName ?: return
 
+        // 快照当前待发送图片 URI 列表，然后清空，防止重复发送
+        val imageUris = pendingImageUris.toList()
+        pendingImageUris = emptyList()
+
         val now = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
-        val userMessage = ChatMessage(
-            id = UUID.randomUUID().toString(),
-            text = text,
-            isFromUser = true,
-            timestamp = now,
-        )
+        val msgId = UUID.randomUUID().toString()
 
-        Log.d(TAG, "[sendMessage] 发送 → text=$text, msgCount=${messages.size}")
+        Log.d(TAG, "[sendMessage] 发送 → text=$text, imageCount=${imageUris.size}, msgCount=${messages.size}")
 
-        // 先追加用户消息到 UI 列表，让 UI 立即刷新
-        messages = messages + userMessage
         inputText = ""
         isLoading = true
 
-        // 首次发送消息时分配对话 ID，后续消息自动关联
-        // 由 Rust 核心生成纯数字递增 ID，替代 UUID 以减少 LLM 上下文 token 消耗
         if (currentConversationId == null) {
             currentConversationId = try { core.nextConversationId() } catch (_: Exception) { System.currentTimeMillis().toString() }
             try {
@@ -1414,26 +1540,82 @@ class CompanionViewModel(
             } catch (_: Exception) {}
         }
 
-        requestSave()
-
-        // 将用户消息追加到 API 对话历史
-        // 当前时间直接注入 user 消息文本末尾，而非单独的 system 消息
-        // 原因：单独的 system_time 消息会夹在对话历史中，导致 Turn N+1 无法完整匹配 Turn N 的缓存前缀
-        // 注入到 user 消息后，对话历史保持连续增长：[user1, assistant1, user2, assistant2, ...]
-        // Turn N+1 的前缀 = Turn N 的完整消息 → DeepSeek Prefix Caching 命中率最大化
-        conversationHistory.add(JSONObject().apply {
-            put("role", "user")
-            put("content", "$text\n\n[时间：${java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))}]")
-        })
-
         Log.d(TAG, "[sendMessage] 启动 AgentLoop → msgCount=${messages.size}")
         viewModelScope.launch {
+            // 优先使用预编码缓存，未完成的在 IO 线程补编
+            val encodedImages = if (imageUris.isNotEmpty()) {
+                imageUris.mapNotNull { uri ->
+                    // 缓存命中：直接使用，零延迟
+                    preEncodedImages.remove(uri)
+                        // 缓存未命中（编码还没完成）：立即编码
+                        ?: withContext(Dispatchers.IO) {
+                            ImageHelper.loadAndEncode(app, uri)
+                        }?.let { ChatImage(it.base64, it.mimeType) }
+                }
+            } else emptyList()
+            // 清理剩余缓存
+            preEncodedImages.clear()
+
+            // 图片编码完成后，创建完整的 ChatMessage（含多图）并加入 UI 列表
+            val userMessage = ChatMessage(
+                id = msgId,
+                text = text,
+                isFromUser = true,
+                timestamp = now,
+                images = encodedImages,
+            )
+            messages = messages + userMessage
+            requestSave()
+
+            val timeSuffix = "\n\n[时间：${java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))}]"
+
+            conversationHistory.add(JSONObject().apply {
+                put("role", "user")
+                if (encodedImages.isNotEmpty()) {
+                    put("content", buildMultimodalContent(
+                        text = if (text.isEmpty()) timeSuffix else "$text$timeSuffix",
+                        images = encodedImages,
+                    ))
+                } else {
+                    put("content", "$text$timeSuffix")
+                }
+                put("_msg_id", msgId)
+            })
+
+            requestSave()
             runAgentLoop(provider, key, model)
             isLoading = false
-            // Agent Loop 结束后，保留完整的 tool_calls + tool result 消息。
-            // 原因：删除后 AI 看不到自己使用工具的记录，几轮对话后不再主动调用工具。
             requestSave()
             Log.d(TAG, "[sendMessage] AgentLoop 结束 → msgCount=${messages.size}")
+        }
+    }
+
+    /**
+     * 构建多模态 content 数组 —— 支持多张图片。
+     *
+     * 格式：[text, image_url_1, image_url_2, ...]
+     * 每张图片一个 image_url 块，OpenAI 和 Anthropic 都兼容。
+     *
+     * @param text   消息文本内容（含时间后缀）
+     * @param images 图片列表，每项含 base64 和 mimeType
+     * @return JSON 数组格式的 content parts
+     */
+    private fun buildMultimodalContent(text: String, images: List<ChatImage>): JSONArray {
+        return JSONArray().apply {
+            // 文本块
+            put(JSONObject().apply {
+                put("type", "text")
+                put("text", text)
+            })
+            // 每张图片一个 image_url 块
+            for (img in images) {
+                put(JSONObject().apply {
+                    put("type", "image_url")
+                    put("image_url", JSONObject().apply {
+                        put("url", "data:${img.mimeType};base64,${img.base64}")
+                    })
+                })
+            }
         }
     }
 
@@ -1831,19 +2013,30 @@ class CompanionViewModel(
         // 从 UI 消息列表移除
         messages = messages.filter { it.id != id }
         // 从 API 对话历史中移除对应条目
-        // 通过匹配 role + content 来定位（因为 conversationHistory 没有存消息 ID）
-        val role = if (msg.isFromUser) "user" else "assistant"
-        val indexToRemove = conversationHistory.indexOfFirst { entry ->
-            try {
-                val entryRole = entry.optString("role", "")
-                val entryContent = entry.optString("content", "")
-                entryRole == role && entryContent == msg.text
-            } catch (_: Exception) {
-                false
-            }
+        // 优先通过 _msg_id 精确匹配（新数据），回退到 role+content 匹配（旧数据兼容）
+        val removedByMsgId = conversationHistory.removeAll { entry ->
+            entry.optString("_msg_id", "") == id
         }
-        if (indexToRemove >= 0) {
-            conversationHistory.removeAt(indexToRemove)
+        if (!removedByMsgId) {
+            // 兼容旧数据：没有 _msg_id 时退化为 role+content 匹配
+            val role = if (msg.isFromUser) "user" else "assistant"
+            val indexToRemove = conversationHistory.indexOfFirst { entry ->
+                try {
+                    val entryRole = entry.optString("role", "")
+                    val entryContent = entry.optString("content", "")
+                    if (msg.isFromUser) {
+                        // 用户消息在 conversationHistory 中带有时间后缀，用 startsWith 匹配
+                        entryRole == role && entryContent.startsWith(msg.text)
+                    } else {
+                        entryRole == role && entryContent == msg.text
+                    }
+                } catch (_: Exception) {
+                    false
+                }
+            }
+            if (indexToRemove >= 0) {
+                conversationHistory.removeAt(indexToRemove)
+            }
         }
         requestSave()
     }
@@ -1870,8 +2063,18 @@ class CompanionViewModel(
         val removedMessages = messages.subList(msgIndex, messages.size)
         messages = messages.subList(0, msgIndex)
 
+        // 收集被删除消息的 ID 集合
+        val removedIds = removedMessages.map { it.id }.toSet()
+
         // 从 API 对话历史中移除被删除消息对应的条目
-        // 倒序遍历，每匹配到一条就移除，直到移除完所有被删除消息对应的条目
+        // 优先通过 _msg_id 匹配（新数据），回退到 role+content 匹配（旧数据兼容）
+        val newHistory = conversationHistory.toMutableList()
+        newHistory.removeAll { entry ->
+            val msgId = entry.optString("_msg_id", "")
+            msgId in removedIds
+        }
+
+        // 对于没有 _msg_id 的旧数据条目，使用 role+content 回退匹配
         for (removed in removedMessages) {
             val role = when {
                 removed.isToolMessage -> "tool"
@@ -1879,18 +2082,27 @@ class CompanionViewModel(
                 else -> "assistant"
             }
             val content = removed.text
-            // 从后往前找，匹配 role 和 content
-            val idx = conversationHistory.indexOfLast { entry ->
+            val idx = newHistory.indexOfLast { entry ->
+                // 只匹配没有 _msg_id 的旧数据条目
+                if (entry.optString("_msg_id", "").isNotEmpty()) return@indexOfLast false
                 try {
-                    entry.optString("role", "") == role && entry.optString("content", "") == content
+                    val entryRole = entry.optString("role", "")
+                    val entryContent = entry.optString("content", "")
+                    if (removed.isFromUser) {
+                        entryRole == role && entryContent.startsWith(content)
+                    } else {
+                        entryRole == role && entryContent == content
+                    }
                 } catch (_: Exception) {
                     false
                 }
             }
             if (idx >= 0) {
-                conversationHistory.removeAt(idx)
+                newHistory.removeAt(idx)
             }
         }
+        conversationHistory.clear()
+        conversationHistory.addAll(newHistory)
         requestSave()
 
         // 重新启动 Agent Loop，让 LLM 重新生成回复
@@ -1940,6 +2152,7 @@ class CompanionViewModel(
         conversationHistory.add(JSONObject().apply {
             put("role", "assistant")
             put("content", text)
+            put("_msg_id", newId)
         })
     }
 
@@ -1974,6 +2187,8 @@ class CompanionViewModel(
             put("content", null)
             put("tool_calls", toolCallsJson)
             // 不回传 reasoning_content，节省上下文 token
+            // 用第一个 tool call 的 ID 标记此条目所属的"工具调用组"，便于 rerollMessage 删除
+            put("_msg_id", "toolgroup_${toolCalls.firstOrNull()?.id ?: ""}")
         })
     }
 
@@ -1991,6 +2206,8 @@ class CompanionViewModel(
             put("role", "tool")
             put("tool_call_id", toolCallId)
             put("content", result)
+            // 用 tool_$callId 标记，与 ChatMessage(id="tool_$callId") 对应
+            put("_msg_id", "tool_$toolCallId")
         })
     }
 
@@ -2056,9 +2273,13 @@ class CompanionViewModel(
             put("content", stableContent)
         })
 
-        // 直接追加原始对话历史，不做任何压缩或修改
-        // 之前的压缩逻辑会改变 tool result 内容，导致每次请求前缀不同，缓存全部失效
-        apiMessages.addAll(conversationHistory)
+        // 追加对话历史，移除内部标记字段 _msg_id（不影响 API 请求内容，保证缓存前缀稳定）
+        // _msg_id 仅用于 deleteMessage/rerollMessage 精确定位条目
+        for (entry in conversationHistory) {
+            val cleaned = JSONObject(entry.toString())
+            cleaned.remove("_msg_id")
+            apiMessages.add(cleaned)
+        }
 
         return apiMessages
     }
