@@ -2,6 +2,9 @@ package com.echonion.nion.ui.task
 
 import com.echonion.nion.ui.theme.NionAlpha
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -19,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +34,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -50,6 +55,7 @@ import com.echonion.nion.ui.theme.LocalPriorityColors
  * @param onClick 点击任务行时触发，打开任务详情
  * @param isSelected 当前任务是否处于选中状态（多选模式）
  * @param isGroupSelected 当前任务所属分组是否被选中
+ * @param onToggleCollapse 点击折叠/展开图标时触发，传入任务 ID；null 表示不显示折叠图标
  * @param modifier 修饰符
  * @param sharedElementModifier shared element 动画 modifier，用于任务详情展开时的 morph 动画
  */
@@ -60,6 +66,7 @@ fun FlatTaskRow(
     onClick: (TaskItem) -> Unit,
     isSelected: Boolean,
     isGroupSelected: Boolean,
+    onToggleCollapse: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
     sharedElementModifier: Modifier = Modifier,
 ) {
@@ -69,10 +76,12 @@ fun FlatTaskRow(
         MainTaskRow(
             task = task,
             isGroupLast = item.isGroupLast,
+            isCollapsed = item.isCollapsed,
             onToggleDone = onToggleDone,
             onClick = onClick,
             isSelected = isSelected,
             isGroupSelected = isGroupSelected,
+            onToggleCollapse = onToggleCollapse,
             modifier = modifier,
             sharedElementModifier = sharedElementModifier,
         )
@@ -132,13 +141,16 @@ private fun Modifier.groupBorder(
 /**
  * 主任务行 —— 委托 SharedTaskCard 渲染，在此基础上添加任务列表特有的
  * group border / selection border / shared element 动画 modifier。
+ * 有子任务时右侧显示折叠/展开箭头图标。
  *
  * @param task 任务数据
  * @param isGroupLast 是否为分组中最后一个任务（控制底部圆角）
+ * @param isCollapsed 当前是否处于折叠状态
  * @param onToggleDone 点击勾选框切换完成状态时触发
  * @param onClick 点击任务行时触发，打开任务详情
  * @param isSelected 当前任务是否处于选中状态（多选模式）
  * @param isGroupSelected 当前任务所属分组是否被选中
+ * @param onToggleCollapse 点击折叠/展开图标时触发，传入任务 ID；null 表示不显示折叠图标
  * @param modifier 修饰符
  * @param sharedElementModifier shared element 动画 modifier，用于任务详情展开时的 morph 动画
  */
@@ -146,10 +158,12 @@ private fun Modifier.groupBorder(
 private fun MainTaskRow(
     task: TaskItem,
     isGroupLast: Boolean,
+    isCollapsed: Boolean,
     onToggleDone: (TaskItem) -> Unit,
     onClick: (TaskItem) -> Unit,
     isSelected: Boolean,
     isGroupSelected: Boolean,
+    onToggleCollapse: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
     sharedElementModifier: Modifier = Modifier,
 ) {
@@ -174,12 +188,28 @@ private fun MainTaskRow(
         )
     }
 
+    /* 折叠箭头旋转动画：展开=0°（朝下），折叠=-90°（朝右） */
+    val arrowRotation by animateFloatAsState(
+        targetValue = if (isCollapsed) -90f else 0f,
+        animationSpec = spring(
+            dampingRatio = 1.0f,
+            stiffness = Spring.StiffnessMediumLow,
+        ),
+        label = "collapseArrow",
+    )
+
+    // 是否显示折叠箭头：有子任务且提供了回调
+    val showCollapseArrow = onToggleCollapse != null && task.subtasks.isNotEmpty()
+
     // 在 SharedTaskCard 的 background() 之前注入 group border / selection / shared element
     SharedTaskCard(
         model = cardModel,
         onToggleDone = { onToggleDone(task) },
         onClick = { onClick(task) },
         shape = shape,
+        showCollapseArrow = showCollapseArrow,
+        arrowRotation = arrowRotation,
+        onToggleCollapse = { onToggleCollapse?.invoke(task.id) },
         modifier = modifier
             .then(sharedElementModifier)
             .then(

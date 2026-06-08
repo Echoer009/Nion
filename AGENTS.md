@@ -28,7 +28,10 @@ cargo run -p uniffi-bindgen-cli -- generate --library <path-to-so> --language ko
 ```bash
 cd app && ./gradlew assembleDebug     # build APK
 ./build-android.sh                    # cross-compile Rust for Android + generate UniFFI Kotlin bindings + copy artifacts
-./deploy.sh                           # build APK, install via adb, launch app (WSL + usbipd)
+./deploy.sh                           # build debug APK, install via adb, launch app (default: standard debug)
+./deploy.sh character                 # character flavor debug
+./deploy.sh character release         # character flavor release
+./deploy.sh standard release          # standard flavor release
 ```
 
 ## Build & Deploy Flow
@@ -154,3 +157,20 @@ private fun WeekDaySelector(
 - WSL2 development. Android SDK at `~/android-sdk`. NDK version `27.0.12077973`.
 - `deploy.sh` uses `usbipd` for USB passthrough from Windows to WSL.
 - Rust edition 2021. Java 17. Kotlin 2.3.21. Compose BOM 2026.05.00. AGP 9.1.1.
+
+## Release 流程
+
+1. 修改 `app/app/build.gradle.kts` 中的 `versionCode` +1 和 `versionName` 升版本号，提交
+2. 打 tag：`git tag v0.x.x`（不带 `-character` 后缀）
+3. 构建 **两个** flavor 的 release APK：
+   ```bash
+   cd app && ./gradlew.bat assembleStandardRelease assembleCharacterRelease
+   ```
+4. 创建 GitHub Release，title 格式 `Nion x.x.x`，tag `v0.x.x`，中英文对照 notes
+5. 上传两个 APK，重命名为 `BrainGirl.apk`（character）和 `Nion.apk`（standard）：
+   ```bash
+   gh release create v0.x.x --title "Nion x.x.x" --notes "..." \
+     "app/app/build/outputs/apk/character/release/app-character-release.apk#BrainGirl.apk" \
+     "app/app/build/outputs/apk/standard/release/app-standard-release.apk#Nion.apk"
+   ```
+6. Release notes 格式参考 `v0.7.4`、`v0.7.5`：中文在前（`## 新功能` / `## 修复`），英文在后（`## New Features` / `## Fixes`）

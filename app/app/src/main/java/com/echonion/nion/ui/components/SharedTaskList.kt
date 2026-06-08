@@ -8,6 +8,7 @@ import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.BorderStroke
@@ -108,6 +109,8 @@ fun SharedTaskList(
     listState: LazyListState = rememberLazyListState(),
     innerPadding: PaddingValues = PaddingValues(0.dp),
     modifier: Modifier = Modifier,
+    /** 点击折叠/展开箭头时触发，传入主任务 ID */
+    onToggleCollapse: ((String) -> Unit)? = null,
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -238,7 +241,11 @@ fun SharedTaskList(
         // ==================== 过期每日任务分区 ====================
         if (overdueTasks.isNotEmpty()) {
             item(key = "overdue_header", contentType = "header") {
-                SectionHeader("过期", overdueTasks.size, isError = true)
+                Box(modifier = Modifier.animateItem(
+                    placementSpec = spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow),
+                )) {
+                    SectionHeader("过期", overdueTasks.size, isError = true)
+                }
             }
             items(
                 items = overdueTasks,
@@ -254,7 +261,11 @@ fun SharedTaskList(
 
         if (reorderableItems.isNotEmpty()) {
             item(key = "todo_header", contentType = "header") {
-                SectionHeader("待办", reorderableItems.count { it.depth == 0 })
+                Box(modifier = Modifier.animateItem(
+                    placementSpec = spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow),
+                )) {
+                    SectionHeader("待办", reorderableItems.count { it.depth == 0 })
+                }
             }
 
             items(
@@ -296,12 +307,14 @@ fun SharedTaskList(
                 ReorderableItem(
                     state = reorderableState,
                     key = flatItem.task.id,
-                    /* 完成动画：StiffnessLow 慢速 + DampingRatioMedium（0.6）微弱回弹，
-                     * 既柔和不闪烁，又不会弹过头。拖拽中的卡片跳过位移动画。 */
+                    /* 位移动画：临界阻尼 + MediumLow 刚度，对齐伙伴设置的弹簧手感；
+                     * fadeIn/fadeOut 在子任务折叠/展开时提供淡入淡出过渡。 */
                     animateItemModifier = if (!isInDraggedGroup) Modifier.animateItem(
+                        fadeInSpec = tween(300, easing = FastOutSlowInEasing),
+                        fadeOutSpec = tween(400, easing = FastOutSlowInEasing),
                         placementSpec = spring(
-                            dampingRatio = Spring.DampingRatioLowBouncy,
-                            stiffness = Spring.StiffnessLow,
+                            dampingRatio = 1.0f,
+                            stiffness = Spring.StiffnessMediumLow,
                         ),
                     ) else Modifier,
                 ) { isDragging ->
@@ -436,6 +449,7 @@ fun SharedTaskList(
                                 },
                                 isSelected = isSelected,
                                 isGroupSelected = groupSelected,
+                                onToggleCollapse = onToggleCollapse,
                                 sharedElementModifier = taskSharedModifier(flatItem.task.id),
                             )
                         }
@@ -445,7 +459,13 @@ fun SharedTaskList(
         }
 
         if (doneItems.isNotEmpty()) {
-            item(key = "done_header", contentType = "header") { SectionHeader("已完成", doneItems.size) }
+            item(key = "done_header", contentType = "header") {
+                Box(modifier = Modifier.animateItem(
+                    placementSpec = spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow),
+                )) {
+                    SectionHeader("已完成", doneItems.size)
+                }
+            }
 
             items(
                 items = doneItems,
@@ -454,13 +474,15 @@ fun SharedTaskList(
             ) { flatItem ->
                 val isSelected = flatItem.task.id in selectedIds
                 val cardShape = remember { RoundedCornerShape(16.dp) }
-                    /* 已完成区使用与待办区相同的慢速弹簧，确保从待办区滑入已完成区的动画速度一致 */
+                    /* 已完成区使用与待办区相同的弹簧规格，确保从待办区滑入已完成区的动画速度一致 */
                     Box(
                         modifier = Modifier
                             .animateItem(
+                                fadeInSpec = tween(300, easing = FastOutSlowInEasing),
+                                fadeOutSpec = tween(400, easing = FastOutSlowInEasing),
                                 placementSpec = spring(
-                                    dampingRatio = Spring.DampingRatioLowBouncy,
-                                    stiffness = Spring.StiffnessLow,
+                                    dampingRatio = 1.0f,
+                                    stiffness = Spring.StiffnessMediumLow,
                                 ),
                             )
                         .padding(vertical = 4.dp)
@@ -489,7 +511,14 @@ fun SharedTaskList(
             }
         }
 
-        item(key = "bottom_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(88.dp)) }
+        item(key = "bottom_spacer", contentType = "spacer") {
+            Spacer(modifier = Modifier
+                .animateItem(
+                    placementSpec = spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow),
+                )
+                .height(88.dp)
+            )
+        }
     }
 }
 

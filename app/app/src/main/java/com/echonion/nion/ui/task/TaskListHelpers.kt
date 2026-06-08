@@ -138,10 +138,13 @@ internal fun collectDoneSubs(
 }
 
 /** 将任务树展平为 FlatTaskItem 列表，供 TaskViewModel 和 FocusSetupViewModel 共用 */
-internal fun flattenWithGroupInfo(tasks: List<TaskItem>): List<FlatTaskItem> {
+internal fun flattenWithGroupInfo(
+    tasks: List<TaskItem>,
+    collapsedIds: Set<String> = emptySet(),
+): List<FlatTaskItem> {
     val result = mutableListOf<FlatTaskItem>()
     for (task in tasks) {
-        flattenTodoGroup(task, depth = 0, result)
+        flattenTodoGroup(task, depth = 0, result, collapsedIds)
     }
     return result
 }
@@ -149,31 +152,41 @@ internal fun flattenWithGroupInfo(tasks: List<TaskItem>): List<FlatTaskItem> {
 /**
  * 递归展开待办任务组。未完成任务作为组根 + 递归子树；
  * 已完成任务跳过自身但继续深入子树（子任务可能被单独取消完成）。
+ * collapsedIds 中的主任务跳过其子树，isGroupLast 强制为 true。
  * 供 flattenWithGroupInfo 内部调用。
  */
 internal fun flattenTodoGroup(
     task: TaskItem,
     depth: Int,
     result: MutableList<FlatTaskItem>,
+    collapsedIds: Set<String> = emptySet(),
 ) {
     if (!task.isDone) {
+        val isCollapsed = task.id in collapsedIds
         val subItems = mutableListOf<FlatTaskItem>()
-        flattenSubs(task.subtasks, depth = depth + 1, parentId = task.id, subItems)
+        if (!isCollapsed) {
+            flattenSubs(task.subtasks, depth = depth + 1, parentId = task.id, subItems, collapsedIds)
+        }
         val hasSubs = subItems.isNotEmpty()
+        /* 折叠时或无子任务时，isGroupLast = true，使父任务显示完整圆角 */
+        val isGroupLast = !hasSubs || isCollapsed
+        /* 标记折叠状态，供 UI 层渲染箭头图标 */
+        val hasSubtasks = task.subtasks.any { !it.isDone }
         result.add(FlatTaskItem(
             task = task,
             depth = depth,
             parentId = null,
             isGroupFirst = true,
-            isGroupLast = !hasSubs,
+            isGroupLast = isGroupLast,
+            isCollapsed = isCollapsed && hasSubtasks,
         ))
-        if (hasSubs) {
+        if (hasSubs && !isCollapsed) {
             subItems[subItems.lastIndex] = subItems.last().copy(isGroupLast = true)
             result.addAll(subItems)
         }
     } else {
         for (sub in task.subtasks) {
-            flattenTodoGroup(sub, depth, result)
+            flattenTodoGroup(sub, depth, result, collapsedIds)
         }
     }
 }
@@ -184,21 +197,35 @@ internal fun flattenSubs(
     depth: Int,
     parentId: String,
     result: MutableList<FlatTaskItem>,
+    collapsedIds: Set<String> = emptySet(),
 ) {
     for ((index, sub) in subs.withIndex()) {
         if (sub.isDone) {
-            flattenSubs(sub.subtasks, depth + 1, sub.id, result)
+            flattenSubs(sub.subtasks, depth + 1, sub.id, result, collapsedIds)
             continue
         }
-        val hasChildSubs = sub.subtasks.any { !it.isDone }
+        val isCollapsed = sub.id in collapsedIds
+        val childSubItems = mutableListOf<FlatTaskItem>()
+        if (!isCollapsed) {
+            flattenSubs(sub.subtasks, depth + 1, sub.id, childSubItems, collapsedIds)
+        }
+        val hasChildSubs = childSubItems.isNotEmpty()
         val isLastInSameParent = index == subs.lastIndex || subs.drop(index + 1).all { it.isDone }
+        /* 折叠时或无子任务时 isGroupLast 由父级决定 */
+        val isGroupLast = isLastInSameParent && (!hasChildSubs || isCollapsed)
+        /* 标记折叠状态，供 UI 层渲染箭头图标 */
+        val hasSubtasks = sub.subtasks.any { !it.isDone }
         result.add(FlatTaskItem(
             task = sub,
             depth = depth,
             parentId = parentId,
             isGroupFirst = false,
-            isGroupLast = isLastInSameParent && !hasChildSubs,
+            isGroupLast = isGroupLast,
+            isCollapsed = isCollapsed && hasSubtasks,
         ))
-        flattenSubs(sub.subtasks, depth + 1, sub.id, result)
+        if (hasChildSubs && !isCollapsed) {
+            childSubItems[childSubItems.lastIndex] = childSubItems.last().copy(isGroupLast = true)
+            result.addAll(childSubItems)
+        }
     }
 }

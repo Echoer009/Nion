@@ -22,6 +22,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Notifications
@@ -39,6 +40,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
@@ -78,6 +80,7 @@ data class TaskCardModel(
  * - 勾选框带弹跳动画，未完成时显示 RadioButtonUnchecked 图标（颜色跟随优先级）
  * - 标题完成时带删除线，每日任务末尾显示循环图标
  * - 可选显示描述（单行省略）和截止日期/提醒时间行
+ * - 可选显示折叠/展开箭头图标（有子任务的主任务使用）
  *
  * @param model 任务卡片数据
  * @param onToggleDone 勾选框点击回调，切换任务完成状态
@@ -85,6 +88,9 @@ data class TaskCardModel(
  * @param shape 卡片圆角形状，用于背景裁切；任务列表在有分组时需要特殊 shape
  * @param modifier 在 background() 之前注入的 modifier，用于任务列表添加 group border / selection / shared element
  * @param compact 紧凑模式，true 时缩小内边距（日程页面使用）
+ * @param showCollapseArrow 是否显示折叠/展开箭头图标
+ * @param arrowRotation 箭头旋转角度（展开=0°朝下，折叠=-90°朝右）
+ * @param onToggleCollapse 点击箭头图标时触发，切换折叠状态
  */
 @Composable
 fun SharedTaskCard(
@@ -94,6 +100,9 @@ fun SharedTaskCard(
     shape: Shape = MaterialTheme.shapes.medium,
     modifier: Modifier = Modifier,
     compact: Boolean = false,
+    showCollapseArrow: Boolean = false,
+    arrowRotation: Float = 0f,
+    onToggleCollapse: (() -> Unit)? = null,
 ) {
     // 背景色动画：已完成 → surfaceContainerLow，未完成 → surfaceContainerLowest
     val cardColor by animateColorAsState(
@@ -162,6 +171,24 @@ fun SharedTaskCard(
         Spacer(modifier = Modifier.width(14.dp))
         // 文字信息列：标题 + 描述 + 提醒时间
         TaskTextContent(model = model, modifier = Modifier.weight(1f))
+        // 折叠/展开箭头图标，仅在有子任务时显示
+        if (showCollapseArrow && onToggleCollapse != null) {
+            Spacer(modifier = Modifier.width(4.dp))
+            Icon(
+                imageVector = Icons.Default.KeyboardArrowDown,
+                contentDescription = if (arrowRotation == -90f) "展开子任务" else "折叠子任务",
+                modifier = Modifier
+                    .size(20.dp)
+                    .rotate(arrowRotation)
+                    .clip(CircleShape)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onToggleCollapse,
+                    ),
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }
 

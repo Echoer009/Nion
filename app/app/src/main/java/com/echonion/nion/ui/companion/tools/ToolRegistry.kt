@@ -45,6 +45,7 @@ object ToolRegistry {
         DeleteTool,
         ManageTool,
         MemoryTool,
+        WebSearchTool,
     )
 
     /**

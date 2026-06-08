@@ -79,6 +79,8 @@ data class FlatTaskItem(
     val parentId: String?,
     val isGroupFirst: Boolean,
     val isGroupLast: Boolean,
+    /** 是否处于折叠状态（仅对有子任务的主任务有意义） */
+    val isCollapsed: Boolean = false,
 )
 
 @OptIn(FlowPreview::class)
@@ -131,8 +133,8 @@ class TaskViewModel(
     val todoCount: Int by derivedStateOf { flatTodoTasks.size }
     val doneCount: Int by derivedStateOf { flatDoneTasks.size }
 
-    /** 扁平化待办任务 —— 遍历全量 tasks，flattenTodoGroup 自行处理已完成父任务下被单独取消的子任务 */
-    val flatTodoTasks: List<FlatTaskItem> by derivedStateOf { flattenWithGroupInfo(tasks) }
+    /** 扁平化待办任务 —— 遍历全量 tasks，折叠的子任务不加入列表 */
+    val flatTodoTasks: List<FlatTaskItem> by derivedStateOf { flattenWithGroupInfo(tasks, collapsedTaskIds) }
 
     val activeChecklistName: String
         get() = when (activeChecklistId) {
@@ -146,6 +148,22 @@ class TaskViewModel(
 
     var selectedTaskIds by mutableStateOf<Set<String>>(emptySet())
         private set
+
+    /** 已折叠的主任务 ID 集合，空集=全部展开 */
+    var collapsedTaskIds by mutableStateOf<Set<String>>(emptySet())
+        private set
+
+    /**
+     * 切换指定主任务的折叠状态。
+     * 展开→折叠：加入集合；折叠→展开：移出集合。
+     */
+    fun toggleCollapse(taskId: String) {
+        collapsedTaskIds = if (taskId in collapsedTaskIds) {
+            collapsedTaskIds - taskId
+        } else {
+            collapsedTaskIds + taskId
+        }
+    }
 
     /** 过期的每日任务列表（所有历史未完成的每日任务），仅在"今天"视图中加载 */
     var overdueDailyTasks by mutableStateOf<List<OverdueDailyTask>>(emptyList())

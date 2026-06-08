@@ -12,8 +12,8 @@ android {
         applicationId = "com.echonion.nion"
         minSdk = 26
         targetSdk = 36
-        versionCode = 13
-        versionName = "0.7.6"
+        versionCode = 14
+        versionName = "0.7.7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -112,6 +112,9 @@ dependencies {
 
     // OkHttp —— HTTP 客户端，用于 SSE 流式聊天
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
+
+    // Jsoup —— HTML 解析，用于 DDG 搜索结果抓取
+    implementation("org.jsoup:jsoup:1.18.3")
 
     // WorkManager —— 后台提醒任务调度（渐进式循环、LLM 文案生成）
     implementation("androidx.work:work-runtime-ktx:2.10.0")

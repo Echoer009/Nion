@@ -94,6 +94,20 @@ internal val femalePhrasePools: Map<String, Map<String, List<String>>> = mapOf(
             "好看吗？我帮你换了配色！",
             "配色更新完毕，满意吗~",
         ),
+        "search_results" to listOf(
+            "帮你查到了 {count} 条相关信息！",
+            "搜索完毕~找到 {count} 条结果！",
+            "锵锵~帮你搜到了 {count} 条有用的信息！",
+            "查到啦！一共 {count} 条搜索结果~",
+            "搜了一圈，找到 {count} 条相关信息~",
+        ),
+        "search_empty" to listOf(
+            "嗯...没有搜到相关信息呢",
+            "抱歉，搜索结果为空...",
+            "没找到相关的内容...",
+            "搜索了一下，但似乎没有匹配的结果...",
+            "查不到相关信息呢，换个关键词试试？",
+        ),
         "fail" to listOf(
             "唔...好像出了点问题",
             "啊，失败了...",
@@ -205,6 +219,20 @@ internal val femalePhrasePools: Map<String, Map<String, List<String>>> = mapOf(
             "嗯，配色改好了",
             "调好了，希望你喜欢",
         ),
+        "search_results" to listOf(
+            "帮你搜到了 {count} 条相关信息~",
+            "查了一下，找到 {count} 条结果",
+            "嗯，搜到了 {count} 条有用的信息",
+            "找到了 {count} 条相关内容~",
+            "查到了哦，一共 {count} 条搜索结果",
+        ),
+        "search_empty" to listOf(
+            "嗯...没有搜到相关信息呢",
+            "抱歉，没找到相关的内容",
+            "搜索结果为空，换个关键词试试？",
+            "暂时没有搜到有用的信息",
+            "没找到相关的结果呢",
+        ),
         "fail" to listOf(
             "嗯...好像没成功呢",
             "抱歉，出了点问题",
@@ -313,6 +341,20 @@ internal val femalePhrasePools: Map<String, Map<String, List<String>>> = mapOf(
             "颜色配置已应用",
             "配色调整完成",
             "主题设置已生效",
+        ),
+        "search_results" to listOf(
+            "搜到了，{count} 条结果",
+            "找到 {count} 条相关信息",
+            "搜索完成，{count} 条结果",
+            "查到了 {count} 条",
+            "{count} 条搜索结果，已整理好",
+        ),
+        "search_empty" to listOf(
+            "未搜到相关信息",
+            "搜索结果为空",
+            "没有找到",
+            "无相关结果",
+            "没查到，换个关键词吧",
         ),
         "fail" to listOf(
             "失败了",

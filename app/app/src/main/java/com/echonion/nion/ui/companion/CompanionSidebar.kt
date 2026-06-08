@@ -2101,7 +2101,9 @@ private fun ChatContent(
                 }
             }
             // 加载指示器：仅在等待 AI 回复且尚未收到任何文本时显示转圈
-            else if (isLoading) {
+            // 排除工具执行阶段——工具状态已通过 appendToolStatusMessage 在消息列表中显示，
+            // 此处不再重复显示，避免出现两个"正在搜索..."气泡
+            else if (isLoading && viewModel.toolExecutionStatus == null) {
                 item {
                     // 工具执行时显示具体操作（如"正在创建任务..."），否则显示通用"正在思考"
                     val statusText = viewModel.toolExecutionStatus

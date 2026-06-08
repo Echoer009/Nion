@@ -544,6 +544,7 @@ private fun TaskScreenContent(
                         listState = listState,
                         innerPadding = androidx.compose.foundation.layout.PaddingValues(),
                         modifier = Modifier.weight(1f),
+                        onToggleCollapse = { viewModel.toggleCollapse(it) },
                     )
                 }
             }

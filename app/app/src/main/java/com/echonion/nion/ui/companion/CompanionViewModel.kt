@@ -1676,6 +1676,7 @@ class CompanionViewModel(
                     else -> "正在调整设置..."
                 }
             }
+            "websearch" -> "正在搜索互联网..."
             else -> "正在执行操作..."
         }
     }
@@ -1773,6 +1774,12 @@ class CompanionViewModel(
                     else ToolPhrasePool.pick(companionStyle, "memory")
                 }
                 "settings" -> ToolPhrasePool.pick(companionStyle, "settings")
+                "websearch" -> {
+                    // websearch 工具根据搜索结果数量选取话术
+                    val count = resultJson.optJSONArray("results")?.length() ?: 0
+                    val subKey = if (count > 0) "search_results" else "search_empty"
+                    ToolPhrasePool.pick(companionStyle, subKey, mapOf("count" to count.toString()))
+                }
                 else -> ToolPhrasePool.pick(companionStyle, "create_generic")
             }
         } catch (_: Exception) {
