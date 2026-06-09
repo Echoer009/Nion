@@ -78,6 +78,20 @@
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
+
+        <!-- Phone Agent 无障碍服务 —— 提供截图、手势执行、全局操作等能力
+             用于 Phone Agent 子循环，让 AI 能够操控手机界面 -->
+        <service
+            android:name=".ui.companion.phoneagent.PhoneAgentService"
+            android:exported="true"
+            android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+            <intent-filter>
+                <action android:name="android.accessibilityservice.AccessibilityService" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accessibilityservice"
+                android:resource="@xml/phone_agent_service_config" />
+        </service>
     </application>
 
 </manifest>

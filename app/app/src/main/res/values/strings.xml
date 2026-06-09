@@ -1,4 +1,5 @@
 <resources>
     <string name="app_name">Nion</string>
+    <string name="phone_agent_service_description">Nion Phone Agent —— 让 AI 伙伴能够帮你操控手机，自动完成打开应用、搜索、发消息等操作。开启后，AI 会通过截图理解屏幕内容并执行点击、滑动等操作。</string>
     <style name="Theme.Nion" parent="android:Theme.Material.Light.NoActionBar" />
 </resources>

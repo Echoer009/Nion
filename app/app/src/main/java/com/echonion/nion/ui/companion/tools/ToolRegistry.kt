@@ -1,6 +1,7 @@
 package com.echonion.nion.ui.companion.tools
 
 import com.echonion.nion.ui.companion.JsonCanonicalizer
+import com.echonion.nion.ui.companion.phoneagent.PhoneAgentTool
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -46,6 +47,7 @@ object ToolRegistry {
         ManageTool,
         MemoryTool,
         WebSearchTool,
+        PhoneAgentTool,
     )
 
     /**

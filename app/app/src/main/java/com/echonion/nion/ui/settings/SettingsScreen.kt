@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.MyLocation
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.HorizontalDivider
@@ -97,12 +98,16 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import com.echonion.nion.core
+import uniffi.nion_core.NionCore
 import com.echonion.nion.ui.companion.weather.LocationHelper
+import com.echonion.nion.ui.companion.phoneagent.PhoneAgentBridge
 import com.echonion.nion.ui.theme.CustomThemeEntry
 import com.echonion.nion.ui.theme.NionAlpha
 import com.echonion.nion.ui.theme.NionColorTheme
 import com.echonion.nion.ui.theme.ThemePalette
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 /**
  * 设置页面 —— 应用配置中心。
@@ -384,6 +389,9 @@ fun SettingsScreen(
             )
 
             DataManagementCard(context = context)
+
+            // ── Phone Agent 设置 ──
+            PhoneAgentSettingsCard(core = core, context = context)
 
             Spacer(modifier = Modifier.height(16.dp))
         }
@@ -1584,4 +1592,135 @@ private fun LocationCard(
             }
         }
     }
+}
+
+/**
+ * Phone Agent 设置卡片 —— 配置 Phone Agent 的 API 连接和无障碍服务状态。
+ */
+@Composable
+private fun PhoneAgentSettingsCard(core: NionCore, context: Context) {
+    val scope = rememberCoroutineScope()
+    val isAccessibilityEnabled = remember {
+        mutableStateOf(PhoneAgentBridge.isAccessibilityServiceEnabled(context))
+    }
+    var apiKey by remember {
+        mutableStateOf(readPhoneAgentSetting(core, "phone_agent_api_key") ?: "")
+    }
+    var baseUrl by remember {
+        mutableStateOf(
+            readPhoneAgentSetting(core, "phone_agent_base_url")
+                ?: "https://open.bigmodel.cn/api/paas/v4"
+        )
+    }
+    var model by remember {
+        mutableStateOf(
+            readPhoneAgentSetting(core, "phone_agent_model")
+                ?: "autoglm-phone"
+        )
+    }
+    var isSaving by remember { mutableStateOf(false) }
+
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(
+        "Phone Agent",
+        style = MaterialTheme.typography.titleMedium,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.secondary,
+    )
+
+    Surface(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+        shape = MaterialTheme.shapes.medium,
+        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text("无障碍服务", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (isAccessibilityEnabled.value) "已开启" else "未开启",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isAccessibilityEnabled.value) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
+                    )
+                    if (!isAccessibilityEnabled.value) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(onClick = {
+                            scope.launch {
+                                PhoneAgentBridge.openAccessibilitySettings(context)
+                                kotlinx.coroutines.delay(1000)
+                                isAccessibilityEnabled.value = PhoneAgentBridge.isAccessibilityServiceEnabled(context)
+                            }
+                        }) { Text("去开启", style = MaterialTheme.typography.labelSmall) }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            OutlinedTextField(
+                value = apiKey, onValueChange = { apiKey = it },
+                label = { Text("Phone Agent API Key") },
+                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall,
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = baseUrl, onValueChange = { baseUrl = it },
+                label = { Text("API Base URL") },
+                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall,
+            )
+
+            Spacer(modifier = Modifier.height(8.dp))
+
+            OutlinedTextField(
+                value = model, onValueChange = { model = it },
+                label = { Text("模型名称") },
+                modifier = Modifier.fillMaxWidth(), singleLine = true,
+                textStyle = MaterialTheme.typography.bodySmall,
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            Button(
+                onClick = {
+                    isSaving = true
+                    scope.launch {
+                        withContext(Dispatchers.IO) {
+                            core.setSetting("phone_agent_api_key", apiKey.trim())
+                            core.setSetting("phone_agent_base_url", baseUrl.trim().trimEnd('/'))
+                            core.setSetting("phone_agent_model", model.trim())
+                        }
+                        withContext(Dispatchers.Main) {
+                            isSaving = false
+                            Toast.makeText(context, "Phone Agent 配置已保存", Toast.LENGTH_SHORT).show()
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth(),
+                enabled = apiKey.isNotBlank() && !isSaving,
+            ) {
+                if (isSaving) {
+                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                    Spacer(modifier = Modifier.width(8.dp))
+                }
+                Text("保存配置")
+            }
+        }
+    }
+}
+
+private fun readPhoneAgentSetting(core: NionCore, key: String): String? {
+    return try {
+        val json = core.getSetting(key)
+        if (json.isNullOrBlank()) return null
+        org.json.JSONObject(json).optString("value", "").takeIf { it.isNotEmpty() }
+    } catch (_: Exception) { null }
 }
