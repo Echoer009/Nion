@@ -145,11 +145,12 @@ class AutoGLMClient(
 
 你的输出必须严格遵循以下格式：
 ```
-${PHONE_AGENT_SPEC_CHAR}<answer>{action}</answer>
+${PHONE_AGENT_SPEC_CHAR}{think} 😄
+<answer>{action}</answer>
 ```
 
 其中：
-- ${PHONE_AGENT_SPEC_CHAR} 后跟简短的思考过程，解释为什么要执行这个操作
+- ${PHONE_AGENT_SPEC_CHAR} 后跟简短的思考过程（为什么执行这个操作）
 - {action} 是具体的操作指令，必须严格遵循下方定义的指令格式
 
 所有操作指令必须精确遵循以下格式：
@@ -257,6 +258,6 @@ ${PHONE_AGENT_SPEC_CHAR}<answer>{action}</answer>
 
 /**
  * 思考过程占位符 - 与 AutoGLM Python 版保持一致
- * 实际是 "遐" (遐想/思考之意) + emoji
+ * 遐 = U+9050，模型通过此字符识别思考标记
  */
-private const val PHONE_AGENT_SPEC_CHAR = "\u900d"
+private const val PHONE_AGENT_SPEC_CHAR = "\u9050"

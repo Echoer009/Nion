@@ -10,12 +10,13 @@ import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Point
 import android.os.Build
-import android.os.CancellationSignal
+import android.os.Bundle
 import android.util.Base64
 import android.util.DisplayMetrics
 import android.util.Log
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.content.ContextCompat
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
@@ -201,12 +202,60 @@ class PhoneAgentService : AccessibilityService() {
 
     // ── 文本输入 ──────────────────────────────────────────────────
 
-    /** 通过剪贴板写入文本 */
+    /** 通过剪贴板写入文本，然后通过无障碍节点执行粘贴操作 */
     fun inputText(text: String): Boolean {
         val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("phone_agent", text))
         Log.d(TAG, "已写入剪贴板: ${text.take(50)}")
-        return true
+
+        // 查找获取焦点的可编辑节点并执行粘贴
+        val focused = findFocusedEditableNode(rootInActiveWindow)
+        if (focused != null) {
+            val result = focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            Log.d(TAG, "执行粘贴: $result")
+            focused.recycle()
+            return result
+        }
+
+        // 没找到焦点，查找第一个可编辑节点
+        val editable = findFirstEditableNode(rootInActiveWindow)
+        if (editable != null) {
+            editable.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+            Thread.sleep(200)
+            val result = editable.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            Log.d(TAG, "查找可编辑节点并粘贴: $result")
+            editable.recycle()
+            return result
+        }
+
+        Log.w(TAG, "未找到可编辑节点")
+        return false
+    }
+
+    /** 递归查找获取焦点的可编辑节点 */
+    private fun findFocusedEditableNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (node == null) return null
+        if (node.isFocused && node.isEditable) return node
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val found = findFocusedEditableNode(child)
+            if (found != null) return found
+            child.recycle()
+        }
+        return null
+    }
+
+    /** 递归查找第一个可编辑节点 */
+    private fun findFirstEditableNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (node == null) return null
+        if (node.isEditable) return node
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val found = findFirstEditableNode(child)
+            if (found != null) return found
+            child.recycle()
+        }
+        return null
     }
 
     // ── 启动应用 ──────────────────────────────────────────────────
