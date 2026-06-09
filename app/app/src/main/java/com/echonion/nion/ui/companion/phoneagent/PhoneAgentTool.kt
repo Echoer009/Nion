@@ -111,9 +111,8 @@ object PhoneAgentTool : Tool {
      */
     private fun readSetting(core: NionCore, key: String): String? {
         return try {
-            val json = core.getSetting(key) ?: return null
-            if (json.isBlank()) return null
-            JSONObject(json).optString("value", "").takeIf { it.isNotEmpty() }
+            val value = core.getSetting(key)
+            if (value.isNullOrBlank()) null else value
         } catch (_: Exception) {
             null
         }

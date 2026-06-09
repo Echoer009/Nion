@@ -1719,8 +1719,7 @@ private fun PhoneAgentSettingsCard(core: NionCore, context: Context) {
 
 private fun readPhoneAgentSetting(core: NionCore, key: String): String? {
     return try {
-        val json = core.getSetting(key)
-        if (json.isNullOrBlank()) return null
-        org.json.JSONObject(json).optString("value", "").takeIf { it.isNotEmpty() }
+        val value = core.getSetting(key)
+        if (value.isNullOrBlank()) null else value
     } catch (_: Exception) { null }
 }

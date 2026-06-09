@@ -20,7 +20,7 @@ import java.util.Locale
  *
  * 使用标准 OpenAI 兼容 API 调用 AutoGLM-Phone-9B 模型。
  * 区别于 Nion 的 ChatService（支持 tools/function calling），
- * AutoGLM 模型使用特殊的响应格式（遐 + <answer>），不支持标准 tool calling。
+ * AutoGLM 模型使用特殊的响应格式（目前为 <answer> 标签），不支持标准 tool calling。
  *
  * 此客户端直接构造原始 HTTP 请求调用 API，因为 AutoGLM 格式与标准 OpenAI 不同。
  *
