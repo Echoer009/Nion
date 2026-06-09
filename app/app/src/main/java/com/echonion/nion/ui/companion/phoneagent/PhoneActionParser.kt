@@ -55,34 +55,46 @@ object PhoneActionParser {
     fun parse(rawContent: String): ParsedAction {
         Log.d(TAG, "解析响应: ${rawContent.take(200)}")
 
-        // 提取思考和动作两部分
-        val thinking: String
-        val actionStr: String
+        var thinking = ""
+        var actionStr = ""
 
-        // 情况 1：finish(message=...) —— 任务完成
+        // 优先处理标准格式：<think>...</think><answer>...</answer>
+        if (rawContent.contains("<answer>") && rawContent.contains("</answer>")) {
+            // 提取思考过程
+            if (rawContent.contains("<think>") && rawContent.contains("</think>")) {
+                val thinkStart = rawContent.indexOf("<think>") + 7
+                val thinkEnd = rawContent.indexOf("</think>")
+                thinking = rawContent.substring(thinkStart, thinkEnd).trim()
+            }
+            // 提取动作
+            val answerStart = rawContent.indexOf("<answer>") + 8
+            val answerEnd = rawContent.indexOf("</answer>")
+            actionStr = rawContent.substring(answerStart, answerEnd).trim()
+
+            if (actionStr.startsWith("finish(message=")) {
+                return parseFinishMessage(actionStr).let { msg ->
+                    ParsedAction("finish", mapOf("message" to msg), thinking, true)
+                }
+            }
+            if (actionStr.startsWith("do(action=")) {
+                return parseDoAction(actionStr, thinking)
+            }
+        }
+
+        // 回退：直接匹配 finish(message=...)
         if (rawContent.contains("finish(message=")) {
             val splitIndex = rawContent.indexOf("finish(message=")
             thinking = rawContent.substring(0, splitIndex).trim()
             actionStr = rawContent.substring(splitIndex).trim()
             return try {
                 val message = parseFinishMessage(actionStr)
-                ParsedAction(
-                    action = "finish",
-                    params = mapOf("message" to message),
-                    thinking = thinking,
-                    finished = true,
-                )
+                ParsedAction("finish", mapOf("message" to message), thinking, true)
             } catch (e: Exception) {
-                ParsedAction(
-                    action = "finish",
-                    params = mapOf("message" to "任务完成"),
-                    thinking = thinking,
-                    finished = true,
-                )
+                ParsedAction("finish", mapOf("message" to "任务完成"), thinking, true)
             }
         }
 
-        // 情况 2：do(action=...) —— 执行动作
+        // 回退：直接匹配 do(action=...)
         if (rawContent.contains("do(action=")) {
             val splitIndex = rawContent.indexOf("do(action=")
             thinking = rawContent.substring(0, splitIndex).trim()
@@ -91,40 +103,13 @@ object PhoneActionParser {
                 parseDoAction(actionStr, thinking)
             } catch (e: Exception) {
                 Log.e(TAG, "动作解析失败", e)
-                ParsedAction(
-                    action = "finish",
-                    params = mapOf("message" to "动作解析失败: ${e.message}"),
-                    thinking = thinking,
-                    finished = true,
-                )
+                ParsedAction("finish", mapOf("message" to "动作解析失败: ${e.message}"), thinking, true)
             }
         }
 
-        // 情况 3：try the emoji-based format "遐...😄\n<answer>...</answer>"
-        if (rawContent.contains("<answer>") && rawContent.contains("</answer>")) {
-            val answerStart = rawContent.indexOf("<answer>") + 8
-            val answerEnd = rawContent.indexOf("</answer>")
-            thinking = rawContent.substring(0, rawContent.indexOf("<answer>")).trim()
-            actionStr = rawContent.substring(answerStart, answerEnd).trim()
-
-            if (actionStr.contains("finish(message=")) {
-                return parseFinishMessage(actionStr).let { msg ->
-                    ParsedAction("finish", mapOf("message" to msg), thinking, true)
-                }
-            }
-            if (actionStr.contains("do(action=")) {
-                return parseDoAction(actionStr, thinking)
-            }
-        }
-
-        // 解析失败：整个响应视为完成消息
-        Log.w(TAG, "无法识别动作格式，将整体响应作为完成消息")
-        return ParsedAction(
-            action = "finish",
-            params = mapOf("message" to rawContent.trim()),
-            thinking = "",
-            finished = true,
-        )
+        // 完全无法解析
+        Log.w(TAG, "无法识别动作格式")
+        return ParsedAction("finish", mapOf("message" to rawContent.trim()), "", true)
     }
 
     /**
