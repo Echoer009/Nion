@@ -732,6 +732,8 @@ class TaskViewModel(
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { core.reorderChecklists(orderedIds) }
+                // 重新从数据库加载清单列表，刷新侧边栏顺序
+                checklists = withContext(Dispatchers.IO) { core.getChecklists().map { it.toUi() } }
             } catch (e: Exception) {
                 onError("清单排序失败: ${e.message}")
             }
