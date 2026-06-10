@@ -12,8 +12,8 @@ android {
         applicationId = "com.echonion.nion"
         minSdk = 26
         targetSdk = 36
-        versionCode = 15
-        versionName = "0.7.8"
+        versionCode = 16
+        versionName = "0.7.9"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
