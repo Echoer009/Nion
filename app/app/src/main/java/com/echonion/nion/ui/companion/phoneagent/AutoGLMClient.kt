@@ -23,14 +23,14 @@ import java.util.Locale
  * - 提供 MessageBuilder 静态方法（createSystemMessage, createUserMessage 等）
  * - 系统提示词从 prompts_zh.py 逐字复制
  *
- * @property baseUrl 模型 API 地址（如 https://open.bigmodel.cn/api/paas/v4）
+ * @property baseUrl 模型 API 地址（如 https://api-inference.modelscope.cn/v1）
  * @property apiKey  API 认证密钥
- * @property model   模型名称（如 autoglm-phone）
+ * @property model   模型名称（如 ZhipuAI/AutoGLM-Phone-9B）
  */
 class AutoGLMClient(
     private val baseUrl: String,
     private val apiKey: String,
-    private val model: String = "autoglm-phone",
+    private val model: String = "ZhipuAI/AutoGLM-Phone-9B",
 ) {
 
     companion object {
@@ -65,7 +65,7 @@ class AutoGLMClient(
                     JSONObject().apply {
                         put("type", "image_url")
                         put("image_url", JSONObject().apply {
-                            put("url", "data:image/png;base64,$imageBase64")
+                            put("url", "data:image/jpeg;base64,$imageBase64")
                         })
                     }
                 )
@@ -215,15 +215,17 @@ class AutoGLMClient(
      *
      * @param messages   完整的消息列表（由 PhoneAgentLoop 维护的上下文）
      * @param isCancelled 取消检查回调，返回 true 时立即中断流式读取
+     * @param onToken 每次收到 delta.content 时的回调，用于实时流式显示
      * @return 模型的完整响应文本（raw_content）
      */
     suspend fun request(
         messages: List<JSONObject>,
         isCancelled: () -> Boolean = { false },
+        onToken: (String) -> Unit = {},
     ): String = withContext(Dispatchers.IO) {
         val messagesArray = JSONArray().apply { messages.forEach { put(it) } }
         Log.d(TAG, "request: 发送 ${messages.size} 条消息, model=$model")
-        callApiStream(messagesArray, isCancelled)
+        callApiStream(messagesArray, isCancelled, onToken)
     }
 
     /**
@@ -237,24 +239,27 @@ class AutoGLMClient(
      *
      * @param messages    消息 JSONArray
      * @param isCancelled 取消检查回调
+     * @param onToken 每收到一个 delta.content 块就调用一次（用于实时流式显示）
      * @return 完整的模型响应文本
      */
-    private fun callApiStream(messages: JSONArray, isCancelled: () -> Boolean): String {
+    private fun callApiStream(messages: JSONArray, isCancelled: () -> Boolean, onToken: (String) -> Unit = {}): String {
         val url = URL("$baseUrl/chat/completions")
         val connection = url.openConnection() as HttpURLConnection
         connection.requestMethod = "POST"
         connection.setRequestProperty("Content-Type", "application/json")
         connection.setRequestProperty("Authorization", "Bearer $apiKey")
         connection.doOutput = true
-        connection.connectTimeout = 60_000
-        connection.readTimeout = 120_000
+        connection.connectTimeout = 30_000
+        // 读超时设短（10秒），配合 isCancelled 实现快速取消：模型思考期间无数据流入，
+        // 超时后 catch IOException → 检查 isCancelled → 如果已取消则抛出 CancellationException
+        connection.readTimeout = 10_000
 
         try {
             // 构建请求体，参数与 Python ModelConfig / ModelClient.request 一致
             val requestBody = JSONObject().apply {
                 put("model", model)
                 put("messages", messages)
-                put("max_tokens", 3000)
+                put("max_tokens", 2048)
                 put("temperature", 0.0)
                 put("top_p", 0.85)
                 put("frequency_penalty", 0.2)
@@ -303,6 +308,7 @@ class AutoGLMClient(
                                     val content = delta.optString("content", "")
                                     if (content.isNotEmpty()) {
                                         rawContent.append(content)
+                                        onToken(content)
                                     }
                                 }
                             }
@@ -326,7 +332,20 @@ class AutoGLMClient(
         } catch (e: CancellationException) {
             Log.w(TAG, "callApiStream: 用户取消")
             throw e
+        } catch (e: java.net.SocketTimeoutException) {
+            // 读超时：可能是模型思考中无数据流出，检查是否用户取消
+            if (isCancelled()) {
+                Log.w(TAG, "callApiStream: 读超时 + 用户取消，立即中断")
+                throw CancellationException("用户取消")
+            }
+            Log.e(TAG, "callApiStream: 读超时", e)
+            throw e
         } catch (e: Exception) {
+            // 其他异常也检查取消：用户可能断开了连接
+            if (isCancelled()) {
+                Log.w(TAG, "callApiStream: 异常 + 用户取消，视为取消")
+                throw CancellationException("用户取消")
+            }
             Log.e(TAG, "callApiStream: 请求失败", e)
             throw e
         } finally {

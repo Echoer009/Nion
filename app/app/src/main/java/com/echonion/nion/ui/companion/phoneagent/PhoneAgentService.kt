@@ -12,6 +12,7 @@ import android.graphics.Path
 import android.graphics.Point
 import android.os.Build
 import android.os.Bundle
+import android.text.InputType
 import android.util.Base64
 import android.util.DisplayMetrics
 import android.util.Log
@@ -84,13 +85,30 @@ class PhoneAgentService : AccessibilityService() {
                     override fun onSuccess(result: ScreenshotResult) {
                         Log.d(TAG, "takeScreenshotBase64: onSuccess")
                         try {
-                            val bitmap = Bitmap.wrapHardwareBuffer(
+                            val rawBitmap = Bitmap.wrapHardwareBuffer(
                                 result.hardwareBuffer, result.colorSpace
                             )?.copy(Bitmap.Config.ARGB_8888, false)
-                            if (bitmap != null) {
+                            if (rawBitmap != null) {
+                                // 将截图缩放到最大 2048x2048 以内，兼容 ModelScope 等平台的图片尺寸限制
+                                val maxDim = 2048
+                                val bitmap = if (rawBitmap.width > maxDim || rawBitmap.height > maxDim) {
+                                    val scale = minOf(
+                                        maxDim.toFloat() / rawBitmap.width,
+                                        maxDim.toFloat() / rawBitmap.height,
+                                    )
+                                    val newW = (rawBitmap.width * scale).toInt()
+                                    val newH = (rawBitmap.height * scale).toInt()
+                                    Log.d(TAG, "takeScreenshotBase64: 缩放 ${rawBitmap.width}x${rawBitmap.height} -> ${newW}x${newH}")
+                                    Bitmap.createScaledBitmap(rawBitmap, newW, newH, true).also {
+                                        rawBitmap.recycle()
+                                    }
+                                } else {
+                                    rawBitmap
+                                }
                                 Log.d(TAG, "takeScreenshotBase64: bitmap=${bitmap.width}x${bitmap.height}")
+                                // 使用 JPEG 压缩，减小 base64 体积（PNG 体积过大）
                                 val os = ByteArrayOutputStream()
-                                bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)
+                                bitmap.compress(Bitmap.CompressFormat.JPEG, 80, os)
                                 resultBase64 = Base64.encodeToString(os.toByteArray(), Base64.NO_WRAP)
                                 Log.d(TAG, "takeScreenshotBase64: base64长度=${resultBase64?.length}")
                                 bitmap.recycle()
@@ -222,40 +240,114 @@ class PhoneAgentService : AccessibilityService() {
 
     // ── 文本输入 ──────────────────────────────────────────────────
 
-    /** 通过剪贴板写入文本，然后通过无障碍节点执行粘贴操作 */
+    /**
+     * 在当前焦点输入框中输入文本。
+     *
+     * 三层策略：
+     * 1. 查找可输入节点 → ACTION_SET_TEXT 或剪贴板粘贴
+     * 2. 查找焦点节点（即使不满足 isInputNode）→ 尝试剪贴板粘贴
+     * 3. 终极 fallback: 剪贴板 + 点击当前焦点位置 → 粘贴
+     */
     fun inputText(text: String): Boolean {
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("phone_agent", text))
-        Log.d(TAG, "已写入剪贴板: ${text.take(50)}")
-
-        // 查找获取焦点的可编辑节点并执行粘贴
-        val focused = findFocusedEditableNode(rootInActiveWindow)
-        if (focused != null) {
-            val result = focused.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-            Log.d(TAG, "执行粘贴: $result")
-            focused.recycle()
-            return result
+        // 策略1: 查找标准可输入节点
+        var node = findFocusedEditableNode(rootInActiveWindow)
+        if (node == null) {
+            node = findFirstEditableNode(rootInActiveWindow)
+            if (node != null) {
+                node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+                Thread.sleep(200)
+                node.recycle()
+                node = findFocusedEditableNode(rootInActiveWindow)
+            }
         }
 
-        // 没找到焦点，查找第一个可编辑节点
-        val editable = findFirstEditableNode(rootInActiveWindow)
-        if (editable != null) {
-            editable.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
-            Thread.sleep(200)
-            val result = editable.performAction(AccessibilityNodeInfo.ACTION_PASTE)
-            Log.d(TAG, "查找可编辑节点并粘贴: $result")
-            editable.recycle()
-            return result
+        if (node != null) {
+            // 尝试 ACTION_SET_TEXT
+            val setTextResult = trySetTextNode(node, text)
+            if (setTextResult) {
+                node.recycle()
+                return true
+            }
+            // Fallback: 剪贴板粘贴
+            Log.d(TAG, "ACTION_SET_TEXT 不支持，fallback 到剪贴板粘贴")
+            val pasteResult = tryClipboardPaste(node, text)
+            node.recycle()
+            if (pasteResult) return true
         }
 
-        Log.w(TAG, "未找到可编辑节点")
+        // 策略2: 查找任何获得焦点的节点（微信等 App 的自定义输入框可能没有 isEditable 标记）
+        Log.d(TAG, "标准可输入节点未找到，尝试查找任意焦点节点")
+        val focusedAny = findFocusedNode(rootInActiveWindow)
+        if (focusedAny != null) {
+            Log.d(TAG, "找到焦点节点: ${focusedAny.className}, text=${focusedAny.text}, hintText=${focusedAny.hintText}")
+            // 先把文本写入剪贴板
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("phone_agent", text))
+            Thread.sleep(100)
+            // 尝试 ACTION_PASTE
+            val pasteResult = focusedAny.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+            Log.d(TAG, "焦点节点粘贴: $pasteResult")
+            focusedAny.recycle()
+            if (pasteResult) return true
+        }
+
+        Log.w(TAG, "未找到可编辑节点，输入失败")
         return false
     }
 
-    /** 递归查找获取焦点的可编辑节点 */
+    /**
+     * 尝试用 ACTION_SET_TEXT 直接设置文本。
+     * 先清空（SET_TEXT("")），再写入目标文本。
+     * 返回 true 表示成功，false 表示节点不支持此操作。
+     */
+    private fun trySetTextNode(node: AccessibilityNodeInfo, text: String): Boolean {
+        // 检查节点是否支持 SET_TEXT（API 21+）
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) return false
+
+        // 先清空已有内容
+        val clearArgs = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, "") }
+        node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, clearArgs)
+        Thread.sleep(100)
+
+        // 写入目标文本
+        val setArgs = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
+        val result = node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, setArgs)
+        Log.d(TAG, "ACTION_SET_TEXT: $result, text=${text.take(50)}")
+        return result
+    }
+
+    /**
+     * 剪贴板粘贴 fallback。
+     * 先全选(ACTION_SET_SELECTION 全选) + 删除，再写入剪贴板并粘贴。
+     */
+    private fun tryClipboardPaste(node: AccessibilityNodeInfo, text: String): Boolean {
+        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+
+        // 尝试先清空已有内容：全选 + 删除
+        try {
+            // 全选
+            val selectArgs = Bundle().apply {
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_START_INT, 0)
+                putInt(AccessibilityNodeInfo.ACTION_ARGUMENT_SELECTION_END_INT, node.text?.length ?: 0)
+            }
+            node.performAction(AccessibilityNodeInfo.ACTION_SET_SELECTION, selectArgs)
+            Thread.sleep(50)
+            // 删除选中内容
+            node.performAction(AccessibilityNodeInfo.ACTION_CUT)
+            Thread.sleep(50)
+        } catch (_: Exception) {}
+
+        // 写入剪贴板并粘贴
+        clipboard.setPrimaryClip(ClipData.newPlainText("phone_agent", text))
+        val result = node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+        Log.d(TAG, "剪贴板粘贴 fallback: $result, text=${text.take(50)}")
+        return result
+    }
+
+    /** 递归查找获取焦点的可编辑节点。放宽判断：isEditable 或是常见输入框类名或支持 SET_TEXT */
     private fun findFocusedEditableNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         if (node == null) return null
-        if (node.isFocused && node.isEditable) return node
+        if (node.isFocused && isInputNode(node)) return node
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             val found = findFocusedEditableNode(child)
@@ -265,10 +357,10 @@ class PhoneAgentService : AccessibilityService() {
         return null
     }
 
-    /** 递归查找第一个可编辑节点 */
+    /** 递归查找第一个可编辑节点。放宽判断：isEditable 或是常见输入框类名或支持 SET_TEXT */
     private fun findFirstEditableNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
         if (node == null) return null
-        if (node.isEditable) return node
+        if (isInputNode(node)) return node
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
             val found = findFirstEditableNode(child)
@@ -276,6 +368,51 @@ class PhoneAgentService : AccessibilityService() {
             child.recycle()
         }
         return null
+    }
+
+    /**
+     * 递归查找当前获得焦点的任意节点（不要求 isEditable）。
+     * 用于微信等 App 的自定义输入框：焦点在一个非标准 Editable 节点上，
+     * 但实际上可以通过 ACTION_PASTE 粘贴文本。
+     */
+    private fun findFocusedNode(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+        if (node == null) return null
+        if (node.isFocused) return AccessibilityNodeInfo.obtain(node)
+        for (i in 0 until node.childCount) {
+            val child = node.getChild(i) ?: continue
+            val found = findFocusedNode(child)
+            if (found != null) {
+                child.recycle()
+                return found
+            }
+            child.recycle()
+        }
+        return null
+    }
+
+    /**
+     * 判断节点是否为可输入节点。多级放宽条件，覆盖各种自定义控件：
+     * - isEditable = true（标准条件）
+     * - 类名包含 Edit / Input / TextView 等输入框关键词（覆盖微信、淘宝等自定义控件）
+     * - 支持 ACTION_SET_TEXT（通过 actionList 检查）
+     * - inputType != 0（设置了输入类型的控件）
+     * - 有 hintText 且可点击（搜索框等场景）
+     */
+    private fun isInputNode(node: AccessibilityNodeInfo): Boolean {
+        if (node.isEditable) return true
+        val className = node.className?.toString() ?: ""
+        // 匹配各类输入框类名：EditText, EasyEditText(微信), MMEditText(微信), Input等
+        if (className.contains("Edit", ignoreCase = true)) return true
+        if (className.contains("Input", ignoreCase = true) && !className.contains("Layout", ignoreCase = true)) return true
+        if (className.contains("AutoCompleteTextView", ignoreCase = true)) return true
+        if (className.contains("TextView", ignoreCase = true) && node.isEditable) return true
+        if (node.inputType != 0 && node.inputType != InputType.TYPE_NULL) return true
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            if (node.actionList?.contains(AccessibilityNodeInfo.ACTION_SET_TEXT as Any) == true) return true
+        }
+        // 微信等 App 的搜索框：有 hintText（提示文字）且可点击
+        if (node.hintText?.isNotEmpty() == true && node.isClickable) return true
+        return false
     }
 
     // ── 启动应用 ──────────────────────────────────────────────────

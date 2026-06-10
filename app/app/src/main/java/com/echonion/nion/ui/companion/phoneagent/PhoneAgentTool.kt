@@ -79,20 +79,21 @@ object PhoneAgentTool : Tool {
             return@withContext """{"error":"Phone Agent 服务未运行，请确认无障碍服务已开启"}"""
         }
 
-        // 读取 Phone Agent API 配置
+        // 读取 Phone Agent API 配置（默认使用 ModelScope，支持 image_url 图片输入）
         val baseUrl = readSetting(core, "phone_agent_base_url")
-            ?: "https://open.bigmodel.cn/api/paas/v4"
+            ?: "https://api-inference.modelscope.cn/v1"
         val apiKey = readSetting(core, "phone_agent_api_key")
-        Log.d(TAG, "配置读取结果: baseUrl=$baseUrl, apiKey=${apiKey?.take(10)}..., model=${readSetting(core, "phone_agent_model") ?: "autoglm-phone"}")
+        Log.d(TAG, "配置读取结果: baseUrl=$baseUrl, apiKey=${apiKey?.take(10)}..., model=${readSetting(core, "phone_agent_model") ?: "ZhipuAI/AutoGLM-Phone-9B"}")
         if (apiKey == null) {
             Log.d(TAG, "错误: API Key 未配置")
             return@withContext """{"error":"未配置 Phone Agent API Key，请在设置中配置"}"""
         }
-        val model = readSetting(core, "phone_agent_model") ?: "autoglm-phone"
+        val model = readSetting(core, "phone_agent_model") ?: "ZhipuAI/AutoGLM-Phone-9B"
 
         val client = AutoGLMClient(baseUrl = baseUrl, apiKey = apiKey, model = model)
         Log.d(TAG, "AutoGLMClient 创建成功，开始运行 PhoneAgentLoop")
         PhoneAgentLoop.resetCancel()
+        PhoneAgentFloatingService.resetState()
 
         val stepDetails = mutableListOf<String>()
         val loop = PhoneAgentLoop(
@@ -101,10 +102,37 @@ object PhoneAgentTool : Tool {
                 val detail = "[第${step.stepNumber}步] ${step.action} | ${if (step.success) "成功" else "失败"}"
                 Log.d(TAG, "步骤回调: $detail")
                 stepDetails.add(detail)
+                // 更新悬浮窗状态：步数和日志
+                PhoneAgentFloatingService.updateStep(step.stepNumber)
+                PhoneAgentFloatingService.addLog(
+                    PhoneAgentFloatingService.LogEntry(
+                        type = "thinking",
+                        content = step.thinking,
+                        stepNumber = step.stepNumber,
+                    )
+                )
+                PhoneAgentFloatingService.addLog(
+                    PhoneAgentFloatingService.LogEntry(
+                        type = "action",
+                        content = "[${step.action}] ${step.message}",
+                        stepNumber = step.stepNumber,
+                        success = step.success,
+                    )
+                )
             }
         )
 
-        val result = loop.run(task)
+        val result = try {
+            loop.run(task)
+        } finally {
+            // 任务结束后清理悬浮窗（如果用户打开过）
+            try {
+                PhoneAgentFloatingService.stop(app)
+            } catch (_: Exception) {
+                Log.w(TAG, "停止悬浮窗 Service 异常")
+            }
+            Log.d(TAG, "PhoneAgentFloatingService 已停止")
+        }
         Log.d(TAG, "========== PhoneAgentTool.execute 完成: success=${result.success}, steps=${result.totalSteps}, msg=${result.message} ==========")
 
         JSONObject().apply {

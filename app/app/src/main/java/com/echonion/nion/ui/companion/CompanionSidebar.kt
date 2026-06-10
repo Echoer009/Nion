@@ -2,8 +2,9 @@
 package com.echonion.nion.ui.companion
 
 import android.util.Log
+import com.echonion.nion.NionApp
 import com.echonion.nion.ui.companion.phoneagent.PhoneAgentBridge
-import com.echonion.nion.ui.companion.phoneagent.PhoneAgentLoop
+import com.echonion.nion.ui.companion.phoneagent.PhoneAgentFloatingService
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -36,6 +37,8 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
@@ -46,6 +49,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.res.painterResource
@@ -784,11 +788,37 @@ private fun ProfilePhoneAgentSettings(viewModel: CompanionViewModel) {
         onDispose { }
     }
 
+    /**
+     * API 提供商预设列表。
+     * 每个预设包含名称、base URL、模型名、独立的 setting key 用于存储各自的 API Key。
+     * 切换预设时自动加载对应提供商的 API Key。
+     */
+    data class ApiPreset(
+        val displayName: String,
+        val baseUrl: String,
+        val model: String,
+        val tag: String,
+        /** 该提供商专属的 API Key 存储键名 */
+        val apiKeySettingKey: String,
+    )
+    val presets = remember {
+        listOf(
+            ApiPreset("ModelScope", "https://api-inference.modelscope.cn/v1", "ZhipuAI/AutoGLM-Phone-9B", "免费", "phone_agent_api_key_modelscope"),
+            ApiPreset("智谱 BigModel", "https://open.bigmodel.cn/api/paas/v4", "autoglm-phone", "", "phone_agent_api_key_bigmodel"),
+        )
+    }
+
     // 从 ViewModel 的 core 读取已保存的配置
     val core = remember { viewModel.getCore() }
-    var apiKey by remember { mutableStateOf(readSetting(core, "phone_agent_api_key") ?: "") }
-    var baseUrl by remember { mutableStateOf(readSetting(core, "phone_agent_base_url") ?: "https://open.bigmodel.cn/api/paas/v4") }
-    var model by remember { mutableStateOf(readSetting(core, "phone_agent_model") ?: "autoglm-phone") }
+    var baseUrl by remember { mutableStateOf(readSetting(core, "phone_agent_base_url") ?: presets.first().baseUrl) }
+    var model by remember { mutableStateOf(readSetting(core, "phone_agent_model") ?: presets.first().model) }
+
+    // 当前选中的预设，根据 baseUrl + model 反查
+    val currentPreset = presets.find { baseUrl == it.baseUrl && model == it.model }
+        ?: presets.first()
+
+    // API Key 按当前预设独立读取
+    var apiKey by remember { mutableStateOf(readSetting(core, currentPreset.apiKeySettingKey) ?: "") }
 
     // API Key 密码显示切换
     var apiKeyVisible by remember { mutableStateOf(false) }
@@ -843,11 +873,82 @@ private fun ProfilePhoneAgentSettings(viewModel: CompanionViewModel) {
 
             Spacer(modifier = Modifier.height(16.dp))
 
+            // ── API 提供商预设切换：横向按钮组 ──
+            Text(
+                "API 提供商",
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+            )
+            Spacer(modifier = Modifier.height(8.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                presets.forEach { preset ->
+                    // 判断当前选中：baseUrl 和 model 都匹配
+                    val isSelected = baseUrl == preset.baseUrl && model == preset.model
+                    Surface(
+                        onClick = {
+                            // 切换预设：保存当前预设的 API Key，加载目标预设的 API Key
+                            if (currentPreset != preset) {
+                                // 先保存当前 Key 到旧预设专属存储
+                                saveSetting(currentPreset.apiKeySettingKey, apiKey)
+                                // 加载目标预设的 Key
+                                baseUrl = preset.baseUrl
+                                model = preset.model
+                                apiKey = readSetting(core, preset.apiKeySettingKey) ?: ""
+                                saveSetting("phone_agent_base_url", preset.baseUrl)
+                                saveSetting("phone_agent_model", preset.model)
+                                // 同步保存新 Key 到通用 key（供 PhoneAgentTool 读取）
+                                saveSetting("phone_agent_api_key", apiKey)
+                            }
+                        },
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer
+                                else MaterialTheme.colorScheme.surfaceVariant,
+                        contentColor = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer
+                                       else MaterialTheme.colorScheme.onSurfaceVariant,
+                        border = if (isSelected) {
+                            androidx.compose.foundation.BorderStroke(
+                                1.dp, MaterialTheme.colorScheme.primary
+                            )
+                        } else null,
+                        modifier = Modifier.weight(1f).fillMaxHeight(),
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalAlignment = androidx.compose.ui.Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.Center,
+                        ) {
+                            Text(
+                                preset.displayName,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            )
+                            if (preset.tag.isNotEmpty()) {
+                                Text(
+                                    preset.tag,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.outline,
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
             // ── API Key 输入框：密码化 + 输入即保存 ──
+            // 同时保存到当前预设的专属 key 和通用 key（供 PhoneAgentTool 读取）
+            val currentApiKeySettingKey = currentPreset.apiKeySettingKey
             OutlinedTextField(
                 value = apiKey,
                 onValueChange = {
                     apiKey = it
+                    saveSetting(currentApiKeySettingKey, it.trim())
                     saveSetting("phone_agent_api_key", it.trim())
                 },
                 label = { Text("API Key") },
@@ -2323,16 +2424,16 @@ private fun ChatContent(
  * @param message 工具消息数据
  */
 @Composable
-private fun ToolMessageRow(message: ChatMessage, onCancelTool: () -> Unit = {}) {
+private fun ToolMessageRow(message: ChatMessage, onClickTool: () -> Unit = {}) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 2.dp, horizontal = 16.dp)
             .then(
-                // 未完成的工具消息可点击取消
+                // 未完成的工具消息可点击打开悬浮窗
                 if (!message.toolDone) {
                     Modifier.clip(RoundedCornerShape(8.dp))
-                        .clickable { onCancelTool() }
+                        .clickable { onClickTool() }
                 } else {
                     Modifier
                 }
@@ -2473,8 +2574,8 @@ private fun MessageBubble(
     val isUser = message.isFromUser
     // 工具消息：简洁状态行，不渲染气泡，不支持长按操作
     if (message.isToolMessage) {
-        ToolMessageRow(message, onCancelTool = {
-            PhoneAgentLoop.cancel()
+        ToolMessageRow(message, onClickTool = {
+            NionApp.instance?.let { PhoneAgentFloatingService.start(it) }
         })
         return
     }

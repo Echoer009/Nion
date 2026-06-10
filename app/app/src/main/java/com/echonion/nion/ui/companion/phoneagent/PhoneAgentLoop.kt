@@ -51,6 +51,11 @@ class PhoneAgentLoop(
         var cancelled = false
             private set
 
+        /** 全局暂停标志，设为 true 后循环在每步开始处挂起等待恢复 */
+        @Volatile
+        var paused = false
+            private set
+
         /** 设置取消标志 */
         fun cancel() {
             cancelled = true
@@ -60,6 +65,24 @@ class PhoneAgentLoop(
         /** 重置取消标志，供下次任务启动前调用 */
         fun resetCancel() {
             cancelled = false
+            paused = false
+        }
+
+        /** 暂停循环，循环将在下一步开始处挂起 */
+        fun pause() {
+            paused = true
+            Log.d(TAG, "已暂停")
+        }
+
+        /** 恢复循环，解除挂起继续执行 */
+        fun resume() {
+            paused = false
+            Log.d(TAG, "已恢复")
+        }
+
+        /** 切换暂停/恢复状态 */
+        fun togglePause() {
+            if (paused) resume() else pause()
         }
     }
 
@@ -119,6 +142,9 @@ class PhoneAgentLoop(
                 // 每步开始前检查取消标志
                 checkCancelled(step)
 
+                // 每步开始前检查暂停标志，暂停时挂起等待恢复
+                checkPaused()
+
                 Log.d(TAG, "--- 第 $step 步 ---")
 
                 // ==================== 1. 截图 ====================
@@ -155,11 +181,15 @@ class PhoneAgentLoop(
                     Log.d(TAG, "第 $step 步: 后续消息已添加, user")
                 }
 
-                // ==================== 3. 调用模型 ====================
+                // ==================== 3. 调用模型（流式）====================
                 // 发送完整 context，取消检查通过 isCancelled 回调
+                // onToken 每次收到 delta.content 时回调，实时更新悬浮窗流式内容
                 Log.d(TAG, "第 $step 步: 开始调用 AutoGLM 模型 (stream=true)...")
+                PhoneAgentFloatingService.clearCurrentResponse()
                 val rawResponse = try {
-                    client.request(context) { cancelled }
+                    client.request(context, isCancelled = { cancelled }) { token ->
+                        PhoneAgentFloatingService.appendToken(token)
+                    }
                 } catch (e: CancellationException) {
                     Log.w(TAG, "第 $step 步: 模型调用期间被取消")
                     throw e
@@ -173,6 +203,8 @@ class PhoneAgentLoop(
                 context[lastIdx] = AutoGLMClient.removeImagesFromMessage(context[lastIdx])
 
                 // ==================== 5. 解析响应 ====================
+                // 清除流式内容，即将作为正式日志显示
+                PhoneAgentFloatingService.clearCurrentResponse()
                 val parsed = PhoneActionParser.parse(rawResponse)
                 Log.d(TAG, "解析结果: action=${parsed.action}, finished=${parsed.finished}")
 
@@ -196,18 +228,19 @@ class PhoneAgentLoop(
                 }
 
                 // ==================== 7. 执行动作 ====================
-                val stepSuccess = executeAction(parsed.action, parsed.params)
-                val stepMsg = if (stepSuccess) "${parsed.action} 执行成功" else "${parsed.action} 执行失败"
-                steps.add(StepInfo(step, parsed.thinking, parsed.action, parsed.params, stepSuccess, stepMsg))
+                val actionResult = executeAction(parsed.action, parsed.params)
+                val stepSuccess = actionResult.success
+                steps.add(StepInfo(step, parsed.thinking, parsed.action, parsed.params, stepSuccess, actionResult.message))
 
                 // ==================== 8. 通知上层 ====================
                 onStep?.invoke(steps.last())
 
                 // ==================== 9. 添加 assistant 消息到上下文 ====================
-                // 对齐 Python: self._context.append(MessageBuilder.create_assistant_message(f"༧{thinking}ཊ\n<answer>{action}</answer>"))
+                // 失败时追加详细原因到上下文，让模型知道为什么失败，可以调整策略
+                val execResult = if (stepSuccess) "" else "\n[执行结果: 失败 - ${actionResult.message}]"
                 context.add(
                     AutoGLMClient.createAssistantMessage(
-                        "༧${parsed.thinking}ཊ\n<answer>${parsed.rawAction}</answer>"
+                        "༧${parsed.thinking}ཊ\n<answer>${parsed.rawAction}</answer>$execResult"
                     )
                 )
                 Log.d(TAG, "第 $step 步: 上下文大小 = ${context.size}")
@@ -268,87 +301,129 @@ class PhoneAgentLoop(
     }
 
     /**
+     * 暂停检查 —— 暂停时循环挂起，每 200ms 检查一次恢复或取消。
+     * 暂停期间不截图不调 API，恢复后从下一步继续执行。
+     */
+    private suspend fun checkPaused() {
+        while (paused && !cancelled) {
+            delay(200)
+        }
+    }
+
+    /**
+     * 动作执行结果，包含成功/失败状态和详细描述。
+     * @property success 是否成功
+     * @property message 结果描述，失败时包含具体原因（传递给模型上下文）
+     */
+    private data class ActionResult(
+        val success: Boolean,
+        val message: String,
+    )
+
+    /**
      * 根据解析的动作执行对应的手机操作。
+     * 每个阻塞操作前后都检查取消标志，实现快速停止。
      *
      * @param action 动作名称（Tap, Swipe, Type, Launch 等）
      * @param params 动作参数
-     * @return 是否执行成功
+     * @return ActionResult 包含成功状态和详细结果描述
      */
-    private suspend fun executeAction(action: String, params: Map<String, Any?>): Boolean {
+    private suspend fun executeAction(action: String, params: Map<String, Any?>): ActionResult {
+        // 执行前先检查取消
+        if (cancelled) throw CancellationException("用户取消")
         Log.d(TAG, "执行动作: $action, 参数: $params")
 
         val screenSize = PhoneAgentBridge.getScreenSize()
 
         return when (action) {
             "Tap" -> {
-                val element = params["element"] as? List<*> ?: return false
+                val element = params["element"] as? List<*>
+                    ?: return ActionResult(false, "Tap 失败: 缺少 element 参数")
                 val coords = element.map { (it as Number).toInt() }
                 if (screenSize != null) {
                     val abs = PhoneAgentBridge.convertToAbsolute(coords, screenSize)
-                    PhoneAgentBridge.tap(abs[0], abs[1])
+                    val ok = PhoneAgentBridge.tap(abs[0], abs[1])
+                    ActionResult(ok, if (ok) "点击成功" else "点击失败: 无障碍服务可能未正确执行手势")
                 } else {
-                    false
+                    ActionResult(false, "Tap 失败: 无法获取屏幕尺寸")
                 }
             }
 
             "Double Tap" -> {
-                val element = params["element"] as? List<*> ?: return false
+                val element = params["element"] as? List<*>
+                    ?: return ActionResult(false, "Double Tap 失败: 缺少 element 参数")
                 val coords = element.map { (it as Number).toInt() }
                 if (screenSize != null) {
                     val abs = PhoneAgentBridge.convertToAbsolute(coords, screenSize)
-                    PhoneAgentBridge.doubleTap(abs[0], abs[1])
+                    val ok = PhoneAgentBridge.doubleTap(abs[0], abs[1])
+                    ActionResult(ok, if (ok) "双击成功" else "双击失败")
                 } else {
-                    false
+                    ActionResult(false, "Double Tap 失败: 无法获取屏幕尺寸")
                 }
             }
 
             "Long Press" -> {
-                val element = params["element"] as? List<*> ?: return false
+                val element = params["element"] as? List<*>
+                    ?: return ActionResult(false, "Long Press 失败: 缺少 element 参数")
                 val coords = element.map { (it as Number).toInt() }
                 if (screenSize != null) {
                     val abs = PhoneAgentBridge.convertToAbsolute(coords, screenSize)
-                    PhoneAgentBridge.longPress(abs[0], abs[1])
+                    val ok = PhoneAgentBridge.longPress(abs[0], abs[1])
+                    ActionResult(ok, if (ok) "长按成功" else "长按失败")
                 } else {
-                    false
+                    ActionResult(false, "Long Press 失败: 无法获取屏幕尺寸")
                 }
             }
 
             "Swipe" -> {
-                val start = params["start"] as? List<*> ?: return false
-                val end = params["end"] as? List<*> ?: return false
+                val start = params["start"] as? List<*>
+                    ?: return ActionResult(false, "Swipe 失败: 缺少 start 参数")
+                val end = params["end"] as? List<*>
+                    ?: return ActionResult(false, "Swipe 失败: 缺少 end 参数")
                 val startCoords = start.map { (it as Number).toInt() }
                 val endCoords = end.map { (it as Number).toInt() }
                 if (screenSize != null) {
                     val absStart = PhoneAgentBridge.convertToAbsolute(startCoords, screenSize)
                     val absEnd = PhoneAgentBridge.convertToAbsolute(endCoords, screenSize)
-                    PhoneAgentBridge.swipe(absStart[0], absStart[1], absEnd[0], absEnd[1])
+                    val ok = PhoneAgentBridge.swipe(absStart[0], absStart[1], absEnd[0], absEnd[1])
+                    ActionResult(ok, if (ok) "滑动成功" else "滑动失败")
                 } else {
-                    false
+                    ActionResult(false, "Swipe 失败: 无法获取屏幕尺寸")
                 }
             }
 
             "Type", "Type_Name" -> {
+                // 输入前检查取消
+                if (cancelled) throw CancellationException("用户取消")
                 val text = params["text"]?.toString() ?: ""
-                PhoneAgentBridge.inputText(text)
+                val ok = PhoneAgentBridge.inputText(text)
+                ActionResult(ok, if (ok) "输入成功: $text" else "输入失败: 未找到可编辑的输入框")
             }
 
             "Launch" -> {
-                val appName = params["app"]?.toString() ?: return false
+                val appName = params["app"]?.toString()
+                    ?: return ActionResult(false, "Launch 失败: 缺少 app 参数")
                 val packageName = AppPackages.getPackageName(appName)
+                Log.d(TAG, "Launch: appName=$appName, packageName=$packageName")
                 if (packageName != null) {
-                    PhoneAgentBridge.launchApp(packageName)
+                    val ok = PhoneAgentBridge.launchApp(packageName)
+                    ActionResult(ok, if (ok) "已启动 $appName" else "启动 $appName 失败: 应用可能未安装或无障碍服务权限不足")
                 } else {
-                    Log.w(TAG, "未找到应用: $appName")
-                    false
+                    // 未找到包名映射，fallback 直接尝试原始名称
+                    Log.w(TAG, "Launch: 未找到应用映射 appName=$appName, 尝试直接启动")
+                    val ok = PhoneAgentBridge.launchApp(appName)
+                    ActionResult(ok, if (ok) "已启动 $appName" else "启动 $appName 失败: 未找到该应用的包名")
                 }
             }
 
             "Back" -> {
-                PhoneAgentBridge.pressBack()
+                val ok = PhoneAgentBridge.pressBack()
+                ActionResult(ok, if (ok) "返回成功" else "返回失败")
             }
 
             "Home" -> {
-                PhoneAgentBridge.pressHome()
+                val ok = PhoneAgentBridge.pressHome()
+                ActionResult(ok, if (ok) "回到桌面成功" else "回到桌面失败")
             }
 
             "Wait" -> {
@@ -359,24 +434,24 @@ class PhoneAgentLoop(
                     1.0
                 }
                 cancellableDelay((seconds * 1000).toLong())
-                true
+                ActionResult(true, "等待 ${seconds}s 完成")
             }
 
             "Take_over" -> {
                 val message = params["message"]?.toString() ?: "需要人工操作"
                 Log.w(TAG, "请求人工接管: $message")
                 cancellableDelay(30_000)
-                true
+                ActionResult(true, "人工接管完成")
             }
 
             "Note", "Call_API", "Interact" -> {
                 Log.d(TAG, "跳过辅助动作: $action")
-                true
+                ActionResult(true, "$action 已跳过")
             }
 
             else -> {
                 Log.e(TAG, "未知动作: $action")
-                false
+                ActionResult(false, "未知动作: $action")
             }
         }
     }
