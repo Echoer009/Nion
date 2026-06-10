@@ -18,6 +18,8 @@
     <!-- 位置权限：天气功能需要 GPS 定位获取用户所在城市 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+    <!-- Phone Agent 需要查询所有已安装应用来启动目标 App（Android 11+ Package Visibility） -->
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
 
     <application
         android:name=".NionApp"

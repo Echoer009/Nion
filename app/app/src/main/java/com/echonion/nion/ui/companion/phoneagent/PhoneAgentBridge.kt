@@ -76,6 +76,18 @@ object PhoneAgentBridge {
         return service?.getScreenSize()
     }
 
+    /**
+     * 获取当前前台 App 的包名。
+     *
+     * 通过 AccessibilityService.getRootInActiveWindow() 获取窗口信息，
+     * 从中提取包名，再通过 AppPackages 反查中文名。
+     *
+     * @return 当前 App 的中文名称，未知时返回包名，Service 未运行返回 null
+     */
+    fun getCurrentAppName(): String? {
+        return service?.getCurrentAppName()
+    }
+
     // ── 手势操作 ──────────────────────────────────────────────────
 
     /**

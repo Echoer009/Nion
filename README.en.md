@@ -47,11 +47,6 @@ This is where I really shine!
 - **Priority levels**: High / Medium / Low — one glance tells you what's urgent
 - **Reminders**: One-time + daily recurring reminders. Down to the minute, never late
 
-<p align="center">
-  <img src="docs/gifs/建立任务.gif" width="280" alt="Create Task">
-  <img src="docs/gifs/任务列表介绍以及伙伴帮忙排序.gif" width="280" alt="Task List">
-</p>
-
 ### Companion System
 
 That's me you're chatting with~
@@ -63,22 +58,9 @@ That's me you're chatting with~
 - **Weather awareness**: GPS + weather API. Rain's coming? I'll tell you to grab an umbrella
 - **Fully customizable persona**: Personality, avatar, character — change whatever you want, make me whoever you want
 
-<p align="center">
-  <img src="docs/gifs/和伙伴第一次打招呼.gif" width="280" alt="First Greeting">
-  <img src="docs/gifs/伙伴界面介绍.gif" width="280" alt="Companion UI">
-</p>
-
 Summon me from anywhere — different screens have different sidebars~
 
-<p align="center">
-  <img src="docs/gifs/不同界面都可呼出伙伴,不同界面有不同的侧界面.gif" width="280" alt="Summon Companion">
-</p>
-
 Want me to change your theme color? Just say the word~
-
-<p align="center">
-  <img src="docs/gifs/伙伴帮忙换主题.gif" width="280" alt="Change Theme">
-</p>
 
 ### Focus Mode
 
@@ -88,10 +70,6 @@ When you need to concentrate, come to me!
 - **Checklist filter**: Pick which checklist's tasks to work on before starting
 - **Focus stats**: By day, by task, total time, total count — all the data laid out for you
 - **Task linking**: After focusing, the time auto-adds to the corresponding task. No manual logging needed
-
-<p align="center">
-  <img src="docs/gifs/专注界面介绍.gif" width="280" alt="Focus Mode">
-</p>
 
 ### Reminder System
 
@@ -103,18 +81,10 @@ This is what I'm best at — getting you to work!
 - **Weather alerts**: Automatic extreme weather detection, notified in advance
 - **Boot resilience**: Phone restarted? I'll re-set all the alarms. Nothing gets missed
 
-<p align="center">
-  <img src="docs/gifs/悬浮窗展示.gif" width="280" alt="Floating Reminder">
-</p>
-
 ### Schedule
 
 - **Week view**: One week at a glance, tasks laid out clearly
 - **Infinite swipe**: Swipe left/right to switch weeks, tap the header to expand calendar picker
-
-<p align="center">
-  <img src="docs/gifs/日程页展示.gif" width="280" alt="Schedule">
-</p>
 
 ### Morning / Noon / Evening Greetings
 

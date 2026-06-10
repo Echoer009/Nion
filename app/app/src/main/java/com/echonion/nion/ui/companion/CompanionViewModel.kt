@@ -81,6 +81,9 @@ class CompanionViewModel(
 
     private val TAG = "NionAgent"
 
+    /** 暴露 core 给 UI 层读取 Phone Agent 等独立配置 */
+    fun getCore(): NionCore = core
+
     /**
      * 当前导航路由（如 "tasks"、"settings"），决定注入哪些工具。
      * 由 CompanionSidebar 从 NionApp 传入，每次路由切换时更新。

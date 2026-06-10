@@ -154,10 +154,10 @@ enum class NionColorTheme(
         secondary = Color(0xFFC48A65),
         secondaryContainer = Color(0xFFFFDDC7),
         onSecondaryContainer = Color(0xFF38200E),
-        // 第三色：深焦橙/赤陶，同色系但更深沉
-        tertiary = Color(0xFFA06B3E),
-        tertiaryContainer = Color(0xFFFFD9B0),
-        onTertiaryContainer = Color(0xFF301400),
+        // 第三色：与主色一致
+        tertiary = Color(0xFFE07A4F),
+        tertiaryContainer = Color(0xFFFFDBC7),
+        onTertiaryContainer = Color(0xFF8B4A25),
         background = NionColors.Warm50,
         onBackground = Color(0xFF1C1B18),
         surfaceVariant = NionColors.Warm100,

@@ -50,22 +50,32 @@ object PhoneAgentTool : Tool {
     }
 
     override suspend fun execute(params: JSONObject, core: NionCore): String = withContext(Dispatchers.IO) {
+        Log.d(TAG, "========== PhoneAgentTool.execute 开始 ==========")
         val task = params.optString("task", "").trim()
+        Log.d(TAG, "任务描述: $task")
         if (task.isEmpty()) {
+            Log.d(TAG, "错误: task 参数为空")
             return@withContext """{"error":"task 参数不能为空"}"""
         }
 
         val app = NionApp.instance
         if (app == null) {
+            Log.d(TAG, "错误: NionApp.instance 为 null")
             return@withContext """{"error":"应用状态异常"}"""
         }
 
         // 检查无障碍服务
-        if (!PhoneAgentBridge.isAccessibilityServiceEnabled(app)) {
+        val accessibilityEnabled = PhoneAgentBridge.isAccessibilityServiceEnabled(app)
+        Log.d(TAG, "无障碍服务已开启: $accessibilityEnabled")
+        if (!accessibilityEnabled) {
+            Log.d(TAG, "错误: 无障碍服务未开启")
             return@withContext """{"error":"Phone Agent 无障碍服务未开启，请在系统设置→无障碍中开启 Nion Phone Agent"}"""
         }
 
-        if (!PhoneAgentBridge.isServiceRunning()) {
+        val serviceRunning = PhoneAgentBridge.isServiceRunning()
+        Log.d(TAG, "PhoneAgentService 运行中: $serviceRunning")
+        if (!serviceRunning) {
+            Log.d(TAG, "错误: 服务未运行")
             return@withContext """{"error":"Phone Agent 服务未运行，请确认无障碍服务已开启"}"""
         }
 
@@ -73,24 +83,29 @@ object PhoneAgentTool : Tool {
         val baseUrl = readSetting(core, "phone_agent_base_url")
             ?: "https://open.bigmodel.cn/api/paas/v4"
         val apiKey = readSetting(core, "phone_agent_api_key")
-            ?: return@withContext """{"error":"未配置 Phone Agent API Key，请在设置中配置"}"""
+        Log.d(TAG, "配置读取结果: baseUrl=$baseUrl, apiKey=${apiKey?.take(10)}..., model=${readSetting(core, "phone_agent_model") ?: "autoglm-phone"}")
+        if (apiKey == null) {
+            Log.d(TAG, "错误: API Key 未配置")
+            return@withContext """{"error":"未配置 Phone Agent API Key，请在设置中配置"}"""
+        }
         val model = readSetting(core, "phone_agent_model") ?: "autoglm-phone"
 
         val client = AutoGLMClient(baseUrl = baseUrl, apiKey = apiKey, model = model)
+        Log.d(TAG, "AutoGLMClient 创建成功，开始运行 PhoneAgentLoop")
+        PhoneAgentLoop.resetCancel()
 
         val stepDetails = mutableListOf<String>()
         val loop = PhoneAgentLoop(
             client = client,
             onStep = { step ->
-                stepDetails.add(
-                    "[第${step.stepNumber}步] ${step.action} | " +
-                    if (step.success) "成功" else "失败"
-                )
+                val detail = "[第${step.stepNumber}步] ${step.action} | ${if (step.success) "成功" else "失败"}"
+                Log.d(TAG, "步骤回调: $detail")
+                stepDetails.add(detail)
             }
         )
 
         val result = loop.run(task)
-        Log.d(TAG, "Phone Agent 完成: success=${result.success}, steps=${result.totalSteps}, msg=${result.message}")
+        Log.d(TAG, "========== PhoneAgentTool.execute 完成: success=${result.success}, steps=${result.totalSteps}, msg=${result.message} ==========")
 
         JSONObject().apply {
             put("success", result.success)
@@ -107,13 +122,15 @@ object PhoneAgentTool : Tool {
     /**
      * 从 NionCore settings 表中读取字符串配置。
      *
-     * getSetting 返回 JSON 格式 {key, value}，从中提取 value 字段。
+     * getSetting 直接返回 value 字符串，不需要 JSON 解析。
      */
     private fun readSetting(core: NionCore, key: String): String? {
         return try {
             val value = core.getSetting(key)
+            Log.d(TAG, "readSetting($key) = ${value?.take(20)}...")
             if (value.isNullOrBlank()) null else value
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.d(TAG, "readSetting($key) 异常: ${e.message}")
             null
         }
     }

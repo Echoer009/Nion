@@ -6,6 +6,7 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Point
@@ -71,6 +72,7 @@ class PhoneAgentService : AccessibilityService() {
             return null
         }
         try {
+            Log.d(TAG, "takeScreenshotBase64: 开始截图...")
             val latch = CountDownLatch(1)
             var resultBase64: String? = null
             val executor = ContextCompat.getMainExecutor(this)
@@ -80,15 +82,20 @@ class PhoneAgentService : AccessibilityService() {
                 executor,
                 object : TakeScreenshotCallback {
                     override fun onSuccess(result: ScreenshotResult) {
+                        Log.d(TAG, "takeScreenshotBase64: onSuccess")
                         try {
                             val bitmap = Bitmap.wrapHardwareBuffer(
                                 result.hardwareBuffer, result.colorSpace
                             )?.copy(Bitmap.Config.ARGB_8888, false)
                             if (bitmap != null) {
+                                Log.d(TAG, "takeScreenshotBase64: bitmap=${bitmap.width}x${bitmap.height}")
                                 val os = ByteArrayOutputStream()
                                 bitmap.compress(Bitmap.CompressFormat.PNG, 100, os)
                                 resultBase64 = Base64.encodeToString(os.toByteArray(), Base64.NO_WRAP)
+                                Log.d(TAG, "takeScreenshotBase64: base64长度=${resultBase64?.length}")
                                 bitmap.recycle()
+                            } else {
+                                Log.e(TAG, "takeScreenshotBase64: bitmap为null")
                             }
                         } catch (e: Exception) {
                             Log.e(TAG, "截图处理失败", e)
@@ -122,6 +129,19 @@ class PhoneAgentService : AccessibilityService() {
         @Suppress("DEPRECATION")
         wm.defaultDisplay.getRealMetrics(metrics)
         return Point(metrics.widthPixels, metrics.heightPixels)
+    }
+
+    /**
+     * 获取当前前台 App 的名称。
+     *
+     * 从 rootInActiveWindow 获取包名，再通过 AppPackages 反查中文名。
+     * 如果找不到中文名则直接返回包名。
+     */
+    fun getCurrentAppName(): String {
+        val window = rootInActiveWindow ?: return "Unknown"
+        val packageName = window.packageName?.toString() ?: return "Unknown"
+        val chineseName = AppPackages.getAppName(packageName)
+        return chineseName
     }
 
     // ── 手势派发辅助 ──────────────────────────────────────────────
@@ -263,14 +283,35 @@ class PhoneAgentService : AccessibilityService() {
     /** 通过包名启动应用 */
     fun launchApp(packageName: String): Boolean {
         return try {
-            val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+            // 先尝试标准方式
+            var launchIntent = packageManager.getLaunchIntentForPackage(packageName)
             if (launchIntent != null) {
                 launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(launchIntent)
-                Log.d(TAG, "已启动: $packageName")
+                Log.d(TAG, "已启动(getLaunchIntent): $packageName")
+                return true
+            }
+
+            // fallback: 查询 LAUNCHER category 的 Activity 并直接构造 ComponentName
+            Log.w(TAG, "getLaunchIntentForPackage 返回 null，尝试 LAUNCHER 查询")
+            val queryIntent = Intent(Intent.ACTION_MAIN).apply {
+                addCategory(Intent.CATEGORY_LAUNCHER)
+                setPackage(packageName)
+            }
+            // 使用 MATCH_ALL 避免 system app 被过滤
+            val resolveInfos = packageManager.queryIntentActivities(queryIntent, PackageManager.MATCH_ALL)
+            if (resolveInfos.isNotEmpty()) {
+                val activity = resolveInfos[0].activityInfo
+                val intent = Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                    setClassName(activity.packageName, activity.name)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(intent)
+                Log.d(TAG, "已启动(queryIntent): $packageName/${activity.name}")
                 true
             } else {
-                Log.e(TAG, "未找到应用: $packageName")
+                Log.e(TAG, "未找到应用: $packageName (queryIntentActivities 也为空)")
                 false
             }
         } catch (e: Exception) {

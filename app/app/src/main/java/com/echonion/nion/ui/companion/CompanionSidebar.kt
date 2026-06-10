@@ -2,6 +2,13 @@
 package com.echonion.nion.ui.companion
 
 import android.util.Log
+import com.echonion.nion.ui.companion.phoneagent.PhoneAgentBridge
+import com.echonion.nion.ui.companion.phoneagent.PhoneAgentLoop
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.text.input.VisualTransformation
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -113,6 +120,7 @@ import androidx.lifecycle.viewModelScope
 import android.graphics.BitmapFactory
 import android.net.Uri
 import kotlinx.coroutines.launch
+import androidx.compose.runtime.rememberCoroutineScope
 import uniffi.nion_core.ConversationData
 import uniffi.nion_core.StickerData
 import org.json.JSONArray
@@ -725,7 +733,16 @@ private fun ProfileContent(
             sharedTransitionScope = sts,
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(24.dp))
+
+        // ══════════════════════════════════════════════════════════════
+        // Phone Agent 配置
+        // ══════════════════════════════════════════════════════════════
+        SectionHeader("Phone Agent")
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        ProfilePhoneAgentSettings(viewModel = viewModel)
     }
     } // SharedTransitionLayout end
 } // ProfileContent end
@@ -744,6 +761,148 @@ private fun SectionHeader(title: String) {
         // 区域标题使用 secondary，与主操作 primary 区分
         color = MaterialTheme.colorScheme.secondary,
     )
+}
+
+/**
+ * Phone Agent 配置卡片 —— 配置 API 密钥、端点、模型和无障碍服务状态。
+ * 所有字段输入即保存，无需手动点击保存按钮。API Key 默认密码化显示。
+ *
+ * @param ViewModel 提供 core 实例用于读写设置
+ */
+@Composable
+private fun ProfilePhoneAgentSettings(viewModel: CompanionViewModel) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+
+    // 无障碍服务运行状态
+    val isAccessibilityEnabled = remember {
+        mutableStateOf(PhoneAgentBridge.isAccessibilityServiceEnabled(context))
+    }
+    // 页面恢复时刷新无障碍服务状态
+    DisposableEffect(Unit) {
+        isAccessibilityEnabled.value = PhoneAgentBridge.isAccessibilityServiceEnabled(context)
+        onDispose { }
+    }
+
+    // 从 ViewModel 的 core 读取已保存的配置
+    val core = remember { viewModel.getCore() }
+    var apiKey by remember { mutableStateOf(readSetting(core, "phone_agent_api_key") ?: "") }
+    var baseUrl by remember { mutableStateOf(readSetting(core, "phone_agent_base_url") ?: "https://open.bigmodel.cn/api/paas/v4") }
+    var model by remember { mutableStateOf(readSetting(core, "phone_agent_model") ?: "autoglm-phone") }
+
+    // API Key 密码显示切换
+    var apiKeyVisible by remember { mutableStateOf(false) }
+
+    // 立即保存到 DB 的辅助函数
+    val saveSetting: (String, String) -> Unit = { key, value ->
+        scope.launch(Dispatchers.IO) {
+            try { core.setSetting(key, value) } catch (_: Exception) {}
+        }
+    }
+
+    // 卡片容器样式与 ExpandablePromptCard 一致：surfaceContainerLowest + 圆角
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                MaterialTheme.colorScheme.surfaceContainerLowest,
+                RoundedCornerShape(16.dp),
+            ),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+
+            // ── 无障碍服务状态行 ──
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    "无障碍服务",
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = FontWeight.Medium,
+                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        if (isAccessibilityEnabled.value) "已开启" else "未开启",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (isAccessibilityEnabled.value) Color(0xFF4CAF50) else MaterialTheme.colorScheme.error,
+                    )
+                    if (!isAccessibilityEnabled.value) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        TextButton(onClick = {
+                            scope.launch {
+                                PhoneAgentBridge.openAccessibilitySettings(context)
+                                kotlinx.coroutines.delay(1000)
+                                isAccessibilityEnabled.value = PhoneAgentBridge.isAccessibilityServiceEnabled(context)
+                            }
+                        }) { Text("去开启", style = MaterialTheme.typography.labelSmall) }
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(16.dp))
+
+            // ── API Key 输入框：密码化 + 输入即保存 ──
+            OutlinedTextField(
+                value = apiKey,
+                onValueChange = {
+                    apiKey = it
+                    saveSetting("phone_agent_api_key", it.trim())
+                },
+                label = { Text("API Key") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+                visualTransformation = if (apiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                trailingIcon = {
+                    IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
+                        Icon(
+                            if (apiKeyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            contentDescription = if (apiKeyVisible) "隐藏" else "显示",
+                            modifier = Modifier.size(20.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                },
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // ── Base URL 输入框：输入即保存 ──
+            OutlinedTextField(
+                value = baseUrl,
+                onValueChange = {
+                    baseUrl = it
+                    saveSetting("phone_agent_base_url", it.trim().trimEnd('/'))
+                },
+                label = { Text("API Base URL") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // ── 模型名称输入框：输入即保存 ──
+            OutlinedTextField(
+                value = model,
+                onValueChange = {
+                    model = it
+                    saveSetting("phone_agent_model", it.trim())
+                },
+                label = { Text("模型名称") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true,
+            )
+        }
+    }
+}
+
+/** 从 NionCore 读取设置值，空值返回 null */
+private fun readSetting(core: uniffi.nion_core.NionCore, key: String): String? {
+    return try {
+        val value = core.getSetting(key)
+        if (value.isNullOrBlank()) null else value
+    } catch (_: Exception) { null }
 }
 
 /**
@@ -2164,11 +2323,20 @@ private fun ChatContent(
  * @param message 工具消息数据
  */
 @Composable
-private fun ToolMessageRow(message: ChatMessage) {
+private fun ToolMessageRow(message: ChatMessage, onCancelTool: () -> Unit = {}) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 2.dp, horizontal = 16.dp),
+            .padding(vertical = 2.dp, horizontal = 16.dp)
+            .then(
+                // 未完成的工具消息可点击取消
+                if (!message.toolDone) {
+                    Modifier.clip(RoundedCornerShape(8.dp))
+                        .clickable { onCancelTool() }
+                } else {
+                    Modifier
+                }
+            ),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         if (message.toolDone) {
@@ -2179,7 +2347,7 @@ private fun ToolMessageRow(message: ChatMessage) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
             )
         } else {
-            // 执行中：显示加载指示器
+            // 执行中：显示加载指示器（点击可取消）
             CircularProgressIndicator(
                 modifier = Modifier.size(12.dp),
                 strokeWidth = 1.5.dp,
@@ -2305,7 +2473,9 @@ private fun MessageBubble(
     val isUser = message.isFromUser
     // 工具消息：简洁状态行，不渲染气泡，不支持长按操作
     if (message.isToolMessage) {
-        ToolMessageRow(message)
+        ToolMessageRow(message, onCancelTool = {
+            PhoneAgentLoop.cancel()
+        })
         return
     }
 
