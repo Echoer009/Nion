@@ -53,6 +53,14 @@ class BootReceiver : BroadcastReceiver() {
         } catch (e: Exception) {
             Log.e(TAG, "天气预警调度恢复失败", e)
         }
+
+        try {
+            // 重调度定时手机自动化任务闹钟
+            PhoneAutomationScheduler.rescheduleAll(context, app.core)
+            Log.d(TAG, "定时手机任务闹钟重调度完成")
+        } catch (e: Exception) {
+            Log.e(TAG, "定时手机任务闹钟重调度失败", e)
+        }
     }
 
     companion object {

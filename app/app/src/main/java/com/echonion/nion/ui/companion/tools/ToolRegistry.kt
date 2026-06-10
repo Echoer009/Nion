@@ -48,6 +48,7 @@ object ToolRegistry {
         MemoryTool,
         WebSearchTool,
         PhoneAgentTool,
+        ScheduledPhoneTaskTool,
     )
 
     /**

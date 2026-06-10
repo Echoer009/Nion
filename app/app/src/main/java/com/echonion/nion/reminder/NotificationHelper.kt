@@ -44,6 +44,13 @@ object NotificationHelper {
     /** "正在输入"渠道描述 */
     private const val TYPING_CHANNEL_DESC = "Nion 正在生成回复时的状态提示"
 
+    /** 定时手机自动化任务通知渠道 ID */
+    private const val PHONE_AUTOMATION_CHANNEL_ID = "phone_automation"
+    /** 定时手机自动化任务渠道名称 */
+    private const val PHONE_AUTOMATION_CHANNEL_NAME = "定时手机任务"
+    /** 定时手机自动化任务渠道描述 */
+    private const val PHONE_AUTOMATION_CHANNEL_DESC = "Nion 定时自动执行的手机任务通知"
+
     /**
      * 创建通知渠道。
      * 必须在 Application.onCreate() 中调用，且只在 Android 8.0+ 需要创建。
@@ -87,6 +94,18 @@ object NotificationHelper {
                 setSound(null, null)
             }
             manager.createNotificationChannel(typingChannel)
+
+            // 定时手机自动化任务渠道（高优先级，确保用户看到执行通知）
+            val phoneAutoChannel = NotificationChannel(
+                PHONE_AUTOMATION_CHANNEL_ID,
+                PHONE_AUTOMATION_CHANNEL_NAME,
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = PHONE_AUTOMATION_CHANNEL_DESC
+                enableVibration(true)
+                setShowBadge(true)
+            }
+            manager.createNotificationChannel(phoneAutoChannel)
         }
     }
 

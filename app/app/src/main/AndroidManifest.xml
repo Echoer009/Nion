@@ -94,6 +94,17 @@
                 android:name="android.accessibilityservice"
                 android:resource="@xml/phone_agent_service_config" />
         </service>
+
+        <!-- Phone Agent 悬浮窗 Service —— Agent 执行手机操作时实时显示思考与操作过程 -->
+        <service
+            android:name=".ui.companion.phoneagent.PhoneAgentFloatingService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse" />
+
+        <!-- 定时手机任务闹钟触发接收器 —— AlarmManager 到点时发送等待确认通知 -->
+        <receiver
+            android:name=".reminder.PhoneAutomationReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>
