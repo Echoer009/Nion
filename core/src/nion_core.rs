@@ -38,7 +38,8 @@ impl NionCore {
                 id TEXT PRIMARY KEY,
                 name TEXT NOT NULL,
                 created_at TEXT NOT NULL,
-                sort_order INTEGER NOT NULL DEFAULT 0
+                sort_order INTEGER NOT NULL DEFAULT 0,
+                checklist_type TEXT NOT NULL DEFAULT 'task'
             );
             CREATE TABLE IF NOT EXISTS tasks (
                 id TEXT PRIMARY KEY,
@@ -57,7 +58,8 @@ impl NionCore {
                 sort_order INTEGER NOT NULL DEFAULT 0,
                 focus_seconds INTEGER NOT NULL DEFAULT 0,
                 recurrence_rule TEXT,
-                recurrence_reminder_time TEXT
+                recurrence_reminder_time TEXT,
+                linked_task_ids TEXT
             );
             CREATE TABLE IF NOT EXISTS task_groups (
                 id TEXT PRIMARY KEY,
@@ -128,6 +130,10 @@ impl NionCore {
         conn.execute_batch("ALTER TABLE tasks ADD COLUMN recurrence_reminder_time TEXT").ok();
         // 任务名称字段迁移：title → name
         conn.execute_batch("ALTER TABLE tasks RENAME COLUMN title TO name").ok();
+        // 笔记型清单：给 checklists 表添加 checklist_type 列（"task" 或 "notebook"）
+        conn.execute_batch("ALTER TABLE checklists ADD COLUMN checklist_type TEXT NOT NULL DEFAULT 'task'").ok();
+        // 笔记-任务双向关联：给 tasks 表添加 linked_task_ids 列（逗号分隔的 ID）
+        conn.execute_batch("ALTER TABLE tasks ADD COLUMN linked_task_ids TEXT").ok();
 
         // 每日任务实例化迁移：将旧模板（recurrence_rule='daily' 且 reminder IS NULL）
         // 的 reminder 锚定为今天的日期，使其成为当天的实例
@@ -158,7 +164,7 @@ impl NionCore {
         })?;
         let mut stmt = db
             .prepare(
-                "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks ORDER BY sort_order ASC, created_at DESC"
+                "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time, linked_task_ids FROM tasks ORDER BY sort_order ASC, created_at DESC"
             )
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
 
@@ -177,14 +183,15 @@ impl NionCore {
             msg: e.to_string(),
         })?;
         let mut stmt = db
-            .prepare("SELECT id, name, created_at FROM checklists ORDER BY sort_order ASC, created_at ASC")
+            .prepare("SELECT id, name, checklist_type, created_at FROM checklists ORDER BY sort_order ASC, created_at ASC")
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         let rows = stmt
             .query_map([], |row| {
                 Ok(ChecklistData {
                     id: row.get(0)?,
                     name: row.get(1)?,
-                    created_at: row.get(2)?,
+                    checklist_type: row.get(2)?,
+                    created_at: row.get(3)?,
                 })
             })
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
@@ -202,15 +209,63 @@ impl NionCore {
         let id = next_id(&db, "checklists")?;
         let now = chrono::Utc::now().to_rfc3339();
         db.execute(
-            "INSERT INTO checklists (id, name, created_at) VALUES (?1, ?2, ?3)",
+            "INSERT INTO checklists (id, name, checklist_type, created_at) VALUES (?1, ?2, 'task', ?3)",
             params![id, name, now],
         )
         .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         Ok(ChecklistData {
             id,
             name,
+            checklist_type: "task".to_string(),
             created_at: now,
         })
+    }
+
+    /// 创建指定类型的清单。
+    /// checklist_type: "task" = 任务型清单，"notebook" = 笔记型清单
+    pub fn create_checklist_with_type(&self, name: String, checklist_type: String) -> Result<ChecklistData, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        let id = next_id(&db, "checklists")?;
+        let now = chrono::Utc::now().to_rfc3339();
+        db.execute(
+            "INSERT INTO checklists (id, name, checklist_type, created_at) VALUES (?1, ?2, ?3, ?4)",
+            params![id, name, &checklist_type, now],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        Ok(ChecklistData {
+            id,
+            name,
+            checklist_type,
+            created_at: now,
+        })
+    }
+
+    /// 修改清单的类型。
+    /// checklist_type: "task" 或 "notebook"
+    pub fn update_checklist_type(&self, id: String, checklist_type: String) -> Result<ChecklistData, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        db.execute(
+            "UPDATE checklists SET checklist_type = ?1 WHERE id = ?2",
+            params![checklist_type, id],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        db.query_row(
+            "SELECT id, name, checklist_type, created_at FROM checklists WHERE id = ?1",
+            params![id],
+            |row| {
+                Ok(ChecklistData {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    checklist_type: row.get(2)?,
+                    created_at: row.get(3)?,
+                })
+            },
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })
     }
 
     pub fn delete_checklist(&self, id: String) -> Result<bool, NionError> {
@@ -251,7 +306,7 @@ impl NionCore {
         }
 
         let sql = format!(
-            "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE {} ORDER BY sort_order ASC, created_at DESC",
+            "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time, linked_task_ids FROM tasks WHERE {} ORDER BY sort_order ASC, created_at DESC",
             conditions.join(" AND ")
         );
         let mut stmt = db.prepare(&sql).map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
@@ -280,7 +335,7 @@ impl NionCore {
         // 新模型：每日任务是独立实例（每天一个任务行），直接通过 reminder 日期匹配。
         // 不再查 daily_completions 表，每日任务的完成状态由 tasks.status 决定。
         // 兼容：仍包含 reminder IS NULL 的旧模板任务（迁移后应不再出现）
-        let sql = "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY COALESCE(SUBSTR(reminder, 12, 5), recurrence_reminder_time, '99:99') ASC, sort_order ASC, created_at DESC";
+        let sql = "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time, linked_task_ids FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY COALESCE(SUBSTR(reminder, 12, 5), recurrence_reminder_time, '99:99') ASC, sort_order ASC, created_at DESC";
         let mut stmt = db.prepare(sql)
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
 
@@ -312,7 +367,7 @@ impl NionCore {
         })?;
         let mut stmt = db
             .prepare(
-                "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id = ?1 ORDER BY sort_order ASC, created_at ASC"
+                "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time, linked_task_ids FROM tasks WHERE parent_id = ?1 ORDER BY sort_order ASC, created_at ASC"
             )
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         let rows = stmt
@@ -380,6 +435,7 @@ impl NionCore {
             focus_seconds: 0,
             recurrence_rule,
             recurrence_reminder_time,
+            linked_task_ids: None,
         })
     }
 
@@ -908,13 +964,14 @@ impl NionCore {
         )
         .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         db.query_row(
-            "SELECT id, name, created_at FROM checklists WHERE id = ?1",
+            "SELECT id, name, checklist_type, created_at FROM checklists WHERE id = ?1",
             params![id],
             |row| {
                 Ok(ChecklistData {
                     id: row.get(0)?,
                     name: row.get(1)?,
-                    created_at: row.get(2)?,
+                    checklist_type: row.get(2)?,
+                    created_at: row.get(3)?,
                 })
             },
         )
@@ -1469,7 +1526,7 @@ impl NionCore {
 
         let mut stmt = db
             .prepare(
-                "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time \
+                "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time, linked_task_ids \
                  FROM tasks WHERE recurrence_rule = 'daily' AND status = 'todo' AND parent_id IS NULL \
                  AND reminder IS NOT NULL AND SUBSTR(reminder, 1, 10) < ?1 \
                  ORDER BY SUBSTR(reminder, 1, 10) DESC",
@@ -1505,7 +1562,7 @@ impl NionCore {
         })?;
 
         // 新模型：直接通过 reminder 日期匹配，完成状态看 tasks.status
-        let sql = "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY COALESCE(SUBSTR(reminder, 12, 5), recurrence_reminder_time, '99:99') ASC, sort_order ASC, created_at DESC";
+        let sql = "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time, linked_task_ids FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY COALESCE(SUBSTR(reminder, 12, 5), recurrence_reminder_time, '99:99') ASC, sort_order ASC, created_at DESC";
         let mut stmt = db.prepare(sql).map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
         })?;
@@ -1694,6 +1751,269 @@ impl NionCore {
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         Ok(rows > 0)
     }
+
+    // ==================== 笔记搜索与任务关联 ====================
+
+    /// 全文搜索笔记：匹配笔记的标题（name）和正文（description）。
+    /// 可选指定 checklist_id 限定搜索范围；None 时搜索所有笔记型清单。
+    /// query 不区分大小写，使用 SQL LIKE 模糊匹配。
+    pub fn search_notes(
+        &self,
+        query: String,
+        checklist_id: Option<String>,
+    ) -> Result<Vec<TaskData>, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+
+        // 构造 LIKE 模式：在查询词前后加 % 实现模糊匹配
+        let like_pattern = format!("%{}%", query);
+
+        if let Some(ref cid) = checklist_id {
+            // 限定在指定清单内搜索
+            let mut stmt = db
+                .prepare(
+                    "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time, linked_task_ids \
+                     FROM tasks WHERE category_id = ?1 AND parent_id IS NULL \
+                     AND (name LIKE ?2 OR description LIKE ?2) \
+                     ORDER BY updated_at DESC"
+                )
+                .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+            let rows = stmt
+                .query_map(params![cid, like_pattern], |row| map_task_row(row))
+                .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+            let mut result = Vec::new();
+            for row in rows {
+                result.push(row.map_err(|e| NionError::DatabaseError { msg: e.to_string() })?);
+            }
+            Ok(result)
+        } else {
+            // 搜索所有笔记型清单下的笔记：通过 JOIN checklists 筛选 checklist_type='notebook'
+            let mut stmt = db
+                .prepare(
+                    "SELECT t.id, t.name, t.description, t.priority, t.status, t.reminder, t.parent_id, t.category_id, t.group_id, t.created_at, t.updated_at, t.completed_at, t.focus_seconds, t.recurrence_rule, t.recurrence_reminder_time, t.linked_task_ids \
+                     FROM tasks t \
+                     INNER JOIN checklists c ON t.category_id = c.id \
+                     WHERE c.checklist_type = 'notebook' AND t.parent_id IS NULL \
+                     AND (t.name LIKE ?1 OR t.description LIKE ?1) \
+                     ORDER BY t.updated_at DESC"
+                )
+                .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+            let rows = stmt
+                .query_map(params![like_pattern], |row| map_task_row(row))
+                .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+            let mut result = Vec::new();
+            for row in rows {
+                result.push(row.map_err(|e| NionError::DatabaseError { msg: e.to_string() })?);
+            }
+            Ok(result)
+        }
+    }
+
+    /// 建立笔记与任务的双向关联。
+    /// 在笔记的 linked_task_ids 中追加 task_id，同时在任务的 linked_task_ids 中追加 note_id。
+    /// 如果已关联则跳去重，不会重复添加。
+    pub fn link_note_to_task(&self, note_id: String, task_id: String) -> Result<(), NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+
+        // 读取笔记当前的 linked_task_ids
+        let note_links: Option<String> = db
+            .query_row(
+                "SELECT linked_task_ids FROM tasks WHERE id = ?1",
+                params![note_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+
+        // 解析现有 ID 列表，去重后追加 task_id
+        let mut note_ids: Vec<String> = note_links
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        if !note_ids.contains(&task_id) {
+            note_ids.push(task_id.clone());
+        }
+        let new_note_links = note_ids.join(",");
+
+        // 读取任务当前的 linked_task_ids
+        let task_links: Option<String> = db
+            .query_row(
+                "SELECT linked_task_ids FROM tasks WHERE id = ?1",
+                params![task_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+
+        // 解析现有 ID 列表，去重后追加 note_id
+        let mut task_ids: Vec<String> = task_links
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+        if !task_ids.contains(&note_id) {
+            task_ids.push(note_id.clone());
+        }
+        let new_task_links = task_ids.join(",");
+
+        // 双向写入
+        let now = chrono::Utc::now().to_rfc3339();
+        db.execute(
+            "UPDATE tasks SET linked_task_ids = ?1, updated_at = ?2 WHERE id = ?3",
+            params![new_note_links, now, note_id],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        db.execute(
+            "UPDATE tasks SET linked_task_ids = ?1, updated_at = ?2 WHERE id = ?3",
+            params![new_task_links, now, task_id],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+
+        Ok(())
+    }
+
+    /// 移除笔记与任务的双向关联。
+    /// 从笔记的 linked_task_ids 中移除 task_id，同时从任务的 linked_task_ids 中移除 note_id。
+    pub fn unlink_note_from_task(&self, note_id: String, task_id: String) -> Result<(), NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+
+        // 读取笔记当前的 linked_task_ids，移除 task_id
+        let note_links: Option<String> = db
+            .query_row(
+                "SELECT linked_task_ids FROM tasks WHERE id = ?1",
+                params![note_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+
+        let note_ids: Vec<String> = note_links
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty() && *s != task_id)
+            .map(|s| s.to_string())
+            .collect();
+        let new_note_links = if note_ids.is_empty() {
+            String::new()
+        } else {
+            note_ids.join(",")
+        };
+
+        // 读取任务当前的 linked_task_ids，移除 note_id
+        let task_links: Option<String> = db
+            .query_row(
+                "SELECT linked_task_ids FROM tasks WHERE id = ?1",
+                params![task_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+
+        let task_ids: Vec<String> = task_links
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty() && *s != note_id)
+            .map(|s| s.to_string())
+            .collect();
+        let new_task_links = if task_ids.is_empty() {
+            String::new()
+        } else {
+            task_ids.join(",")
+        };
+
+        // 双向写入
+        let now = chrono::Utc::now().to_rfc3339();
+        db.execute(
+            "UPDATE tasks SET linked_task_ids = ?1, updated_at = ?2 WHERE id = ?3",
+            params![new_note_links, now, note_id],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        db.execute(
+            "UPDATE tasks SET linked_task_ids = ?1, updated_at = ?2 WHERE id = ?3",
+            params![new_task_links, now, task_id],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+
+        Ok(())
+    }
+
+    /// 获取任务关联的所有笔记。
+    /// 从任务的 linked_task_ids 解析出笔记 ID 列表，逐个查询返回。
+    pub fn get_linked_notes(&self, task_id: String) -> Result<Vec<TaskData>, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+
+        // 读取任务的 linked_task_ids 字段
+        let links: Option<String> = db
+            .query_row(
+                "SELECT linked_task_ids FROM tasks WHERE id = ?1",
+                params![task_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+
+        let note_ids: Vec<String> = links
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+
+        if note_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // 逐个查询笔记数据
+        let mut result = Vec::new();
+        for nid in note_ids {
+            if let Ok(note) = query_task(&db, &nid) {
+                result.push(note);
+            }
+        }
+        Ok(result)
+    }
+
+    /// 获取笔记关联的所有任务。
+    /// 从笔记的 linked_task_ids 解析出任务 ID 列表，逐个查询返回。
+    pub fn get_linked_tasks(&self, note_id: String) -> Result<Vec<TaskData>, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+
+        // 读取笔记的 linked_task_ids 字段
+        let links: Option<String> = db
+            .query_row(
+                "SELECT linked_task_ids FROM tasks WHERE id = ?1",
+                params![note_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+
+        let task_ids: Vec<String> = links
+            .unwrap_or_default()
+            .split(',')
+            .filter(|s| !s.is_empty())
+            .map(|s| s.to_string())
+            .collect();
+
+        if task_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // 逐个查询任务数据
+        let mut result = Vec::new();
+        for tid in task_ids {
+            if let Ok(task) = query_task(&db, &tid) {
+                result.push(task);
+            }
+        }
+        Ok(result)
+    }
 }
 
 /// 递归级联：将 task_id 的 category_id 和 group_id 同步到所有子孙任务。
@@ -1763,12 +2083,13 @@ fn map_task_row(row: &rusqlite::Row) -> rusqlite::Result<TaskData> {
         focus_seconds: row.get(12)?,
         recurrence_rule: row.get(13)?,
         recurrence_reminder_time: row.get(14)?,
+        linked_task_ids: row.get(15)?,
     })
 }
 
 fn query_task(db: &rusqlite::Connection, id: &str) -> Result<TaskData, NionError> {
     db.query_row(
-        "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time FROM tasks WHERE id = ?1",
+        "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time, linked_task_ids FROM tasks WHERE id = ?1",
         params![id],
         |row| map_task_row(row),
     )
@@ -2636,5 +2957,155 @@ mod tests {
         let promoted = core.get_task(child.id.clone()).unwrap();
         assert_eq!(promoted.category_id, Some(cl.id.clone()), "提升后 category_id 不应变");
         assert_eq!(promoted.parent_id, None, "parent_id 应为 None");
+    }
+
+    // ==================== 笔记型清单测试 ====================
+
+    #[test]
+    fn test_create_checklist_with_type() {
+        let core = make_in_memory();
+
+        // 创建笔记型清单
+        let nb = core.create_checklist_with_type("读书笔记".to_string(), "notebook".to_string()).unwrap();
+        assert_eq!(nb.name, "读书笔记");
+        assert_eq!(nb.checklist_type, "notebook");
+
+        // 创建任务型清单（默认）
+        let cl = core.create_checklist("工作任务".to_string()).unwrap();
+        assert_eq!(cl.checklist_type, "task");
+
+        // 查询列表应包含两种类型（按创建时间排序：notebook 先创建）
+        let lists = core.get_checklists().unwrap();
+        assert_eq!(lists.len(), 2);
+        assert_eq!(lists[0].checklist_type, "notebook");
+        assert_eq!(lists[1].checklist_type, "task");
+    }
+
+    #[test]
+    fn test_update_checklist_type() {
+        let core = make_in_memory();
+        let cl = core.create_checklist("普通清单".to_string()).unwrap();
+        assert_eq!(cl.checklist_type, "task");
+
+        // 转换为笔记型
+        let updated = core.update_checklist_type(cl.id.clone(), "notebook".to_string()).unwrap();
+        assert_eq!(updated.checklist_type, "notebook");
+
+        // 持久化验证
+        let lists = core.get_checklists().unwrap();
+        assert_eq!(lists[0].checklist_type, "notebook");
+    }
+
+    #[test]
+    fn test_search_notes() {
+        let core = make_in_memory();
+
+        // 创建笔记型清单
+        let nb = core.create_checklist_with_type("读书笔记".to_string(), "notebook".to_string()).unwrap();
+
+        // 在笔记清单中创建几条笔记（用 task 模拟笔记条目）
+        let note1 = core.create_task(
+            "Rust 程序设计".to_string(),
+            Some("# Rust 学习\n\n所有权和借用是 Rust 的核心".to_string()),
+            "medium".to_string(),
+            Some(nb.id.clone()), None, None, None, None, None,
+        ).unwrap();
+        let note2 = core.create_task(
+            "原子习惯".to_string(),
+            Some("每天进步 1%，一年后就是 37 倍".to_string()),
+            "medium".to_string(),
+            Some(nb.id.clone()), None, None, None, None, None,
+        ).unwrap();
+
+        // 搜索 "Rust" —— 应只匹配 note1
+        let results = core.search_notes("Rust".to_string(), Some(nb.id.clone())).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "Rust 程序设计");
+
+        // 搜索 "习惯" —— 应只匹配 note2
+        let results = core.search_notes("习惯".to_string(), Some(nb.id.clone())).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "原子习惯");
+
+        // 全局搜索（不限定清单），应搜到笔记型清单下的所有匹配项
+        let results = core.search_notes("每天".to_string(), None).unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].name, "原子习惯");
+    }
+
+    #[test]
+    fn test_link_and_unlink_note_to_task() {
+        let core = make_in_memory();
+
+        // 创建任务型清单和笔记型清单
+        let cl = core.create_checklist("工作任务".to_string()).unwrap();
+        let nb = core.create_checklist_with_type("学习笔记".to_string(), "notebook".to_string()).unwrap();
+
+        // 创建一个任务和一条笔记
+        let task = core.create_task(
+            "完成 Rust 重构".to_string(), None, "high".to_string(),
+            Some(cl.id.clone()), None, None, None, None, None,
+        ).unwrap();
+        let note = core.create_task(
+            "Rust 重构笔记".to_string(),
+            Some("记录重构过程中的要点".to_string()),
+            "medium".to_string(),
+            Some(nb.id.clone()), None, None, None, None, None,
+        ).unwrap();
+
+        // 建立关联
+        core.link_note_to_task(note.id.clone(), task.id.clone()).unwrap();
+
+        // 验证：任务侧能查到关联的笔记
+        let linked_notes = core.get_linked_notes(task.id.clone()).unwrap();
+        assert_eq!(linked_notes.len(), 1);
+        assert_eq!(linked_notes[0].id, note.id);
+
+        // 验证：笔记侧能查到关联的任务
+        let linked_tasks = core.get_linked_tasks(note.id.clone()).unwrap();
+        assert_eq!(linked_tasks.len(), 1);
+        assert_eq!(linked_tasks[0].id, task.id);
+
+        // 重复关联不会产生重复记录
+        core.link_note_to_task(note.id.clone(), task.id.clone()).unwrap();
+        let linked_notes = core.get_linked_notes(task.id.clone()).unwrap();
+        assert_eq!(linked_notes.len(), 1);
+
+        // 移除关联
+        core.unlink_note_from_task(note.id.clone(), task.id.clone()).unwrap();
+        let linked_notes = core.get_linked_notes(task.id.clone()).unwrap();
+        assert_eq!(linked_notes.len(), 0);
+        let linked_tasks = core.get_linked_tasks(note.id.clone()).unwrap();
+        assert_eq!(linked_tasks.len(), 0);
+    }
+
+    #[test]
+    fn test_multiple_links() {
+        let core = make_in_memory();
+        let cl = core.create_checklist("工作".to_string()).unwrap();
+        let nb = core.create_checklist_with_type("笔记".to_string(), "notebook".to_string()).unwrap();
+
+        // 创建 2 个任务和 2 条笔记
+        let task1 = core.create_task("任务1".to_string(), None, "high".to_string(), Some(cl.id.clone()), None, None, None, None, None).unwrap();
+        let task2 = core.create_task("任务2".to_string(), None, "high".to_string(), Some(cl.id.clone()), None, None, None, None, None).unwrap();
+        let note1 = core.create_task("笔记1".to_string(), Some("内容".to_string()), "medium".to_string(), Some(nb.id.clone()), None, None, None, None, None).unwrap();
+        let note2 = core.create_task("笔记2".to_string(), Some("内容".to_string()), "medium".to_string(), Some(nb.id.clone()), None, None, None, None, None).unwrap();
+
+        // note1 关联 task1 和 task2
+        core.link_note_to_task(note1.id.clone(), task1.id.clone()).unwrap();
+        core.link_note_to_task(note1.id.clone(), task2.id.clone()).unwrap();
+        let linked = core.get_linked_tasks(note1.id.clone()).unwrap();
+        assert_eq!(linked.len(), 2);
+
+        // task1 关联 note2
+        core.link_note_to_task(note2.id.clone(), task1.id.clone()).unwrap();
+        let notes = core.get_linked_notes(task1.id.clone()).unwrap();
+        assert_eq!(notes.len(), 2);
+
+        // 移除 note1 → task1 关联后，task1 应只剩 note2
+        core.unlink_note_from_task(note1.id.clone(), task1.id.clone()).unwrap();
+        let notes = core.get_linked_notes(task1.id.clone()).unwrap();
+        assert_eq!(notes.len(), 1);
+        assert_eq!(notes[0].id, note2.id);
     }
 }

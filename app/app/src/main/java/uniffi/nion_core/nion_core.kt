@@ -648,6 +648,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_checklist(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_create_checklist_with_type(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_group(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_sticker(
@@ -682,6 +684,10 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_groups_by_checklist(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_get_linked_notes(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_get_linked_tasks(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_overdue_daily_tasks(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_setting(
@@ -702,6 +708,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_tasks_for_date(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_link_note_to_task(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_move_group_to_checklist(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_next_conversation_id(
@@ -718,6 +726,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_save_conversation(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_search_notes(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_set_setting(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_set_task_recurrence(
@@ -726,7 +736,11 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_uncomplete_daily_task_instance(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_unlink_note_from_task(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_update_checklist_name(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_update_checklist_type(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_update_group(
     ): Short
@@ -774,6 +788,8 @@ external fun uniffi_nion_core_fn_method_nioncore_complete_daily_task_instance(`p
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_create_checklist(`ptr`: Long,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_create_checklist_with_type(`ptr`: Long,`name`: RustBuffer.ByValue,`checklistType`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_create_group(`ptr`: Long,`name`: RustBuffer.ByValue,`checklistId`: RustBuffer.ByValue,`color`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_create_sticker(`ptr`: Long,`tag`: RustBuffer.ByValue,`fileName`: RustBuffer.ByValue,`filePath`: RustBuffer.ByValue,`mimeType`: RustBuffer.ByValue,`fileSize`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -808,6 +824,10 @@ external fun uniffi_nion_core_fn_method_nioncore_get_group(`ptr`: Long,`id`: Rus
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_get_groups_by_checklist(`ptr`: Long,`checklistId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_linked_notes(`ptr`: Long,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_get_linked_tasks(`ptr`: Long,`noteId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_get_overdue_daily_tasks(`ptr`: Long,`beforeDate`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_get_setting(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -828,6 +848,8 @@ external fun uniffi_nion_core_fn_method_nioncore_get_tasks_due_today(`ptr`: Long
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_get_tasks_for_date(`ptr`: Long,`date`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_link_note_to_task(`ptr`: Long,`noteId`: RustBuffer.ByValue,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_nion_core_fn_method_nioncore_move_group_to_checklist(`ptr`: Long,`groupId`: RustBuffer.ByValue,`checklistId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_next_conversation_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -844,6 +866,8 @@ external fun uniffi_nion_core_fn_method_nioncore_reorder_tasks(`ptr`: Long,`orde
 ): Unit
 external fun uniffi_nion_core_fn_method_nioncore_save_conversation(`ptr`: Long,`id`: RustBuffer.ByValue,`title`: RustBuffer.ByValue,`messages`: RustBuffer.ByValue,`apiHistory`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_search_notes(`ptr`: Long,`query`: RustBuffer.ByValue,`checklistId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_set_setting(`ptr`: Long,`key`: RustBuffer.ByValue,`value`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_nion_core_fn_method_nioncore_set_task_recurrence(`ptr`: Long,`taskId`: RustBuffer.ByValue,`recurrenceRule`: RustBuffer.ByValue,`reminderTime`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -852,7 +876,11 @@ external fun uniffi_nion_core_fn_method_nioncore_uncomplete_daily_task(`ptr`: Lo
 ): Byte
 external fun uniffi_nion_core_fn_method_nioncore_uncomplete_daily_task_instance(`ptr`: Long,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_unlink_note_from_task(`ptr`: Long,`noteId`: RustBuffer.ByValue,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_nion_core_fn_method_nioncore_update_checklist_name(`ptr`: Long,`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_update_checklist_type(`ptr`: Long,`id`: RustBuffer.ByValue,`checklistType`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_update_group(`ptr`: Long,`id`: RustBuffer.ByValue,`name`: RustBuffer.ByValue,`color`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -999,6 +1027,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_create_checklist() != 24825.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_create_checklist_with_type() != 51472.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_create_group() != 45929.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1050,6 +1081,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_groups_by_checklist() != 13216.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_linked_notes() != 65113.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_linked_tasks() != 26066.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_overdue_daily_tasks() != 28623.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1080,6 +1117,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_tasks_for_date() != 30602.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_link_note_to_task() != 23972.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_move_group_to_checklist() != 6120.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1104,6 +1144,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_save_conversation() != 11459.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_search_notes() != 40623.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_set_setting() != 44047.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1116,7 +1159,13 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_uncomplete_daily_task_instance() != 26461.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_unlink_note_from_task() != 49651.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_update_checklist_name() != 4118.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_update_checklist_type() != 43992.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_update_group() != 36991.toShort()) {
@@ -1553,6 +1602,12 @@ public interface NionCoreInterface {
     fun `createChecklist`(`name`: kotlin.String): ChecklistData
     
     /**
+     * 创建指定类型的清单。
+     * checklist_type: "task" = 任务型清单，"notebook" = 笔记型清单
+     */
+    fun `createChecklistWithType`(`name`: kotlin.String, `checklistType`: kotlin.String): ChecklistData
+    
+    /**
      * 创建分组：在指定清单下新建一个分组（如"语文"、"英语"）
      */
     fun `createGroup`(`name`: kotlin.String, `checklistId`: kotlin.String, `color`: kotlin.String?): GroupData
@@ -1631,6 +1686,18 @@ public interface NionCoreInterface {
     fun `getGroupsByChecklist`(`checklistId`: kotlin.String): List<GroupData>
     
     /**
+     * 获取任务关联的所有笔记。
+     * 从任务的 linked_task_ids 解析出笔记 ID 列表，逐个查询返回。
+     */
+    fun `getLinkedNotes`(`taskId`: kotlin.String): List<TaskData>
+    
+    /**
+     * 获取笔记关联的所有任务。
+     * 从笔记的 linked_task_ids 解析出任务 ID 列表，逐个查询返回。
+     */
+    fun `getLinkedTasks`(`noteId`: kotlin.String): List<TaskData>
+    
+    /**
      * 获取所有过期的每日任务实例
      * 新模型：查找 recurrence_rule='daily'、status='todo'、reminder 日期 < before_date 的任务
      * 这些是未完成的每日任务实例（被跳过的日期），按过期日期降序排列
@@ -1682,6 +1749,13 @@ public interface NionCoreInterface {
     fun `getTasksForDate`(`date`: kotlin.String): List<DailyTaskStatus>
     
     /**
+     * 建立笔记与任务的双向关联。
+     * 在笔记的 linked_task_ids 中追加 task_id，同时在任务的 linked_task_ids 中追加 note_id。
+     * 如果已关联则跳去重，不会重复添加。
+     */
+    fun `linkNoteToTask`(`noteId`: kotlin.String, `taskId`: kotlin.String)
+    
+    /**
      * 将分组移动到另一个清单，同时更新组内任务的 category_id
      * 将整个分组移动到另一个清单。更新分组的 checklist_id，同步更新组内任务的
      * category_id，并对每个有子任务的父任务递归级联，确保子孙任务的归属也同步变更。
@@ -1717,6 +1791,13 @@ public interface NionCoreInterface {
      */
     fun `saveConversation`(`id`: kotlin.String, `title`: kotlin.String, `messages`: kotlin.String, `apiHistory`: kotlin.String): ConversationData
     
+    /**
+     * 全文搜索笔记：匹配笔记的标题（name）和正文（description）。
+     * 可选指定 checklist_id 限定搜索范围；None 时搜索所有笔记型清单。
+     * query 不区分大小写，使用 SQL LIKE 模糊匹配。
+     */
+    fun `searchNotes`(`query`: kotlin.String, `checklistId`: kotlin.String?): List<TaskData>
+    
     fun `setSetting`(`key`: kotlin.String, `value`: kotlin.String)
     
     /**
@@ -1743,9 +1824,21 @@ public interface NionCoreInterface {
     fun `uncompleteDailyTaskInstance`(`taskId`: kotlin.String): TaskData
     
     /**
+     * 移除笔记与任务的双向关联。
+     * 从笔记的 linked_task_ids 中移除 task_id，同时从任务的 linked_task_ids 中移除 note_id。
+     */
+    fun `unlinkNoteFromTask`(`noteId`: kotlin.String, `taskId`: kotlin.String)
+    
+    /**
      * 修改清单名称
      */
     fun `updateChecklistName`(`id`: kotlin.String, `name`: kotlin.String): ChecklistData
+    
+    /**
+     * 修改清单的类型。
+     * checklist_type: "task" 或 "notebook"
+     */
+    fun `updateChecklistType`(`id`: kotlin.String, `checklistType`: kotlin.String): ChecklistData
     
     /**
      * 修改分组名称和颜色
@@ -1977,6 +2070,24 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     UniffiLib.uniffi_nion_core_fn_method_nioncore_create_checklist(
         it,
         FfiConverterString.lower(`name`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 创建指定类型的清单。
+     * checklist_type: "task" = 任务型清单，"notebook" = 笔记型清单
+     */
+    @Throws(NionException::class)override fun `createChecklistWithType`(`name`: kotlin.String, `checklistType`: kotlin.String): ChecklistData {
+            return FfiConverterTypeChecklistData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_create_checklist_with_type(
+        it,
+        FfiConverterString.lower(`name`),FfiConverterString.lower(`checklistType`),_status)
 }
     }
     )
@@ -2267,6 +2378,42 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
 
     
     /**
+     * 获取任务关联的所有笔记。
+     * 从任务的 linked_task_ids 解析出笔记 ID 列表，逐个查询返回。
+     */
+    @Throws(NionException::class)override fun `getLinkedNotes`(`taskId`: kotlin.String): List<TaskData> {
+            return FfiConverterSequenceTypeTaskData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_get_linked_notes(
+        it,
+        FfiConverterString.lower(`taskId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 获取笔记关联的所有任务。
+     * 从笔记的 linked_task_ids 解析出任务 ID 列表，逐个查询返回。
+     */
+    @Throws(NionException::class)override fun `getLinkedTasks`(`noteId`: kotlin.String): List<TaskData> {
+            return FfiConverterSequenceTypeTaskData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_get_linked_tasks(
+        it,
+        FfiConverterString.lower(`noteId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * 获取所有过期的每日任务实例
      * 新模型：查找 recurrence_rule='daily'、status='todo'、reminder 日期 < before_date 的任务
      * 这些是未完成的每日任务实例（被跳过的日期），按过期日期降序排列
@@ -2438,6 +2585,24 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
 
     
     /**
+     * 建立笔记与任务的双向关联。
+     * 在笔记的 linked_task_ids 中追加 task_id，同时在任务的 linked_task_ids 中追加 note_id。
+     * 如果已关联则跳去重，不会重复添加。
+     */
+    @Throws(NionException::class)override fun `linkNoteToTask`(`noteId`: kotlin.String, `taskId`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_link_note_to_task(
+        it,
+        FfiConverterString.lower(`noteId`),FfiConverterString.lower(`taskId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * 将分组移动到另一个清单，同时更新组内任务的 category_id
      * 将整个分组移动到另一个清单。更新分组的 checklist_id，同步更新组内任务的
      * category_id，并对每个有子任务的父任务递归级联，确保子孙任务的归属也同步变更。
@@ -2565,6 +2730,25 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
 
     
+    /**
+     * 全文搜索笔记：匹配笔记的标题（name）和正文（description）。
+     * 可选指定 checklist_id 限定搜索范围；None 时搜索所有笔记型清单。
+     * query 不区分大小写，使用 SQL LIKE 模糊匹配。
+     */
+    @Throws(NionException::class)override fun `searchNotes`(`query`: kotlin.String, `checklistId`: kotlin.String?): List<TaskData> {
+            return FfiConverterSequenceTypeTaskData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_search_notes(
+        it,
+        FfiConverterString.lower(`query`),FfiConverterOptionalString.lower(`checklistId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
     @Throws(NionException::class)override fun `setSetting`(`key`: kotlin.String, `value`: kotlin.String)
         = 
     callWithHandle {
@@ -2638,6 +2822,23 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
 
     
     /**
+     * 移除笔记与任务的双向关联。
+     * 从笔记的 linked_task_ids 中移除 task_id，同时从任务的 linked_task_ids 中移除 note_id。
+     */
+    @Throws(NionException::class)override fun `unlinkNoteFromTask`(`noteId`: kotlin.String, `taskId`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_unlink_note_from_task(
+        it,
+        FfiConverterString.lower(`noteId`),FfiConverterString.lower(`taskId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * 修改清单名称
      */
     @Throws(NionException::class)override fun `updateChecklistName`(`id`: kotlin.String, `name`: kotlin.String): ChecklistData {
@@ -2647,6 +2848,24 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     UniffiLib.uniffi_nion_core_fn_method_nioncore_update_checklist_name(
         it,
         FfiConverterString.lower(`id`),FfiConverterString.lower(`name`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 修改清单的类型。
+     * checklist_type: "task" 或 "notebook"
+     */
+    @Throws(NionException::class)override fun `updateChecklistType`(`id`: kotlin.String, `checklistType`: kotlin.String): ChecklistData {
+            return FfiConverterTypeChecklistData.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_update_checklist_type(
+        it,
+        FfiConverterString.lower(`id`),FfiConverterString.lower(`checklistType`),_status)
 }
     }
     )
@@ -2907,10 +3126,19 @@ public object FfiConverterTypeCalendarDateMarker: FfiConverterRustBuffer<Calenda
 
 
 
+/**
+ * 清单数据 —— 任务型清单和笔记型清单共用此结构
+ * checklist_type: "task" = 任务型（默认），"notebook" = 笔记型
+ */
 data class ChecklistData (
     var `id`: kotlin.String
     , 
     var `name`: kotlin.String
+    , 
+    /**
+     * 清单类型："task" 或 "notebook"
+     */
+    var `checklistType`: kotlin.String
     , 
     var `createdAt`: kotlin.String
     
@@ -2932,18 +3160,21 @@ public object FfiConverterTypeChecklistData: FfiConverterRustBuffer<ChecklistDat
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
             FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
         )
     }
 
     override fun allocationSize(value: ChecklistData) = (
             FfiConverterString.allocationSize(value.`id`) +
             FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`checklistType`) +
             FfiConverterString.allocationSize(value.`createdAt`)
     )
 
     override fun write(value: ChecklistData, buf: ByteBuffer) {
             FfiConverterString.write(value.`id`, buf)
             FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`checklistType`, buf)
             FfiConverterString.write(value.`createdAt`, buf)
     }
 }
@@ -3499,6 +3730,13 @@ data class TaskData (
      * 每日循环的提醒时间，格式为 "HH:MM"（精确到分钟），仅当 recurrence_rule="daily" 时有效
      */
     var `recurrenceReminderTime`: kotlin.String?
+    , 
+    /**
+     * 关联的任务/笔记 ID 列表（逗号分隔，如 "3,7,12"）。
+     * 用于笔记-任务双向关联：笔记的 linked_task_ids 存储关联的任务 ID，
+     * 任务的 linked_task_ids 存储关联的笔记 ID。None 表示无关联。
+     */
+    var `linkedTaskIds`: kotlin.String?
     
 ){
     
@@ -3530,6 +3768,7 @@ public object FfiConverterTypeTaskData: FfiConverterRustBuffer<TaskData> {
             FfiConverterLong.read(buf),
             FfiConverterOptionalString.read(buf),
             FfiConverterOptionalString.read(buf),
+            FfiConverterOptionalString.read(buf),
         )
     }
 
@@ -3548,7 +3787,8 @@ public object FfiConverterTypeTaskData: FfiConverterRustBuffer<TaskData> {
             FfiConverterOptionalString.allocationSize(value.`completedAt`) +
             FfiConverterLong.allocationSize(value.`focusSeconds`) +
             FfiConverterOptionalString.allocationSize(value.`recurrenceRule`) +
-            FfiConverterOptionalString.allocationSize(value.`recurrenceReminderTime`)
+            FfiConverterOptionalString.allocationSize(value.`recurrenceReminderTime`) +
+            FfiConverterOptionalString.allocationSize(value.`linkedTaskIds`)
     )
 
     override fun write(value: TaskData, buf: ByteBuffer) {
@@ -3567,6 +3807,7 @@ public object FfiConverterTypeTaskData: FfiConverterRustBuffer<TaskData> {
             FfiConverterLong.write(value.`focusSeconds`, buf)
             FfiConverterOptionalString.write(value.`recurrenceRule`, buf)
             FfiConverterOptionalString.write(value.`recurrenceReminderTime`, buf)
+            FfiConverterOptionalString.write(value.`linkedTaskIds`, buf)
     }
 }
 

@@ -8,10 +8,14 @@ pub enum NionError {
     ValidationError { msg: String },
 }
 
+/// 清单数据 —— 任务型清单和笔记型清单共用此结构
+/// checklist_type: "task" = 任务型（默认），"notebook" = 笔记型
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
 pub struct ChecklistData {
     pub id: String,
     pub name: String,
+    /// 清单类型："task" 或 "notebook"
+    pub checklist_type: String,
     pub created_at: String,
 }
 
@@ -34,6 +38,10 @@ pub struct TaskData {
     pub recurrence_rule: Option<String>,
     /// 每日循环的提醒时间，格式为 "HH:MM"（精确到分钟），仅当 recurrence_rule="daily" 时有效
     pub recurrence_reminder_time: Option<String>,
+    /// 关联的任务/笔记 ID 列表（逗号分隔，如 "3,7,12"）。
+    /// 用于笔记-任务双向关联：笔记的 linked_task_ids 存储关联的任务 ID，
+    /// 任务的 linked_task_ids 存储关联的笔记 ID。None 表示无关联。
+    pub linked_task_ids: Option<String>,
 }
 
 /// 任务分组 —— 清单下的二级分类，例如"学习清单"下的"语文"、"英语"
