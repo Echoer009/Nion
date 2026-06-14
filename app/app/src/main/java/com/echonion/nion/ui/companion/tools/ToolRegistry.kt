@@ -1,7 +1,7 @@
 package com.echonion.nion.ui.companion.tools
 
 import com.echonion.nion.ui.companion.JsonCanonicalizer
-import com.echonion.nion.ui.companion.phoneagent.PhoneAgentTool
+// import com.echonion.nion.ui.companion.phoneagent.PhoneAgentTool  // Phone Agent 功能暂未成熟，注释禁用
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -47,8 +47,8 @@ object ToolRegistry {
         ManageTool,
         MemoryTool,
         WebSearchTool,
-        PhoneAgentTool,
-        ScheduledPhoneTaskTool,
+        // PhoneAgentTool,           // Phone Agent 功能暂未成熟，注释禁用
+        // ScheduledPhoneTaskTool,   // 定时手机任务依赖 Phone Agent，一并禁用
     )
 
     /**

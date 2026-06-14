@@ -8,7 +8,7 @@ import java.io.File
 import com.echonion.nion.reminder.GreetingScheduler
 import com.echonion.nion.reminder.NotificationHelper
 import com.echonion.nion.reminder.GreetingEvent
-import com.echonion.nion.reminder.PhoneAutomationScheduler
+// import com.echonion.nion.reminder.PhoneAutomationScheduler  // Phone Agent 功能暂未成熟，注释禁用
 import com.echonion.nion.reminder.ReminderEvent
 import com.echonion.nion.reminder.ReminderScheduler
 import com.echonion.nion.reminder.WeatherAlertEvent
@@ -169,12 +169,12 @@ class NionApp : Application() {
             Log.e("NionApp", "启动天气预警调度失败", e)
         }
 
-        // 重调度定时手机自动化任务闹钟
-        try {
-            PhoneAutomationScheduler.rescheduleAll(this, core)
-        } catch (e: Exception) {
-            Log.e("NionApp", "重调度定时手机任务闹钟失败", e)
-        }
+        // 重调度定时手机自动化任务闹钟 —— Phone Agent 功能暂未成熟，注释禁用
+        // try {
+        //     PhoneAutomationScheduler.rescheduleAll(this, core)
+        // } catch (e: Exception) {
+        //     Log.e("NionApp", "重调度定时手机任务闹钟失败", e)
+        // }
 
         // 注册 Activity 生命周期回调，跟踪 app 前后台状态
         // 供 ReminderWorker 判断是否发送 SharedFlow 事件给 UI 层

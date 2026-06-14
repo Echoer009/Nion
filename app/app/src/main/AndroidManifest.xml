@@ -18,8 +18,8 @@
     <!-- 位置权限：天气功能需要 GPS 定位获取用户所在城市 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
-    <!-- Phone Agent 需要查询所有已安装应用来启动目标 App（Android 11+ Package Visibility） -->
-    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+    <!-- Phone Agent 需要查询所有已安装应用来启动目标 App（Android 11+ Package Visibility）
+    <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" /> -->
 
     <application
         android:name=".NionApp"
@@ -81,8 +81,10 @@
             </intent-filter>
         </receiver>
 
-        <!-- Phone Agent 无障碍服务 —— 提供截图、手势执行、全局操作等能力
-             用于 Phone Agent 子循环，让 AI 能够操控手机界面 -->
+        <!-- ===== Phone Agent 功能暂未成熟，以下服务和接收器全部注释禁用 =====
+
+        Phone Agent 无障碍服务 —— 提供截图、手势执行、全局操作等能力
+             用于 Phone Agent 子循环，让 AI 能够操控手机界面
         <service
             android:name=".ui.companion.phoneagent.PhoneAgentService"
             android:exported="true"
@@ -95,16 +97,17 @@
                 android:resource="@xml/phone_agent_service_config" />
         </service>
 
-        <!-- Phone Agent 悬浮窗 Service —— Agent 执行手机操作时实时显示思考与操作过程 -->
+        Phone Agent 悬浮窗 Service —— Agent 执行手机操作时实时显示思考与操作过程
         <service
             android:name=".ui.companion.phoneagent.PhoneAgentFloatingService"
             android:exported="false"
             android:foregroundServiceType="specialUse" />
 
-        <!-- 定时手机任务闹钟触发接收器 —— AlarmManager 到点时发送等待确认通知 -->
+        定时手机任务闹钟触发接收器 —— AlarmManager 到点时发送等待确认通知
         <receiver
             android:name=".reminder.PhoneAutomationReceiver"
             android:exported="false" />
+        ===== Phone Agent 禁用区结束 ===== -->
     </application>
 
 </manifest>

@@ -740,13 +740,13 @@ private fun ProfileContent(
         Spacer(modifier = Modifier.height(24.dp))
 
         // ══════════════════════════════════════════════════════════════
-        // Phone Agent 配置
+        // Phone Agent 配置 —— 功能暂未成熟，注释禁用
         // ══════════════════════════════════════════════════════════════
-        SectionHeader("Phone Agent")
+        // SectionHeader("Phone Agent")
 
-        Spacer(modifier = Modifier.height(8.dp))
+        // Spacer(modifier = Modifier.height(8.dp))
 
-        ProfilePhoneAgentSettings(viewModel = viewModel)
+        // ProfilePhoneAgentSettings(viewModel = viewModel)
     }
     } // SharedTransitionLayout end
 } // ProfileContent end
@@ -2575,7 +2575,8 @@ private fun MessageBubble(
     // 工具消息：简洁状态行，不渲染气泡，不支持长按操作
     if (message.isToolMessage) {
         ToolMessageRow(message, onClickTool = {
-            NionApp.instance?.let { PhoneAgentFloatingService.start(it) }
+            // Phone Agent 功能暂未成熟，注释禁用悬浮窗启动
+            // NionApp.instance?.let { PhoneAgentFloatingService.start(it) }
         })
         return
     }
