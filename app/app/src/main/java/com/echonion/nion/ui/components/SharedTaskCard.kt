@@ -18,8 +18,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.ui.graphics.Shape
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -42,7 +41,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.draw.scale
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -52,6 +53,7 @@ import com.echonion.nion.ui.task.formatReminderDate
 import com.echonion.nion.ui.task.isReminderOverdue
 import com.echonion.nion.ui.task.isReminderToday
 import com.echonion.nion.ui.task.priorityColor
+import com.echonion.nion.ui.notebook.stripMarkdown
 import com.echonion.nion.ui.theme.LocalPriorityColors
 
 /**
@@ -103,6 +105,8 @@ fun SharedTaskCard(
     showCollapseArrow: Boolean = false,
     arrowRotation: Float = 0f,
     onToggleCollapse: (() -> Unit)? = null,
+    /** 笔记模式：true 时复选框替换为笔记图标 */
+    isNotebook: Boolean = false,
 ) {
     // 背景色动画：已完成 → surfaceContainerLow，未完成 → surfaceContainerLowest
     val cardColor by animateColorAsState(
@@ -160,17 +164,26 @@ fun SharedTaskCard(
             .padding(horizontal = horizontalPadding, vertical = verticalPadding),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 勾选框：带弹跳动画的圆形 checkbox
-        TaskCheckbox(
-            isDone = model.isDone,
-            checkScale = checkScale.value,
-            checkBgColor = checkBgColor,
-            priorityColor = priorityColor,
-            onToggleDone = onToggleDone,
-        )
+        // 勾选框：笔记模式显示笔记图标，任务模式显示带弹跳动画的 checkbox
+        if (isNotebook) {
+            Icon(
+                Icons.AutoMirrored.Filled.Article,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+                modifier = Modifier.size(24.dp),
+            )
+        } else {
+            TaskCheckbox(
+                isDone = model.isDone,
+                checkScale = checkScale.value,
+                checkBgColor = checkBgColor,
+                priorityColor = priorityColor,
+                onToggleDone = onToggleDone,
+            )
+        }
         Spacer(modifier = Modifier.width(14.dp))
         // 文字信息列：标题 + 描述 + 提醒时间
-        TaskTextContent(model = model, modifier = Modifier.weight(1f))
+        TaskTextContent(model = model, isNotebook = isNotebook, modifier = Modifier.weight(1f))
         // 折叠/展开箭头图标，仅在有子任务时显示
         if (showCollapseArrow && onToggleCollapse != null) {
             Spacer(modifier = Modifier.width(4.dp))
@@ -250,11 +263,13 @@ private fun TaskCheckbox(
  * 描述单行省略显示。提醒时间行根据任务类型显示不同样式。
  *
  * @param model 任务卡片数据
+ * @param isNotebook 笔记模式：true 时描述去除 Markdown 语法符号后显示
  */
 @Composable
 private fun TaskTextContent(
     model: TaskCardModel,
     modifier: Modifier = Modifier,
+    isNotebook: Boolean = false,
 ) {
     Column(modifier = modifier) {
         // 标题行：任务名 + 每日循环图标
@@ -281,10 +296,12 @@ private fun TaskTextContent(
             }
         }
         // 描述：单行省略，仅在有内容时显示
-        if (!model.description.isNullOrBlank()) {
+        // 笔记模式下去除 Markdown 语法符号再显示预览
+        val displayDesc = if (isNotebook) model.description?.let { stripMarkdown(it) } else model.description
+        if (!displayDesc.isNullOrBlank()) {
             Spacer(modifier = Modifier.height(2.dp))
             Text(
-                text = model.description,
+                text = displayDesc,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,

@@ -396,6 +396,9 @@ private fun NionLeftPanel(
             onAddChecklist = { name ->
                 viewModel.createChecklist(name)
             },
+            onAddChecklistWithType = { name, type ->
+                viewModel.createChecklistWithType(name, type)
+            },
             onDeleteChecklist = { viewModel.deleteChecklist(it) },
             onReorderChecklists = { viewModel.reorderChecklists(it) },
             onSidebarDrag = onDrag,

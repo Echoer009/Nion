@@ -56,6 +56,7 @@ internal fun TaskData.toUi(): TaskItem {
 internal fun ChecklistData.toUi(): ChecklistItem = ChecklistItem(
     id = id,
     name = name,
+    checklistType = checklistType,
 )
 
 /** 将 Rust 端 GroupData 转换为 UI 模型（分组列表项） */

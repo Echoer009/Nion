@@ -58,6 +58,8 @@ data class TaskItem(
 data class ChecklistItem(
     val id: String,
     val name: String,
+    /** 清单类型："task" = 任务型（默认），"notebook" = 笔记型 */
+    val checklistType: String = "task",
 )
 
 /**
@@ -144,6 +146,16 @@ class TaskViewModel(
             else -> checklists.find { it.id == activeChecklistId }?.name ?: "我的任务"
         }
 
+    /** 当前激活清单的类型："task" 或 "notebook"。虚拟清单（今天/收集箱）始终为 "task" */
+    val activeChecklistType: String
+        get() = when (activeChecklistId) {
+            TODAY_ID, INBOX_ID, null -> "task"
+            else -> checklists.find { it.id == activeChecklistId }?.checklistType ?: "task"
+        }
+
+    /** 当前是否在笔记型清单视图中 */
+    val isNotebookView: Boolean by derivedStateOf { activeChecklistType == "notebook" }
+
     private var countsJob: Job? = null
 
     var selectedTaskIds by mutableStateOf<Set<String>>(emptySet())
@@ -185,8 +197,8 @@ class TaskViewModel(
             app.dataEvents()
                 .debounce(300)
                 .collect { event ->
-                    // 只处理任务数据变更事件，忽略偏好/记忆等不相关事件
-                    if (DataType.TASK_DATA in event.types) {
+                    // 只处理任务和笔记数据变更事件，忽略偏好/记忆等不相关事件
+                    if (DataType.TASK_DATA in event.types || DataType.NOTEBOOK_DATA in event.types) {
                         Log.d("TaskViewModel", "收到数据变更事件: ${event.types}")
                         refreshJob?.cancel()
                         refreshJob = viewModelScope.launch { doRefreshInternal() }
@@ -411,6 +423,36 @@ class TaskViewModel(
                 onCreated(newTask.id)
             } catch (e: Exception) {
                 onError("创建任务失败: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 在当前笔记型清单中创建一条新笔记（带标题和初始内容）。
+     * 笔记复用 TaskData 结构：name = 标题，description = Markdown 正文。
+     * 创建成功后通过 onCreated 回调传入新笔记的 ID。
+     *
+     * @param title 笔记标题
+     * @param content 笔记初始 Markdown 正文（可为空）
+     * @param onCreated 创建成功回调，传入新笔记 ID
+     */
+    fun createNote(title: String, content: String? = null, onCreated: (String) -> Unit) {
+        viewModelScope.launch {
+            try {
+                val newNote = withContext(Dispatchers.IO) {
+                    core.createTask(
+                        title.ifBlank { "新笔记" },
+                        content?.ifBlank { null },
+                        "medium",
+                        activeChecklistId,
+                        null, activeGroupId, null, null, null,
+                    )
+                }
+                tasks = loadTasksForCurrentView()
+                scheduleRefreshCounts()
+                onCreated(newNote.id)
+            } catch (e: Exception) {
+                onError("创建笔记失败: ${e.message}")
             }
         }
     }
@@ -661,6 +703,24 @@ class TaskViewModel(
         viewModelScope.launch {
             try {
                 withContext(Dispatchers.IO) { core.createChecklist(name) }
+                val loaded = withContext(Dispatchers.IO) { core.getChecklists().map { it.toUi() } }
+                checklists = loaded
+                scheduleRefreshCounts()
+            } catch (e: Exception) {
+                onError("创建清单失败: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 创建指定类型的清单。
+     * @param name 清单名称
+     * @param checklistType "task" 或 "notebook"
+     */
+    fun createChecklistWithType(name: String, checklistType: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { core.createChecklistWithType(name, checklistType) }
                 val loaded = withContext(Dispatchers.IO) { core.getChecklists().map { it.toUi() } }
                 checklists = loaded
                 scheduleRefreshCounts()
@@ -1055,6 +1115,133 @@ class TaskViewModel(
             } catch (e: Exception) {
                 onError("更新提醒失败: ${e.message}")
             }
+        }
+    }
+
+    // ==================== 笔记-任务关联 ====================
+
+    /** 缓存的关联笔记列表（在任务详情页中使用） */
+    var linkedNotes by mutableStateOf<List<TaskItem>>(emptyList())
+        private set
+
+    /** 缓存的关联任务列表（在笔记编辑器中使用） */
+    var linkedTasks by mutableStateOf<List<TaskItem>>(emptyList())
+        private set
+
+    /**
+     * 加载指定任务关联的所有笔记。
+     * @param taskId 任务 ID
+     */
+    fun loadLinkedNotes(taskId: String) {
+        viewModelScope.launch {
+            try {
+                val notes = withContext(Dispatchers.IO) {
+                    core.getLinkedNotes(taskId).map { it.toUi() }
+                }
+                linkedNotes = notes
+            } catch (e: Exception) {
+                linkedNotes = emptyList()
+            }
+        }
+    }
+
+    /**
+     * 加载指定笔记关联的所有任务。
+     * @param noteId 笔记 ID
+     */
+    fun loadLinkedTasks(noteId: String) {
+        viewModelScope.launch {
+            try {
+                val tasks = withContext(Dispatchers.IO) {
+                    core.getLinkedTasks(noteId).map { it.toUi() }
+                }
+                linkedTasks = tasks
+            } catch (e: Exception) {
+                linkedTasks = emptyList()
+            }
+        }
+    }
+
+    /**
+     * 关联笔记和任务（双向写入）。
+     * @param noteId 笔记 ID
+     * @param taskId 任务 ID
+     */
+    fun linkNoteToTask(noteId: String, taskId: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { core.linkNoteToTask(noteId, taskId) }
+                // 刷新关联列表
+                loadLinkedTasks(noteId)
+                loadLinkedNotes(taskId)
+            } catch (e: Exception) {
+                onError("关联失败: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 取消笔记和任务的关联（双向删除）。
+     * @param noteId 笔记 ID
+     * @param taskId 任务 ID
+     */
+    fun unlinkNoteFromTask(noteId: String, taskId: String) {
+        viewModelScope.launch {
+            try {
+                withContext(Dispatchers.IO) { core.unlinkNoteFromTask(noteId, taskId) }
+                loadLinkedTasks(noteId)
+                loadLinkedNotes(taskId)
+            } catch (e: Exception) {
+                onError("取消关联失败: ${e.message}")
+            }
+        }
+    }
+
+    /**
+     * 全局搜索所有笔记型清单中的笔记。
+     * @param query 搜索关键词
+     * @return 匹配的笔记列表
+     */
+    suspend fun searchNotesGlobal(query: String): List<TaskItem> {
+        return try {
+            withContext(Dispatchers.IO) {
+                core.searchNotes(query, null).map { it.toUi() }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * 获取所有笔记型清单中的笔记（用于关联选择器）。
+     * @return 所有笔记列表
+     */
+    suspend fun getAllNotes(): List<TaskItem> {
+        return try {
+            withContext(Dispatchers.IO) {
+                // 遍历所有笔记型清单，加载其中的笔记
+                checklists.filter { it.checklistType == "notebook" }.flatMap { cl ->
+                    core.getTasksByCategory(cl.id, null).map { it.toUi() }
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    /**
+     * 获取所有任务型清单中的任务（用于关联选择器）。
+     * @return 所有顶层任务列表
+     */
+    suspend fun getAllTasks(): List<TaskItem> {
+        return try {
+            withContext(Dispatchers.IO) {
+                checklists.filter { it.checklistType == "task" }.flatMap { cl ->
+                    core.getTasksByCategory(cl.id, null).map { it.toUi() }
+                }
+            }
+        } catch (_: Exception) {
+            emptyList()
         }
     }
 

@@ -111,6 +111,8 @@ fun SharedTaskList(
     modifier: Modifier = Modifier,
     /** 点击折叠/展开箭头时触发，传入主任务 ID */
     onToggleCollapse: ((String) -> Unit)? = null,
+    /** 是否为笔记型清单视图：true 时 section header 显示"笔记"，隐藏"已完成"区，FlatTaskRow 显示笔记图标 */
+    isNotebook: Boolean = false,
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -264,7 +266,8 @@ fun SharedTaskList(
                 Box(modifier = Modifier.animateItem(
                     placementSpec = spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow),
                 )) {
-                    SectionHeader("待办", reorderableItems.count { it.depth == 0 })
+                    // 笔记模式下 section header 显示"笔记"，任务模式显示"待办"
+                    SectionHeader(if (isNotebook) "笔记" else "待办", reorderableItems.count { it.depth == 0 })
                 }
             }
 
@@ -451,6 +454,7 @@ fun SharedTaskList(
                                 isGroupSelected = groupSelected,
                                 onToggleCollapse = onToggleCollapse,
                                 sharedElementModifier = taskSharedModifier(flatItem.task.id),
+                                isNotebook = isNotebook,
                             )
                         }
                     }
@@ -458,7 +462,8 @@ fun SharedTaskList(
             }
         }
 
-        if (doneItems.isNotEmpty()) {
+        // 笔记模式不显示"已完成"区（笔记没有完成状态）
+        if (doneItems.isNotEmpty() && !isNotebook) {
             item(key = "done_header", contentType = "header") {
                 Box(modifier = Modifier.animateItem(
                     placementSpec = spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow),
@@ -506,6 +511,7 @@ fun SharedTaskList(
                         isSelected = isSelected,
                         isGroupSelected = isSelected,
                         sharedElementModifier = taskSharedModifier(flatItem.task.id),
+                        isNotebook = isNotebook,
                     )
                 }
             }

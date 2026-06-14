@@ -1,5 +1,7 @@
 package com.echonion.nion.ui.task
 
+import com.echonion.nion.ui.notebook.NotebookContent
+import com.echonion.nion.ui.notebook.NotebookEditor
 import com.echonion.nion.ui.theme.NionAlpha
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -149,7 +151,11 @@ fun TaskScreen(
     onStartFocus: (taskId: String, taskTitle: String, durationMinutes: Int) -> Unit = { _, _, _ -> },
 ) {
     var showAddSheet by remember { mutableStateOf(false) }
+    var showAddNote by remember { mutableStateOf(false) }
     var expandedTaskId by remember { mutableStateOf<String?>(null) }
+
+    // 笔记搜索关键词：null=不搜索，非空=按关键词过滤笔记列表
+    var noteSearchQuery by remember { mutableStateOf<String?>(null) }
 
     // ===== 附件相关状态 =====
     val context = LocalContext.current
@@ -212,7 +218,7 @@ fun TaskScreen(
     // backdropBlur: 展开时模糊任务列表，收回时恢复清晰
     // 同时感知 FAD 展开和任务详情展开
     val blurPx by animateFloatAsState(
-        targetValue = if (showAddSheet || expandedTaskId != null) 25f else 0f,
+        targetValue = if (showAddSheet || showAddNote || expandedTaskId != null) 25f else 0f,
         animationSpec = tween(300),
         label = "backdropBlur",
     )
@@ -234,9 +240,13 @@ fun TaskScreen(
     BackHandler(enabled = expandedTaskId != null) {
         expandedTaskId = null
     }
-    // 添加任务 overlay 返回拦截：showAddSheet 为 true 时，系统返回手势关闭表单而非退出页面
+    // 添加任务 overlay 返回拦截
     BackHandler(enabled = showAddSheet) {
         showAddSheet = false
+    }
+    // 添加笔记 overlay 返回拦截
+    BackHandler(enabled = showAddNote) {
+        showAddNote = false
     }
 
     // SharedTransitionLayout：为 sharedBounds（FAB）+ sharedElement（任务卡片）两套动画提供容器
@@ -260,9 +270,40 @@ fun TaskScreen(
             label = "taskDetail",
         ) { taskId ->
             if (taskId != null) {
-                // 任务详情浮层：从任务卡片位置 morph 展开
-                val task = findTaskById(viewModel.tasks, taskId)
-                if (task != null) {
+                if (viewModel.isNotebookView) {
+                    // 笔记编辑器：笔记型清单中点击笔记后展开的全屏 Markdown 编辑器
+                    val note = findTaskById(viewModel.tasks, taskId)
+                    if (note != null) {
+                        // 可关联的任务列表：加载所有任务型清单中的顶层任务
+                        var allLinkableTasks by remember { mutableStateOf<List<TaskItem>>(emptyList()) }
+                        // 加载此笔记的关联任务和所有可选任务
+                        LaunchedEffect(taskId) {
+                            viewModel.loadLinkedTasks(taskId)
+                            allLinkableTasks = viewModel.getAllTasks()
+                        }
+                        NotebookEditor(
+                            note = note,
+                            linkedTasks = viewModel.linkedTasks,
+                            allTasks = allLinkableTasks,
+                            onUpdateTitle = { newTitle ->
+                                viewModel.updateTask(taskId, name = newTitle)
+                            },
+                            onUpdateContent = { newContent ->
+                                viewModel.updateTask(taskId, description = newContent)
+                            },
+                            onLinkTask = { taskToLinkId ->
+                                viewModel.linkNoteToTask(taskId, taskToLinkId)
+                            },
+                            onUnlinkTask = { taskToUnlinkId ->
+                                viewModel.unlinkNoteFromTask(taskId, taskToUnlinkId)
+                            },
+                            onDismiss = { expandedTaskId = null },
+                        )
+                    }
+                } else {
+                    // 任务详情浮层：从任务卡片位置 morph 展开
+                    val task = findTaskById(viewModel.tasks, taskId)
+                    if (task != null) {
                     TaskDetailOverlay(
                         task = task,
                         onDismiss = { expandedTaskId = null },
@@ -311,11 +352,11 @@ fun TaskScreen(
                         },
                         onPreviewImage = { previewAttachment = it },
                     )
+                    }
                 }
             } else {
-                // 任务列表 + FAB + 添加任务浮层（原有逻辑，FAD 动画）
+                // 统一的列表 + FAB + 添加浮层（任务型和笔记型清单共用）
                 Box(modifier = Modifier.fillMaxSize()) {
-                    // 任务列表始终渲染，展开时施加高斯模糊
                     Box(modifier = Modifier.graphicsLayer {
                         if (blurPx > 0f && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S) {
                             renderEffect = android.graphics.RenderEffect
@@ -328,11 +369,6 @@ fun TaskScreen(
                             dualState = dualState,
                             viewModel = viewModel,
                             onTaskClick = { expandedTaskId = it.id },
-                            /**
-                             * 为每个任务卡片生成 sharedElement modifier。
-                             * key 为 "task_detail_${taskId}"，与 TaskDetailOverlay 中的 key 匹配，
-                             * 使得 AnimatedContent 过渡时该卡片能 morph 展开为详情浮层。
-                             */
                             taskSharedModifier = { targetId ->
                                 Modifier.sharedElement(
                                     sharedContentState = rememberSharedContentState("task_detail_$targetId"),
@@ -345,15 +381,21 @@ fun TaskScreen(
                                     },
                                 )
                             },
+                            isNotebook = viewModel.isNotebookView,
                             fab = {
-                                // FAB 通过 AnimatedVisibility 参与 shared bounds 动画
                                 AnimatedVisibility(
-                                    visible = !showAddSheet,
+                                    visible = !showAddSheet && !showAddNote,
                                     enter = fadeIn(tween(250, easing = FastOutSlowInEasing)),
                                     exit = fadeOut(tween(180, easing = FastOutSlowInEasing)),
                                 ) {
                                     FloatingActionButton(
-                                        onClick = { showAddSheet = true },
+                                        onClick = {
+                                            if (viewModel.isNotebookView) {
+                                                showAddNote = true
+                                            } else {
+                                                showAddSheet = true
+                                            }
+                                        },
                                         modifier = Modifier.sharedBounds(
                                             sharedContentState = rememberSharedContentState("fab"),
                                             animatedVisibilityScope = this@AnimatedVisibility,
@@ -368,14 +410,14 @@ fun TaskScreen(
                                         contentColor = MaterialTheme.colorScheme.onPrimary,
                                         elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 0.dp, hoveredElevation = 0.dp),
                                         shape = RoundedCornerShape(16.dp),
-                                    ) { Icon(Icons.Default.Add, contentDescription = "添加任务") }
+                                    ) { Icon(Icons.Default.Add, contentDescription = if (viewModel.isNotebookView) "添加笔记" else "添加任务") }
                                 }
                             },
                             reorderableItems = reorderableItems,
                         )
                     } // end blur Box
 
-                    // 添加任务浮层，叠加在任务列表之上
+                    // 添加任务浮层（任务型清单）
                     AnimatedVisibility(
                         visible = showAddSheet,
                         enter = fadeIn(tween(300, easing = FastOutSlowInEasing)),
@@ -393,7 +435,6 @@ fun TaskScreen(
                                     recurrenceReminderTime = recurrenceReminderTime,
                                     reminder = reminder,
                                 ) { newTaskId ->
-                                    // 任务创建成功后，批量关联临时附件
                                     if (pending.isNotEmpty()) {
                                         viewModel.commitPendingAttachments(newTaskId, pending)
                                     }
@@ -414,7 +455,6 @@ fun TaskScreen(
                             onPickImage = { addAttachmentPicker.pickImage() },
                             onPickFile = { addAttachmentPicker.pickFile() },
                             onRemoveAttachment = { id ->
-                                // 从临时列表中移除
                                 val idx = pendingAttachments.indexOfFirst { it.id == id }
                                 if (idx >= 0) {
                                     pendingAttachments = pendingAttachments.toMutableList().also { it.removeAt(idx) }
@@ -422,6 +462,33 @@ fun TaskScreen(
                                 }
                             },
                             onPreviewImage = { previewAttachment = it },
+                        )
+                    }
+
+                    // 添加笔记浮层（笔记型清单）
+                    AnimatedVisibility(
+                        visible = showAddNote,
+                        enter = fadeIn(tween(300, easing = FastOutSlowInEasing)),
+                        exit = fadeOut(tween(400, easing = FastOutSlowInEasing)),
+                    ) {
+                        AddNoteOverlay(
+                            onDismiss = { showAddNote = false },
+                            onAdd = { title, content ->
+                                viewModel.createNote(title, content) { newNoteId ->
+                                    expandedTaskId = newNoteId
+                                }
+                                showAddNote = false
+                            },
+                            sharedBoundsModifier = Modifier.sharedBounds(
+                                sharedContentState = rememberSharedContentState("fab"),
+                                animatedVisibilityScope = this@AnimatedVisibility,
+                                boundsTransform = { _, _ ->
+                                    spring(
+                                        dampingRatio = 0.8f,
+                                        stiffness = Spring.StiffnessMediumLow,
+                                    )
+                                },
+                            ),
                         )
                     }
                 }
@@ -453,6 +520,8 @@ private fun TaskScreenContent(
     fab: @Composable () -> Unit,
     /** 外部传入，跨 AnimatedContent 过渡保留 */
     reorderableItems: SnapshotStateList<FlatTaskItem>,
+    /** 笔记模式：true 时列表标题显示"笔记"，SharedTaskCard 显示笔记图标 */
+    isNotebook: Boolean = false,
 ) {
     Scaffold(
         contentWindowInsets = WindowInsets.statusBars,
@@ -545,6 +614,7 @@ private fun TaskScreenContent(
                         innerPadding = androidx.compose.foundation.layout.PaddingValues(),
                         modifier = Modifier.weight(1f),
                         onToggleCollapse = { viewModel.toggleCollapse(it) },
+                        isNotebook = isNotebook,
                     )
                 }
             }
@@ -620,6 +690,125 @@ private fun ReminderEntryRow(
  * - RECURRENCE：重复设置面板（不重复/每天 + 时间滚轮）
  */
 private enum class AddPanel { FORM, REMINDER, RECURRENCE }
+
+/**
+ * 新建笔记浮层 —— 从 FAB 位置 morph 展开为居中的笔记创建表单。
+ *
+ * 仿 AddTaskOverlay 的视觉风格，但只有标题和正文两个输入框，没有优先级/提醒/循环。
+ * 点"添加"后创建笔记并打开 Markdown 编辑器。
+ *
+ * @param onDismiss 点击外部区域关闭回调
+ * @param onAdd 确认添加回调，传入 (标题, 正文Markdown)
+ * @param sharedBoundsModifier shared element 动画 modifier（与 FAB 共享 bounds）
+ */
+@Composable
+private fun AddNoteOverlay(
+    onDismiss: () -> Unit,
+    onAdd: (String, String?) -> Unit,
+    sharedBoundsModifier: Modifier,
+) {
+    var title by remember { mutableStateOf("") }
+    var content by remember { mutableStateOf("") }
+
+    // 自动聚焦标题输入框
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(Unit) {
+        focusRequester.requestFocus()
+    }
+
+    // 半透明背景 + 点击外部关闭
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = NionAlpha.OVERLAY_SCRIM))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        Surface(
+            modifier = sharedBoundsModifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp),
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+            tonalElevation = 6.dp,
+        ) {
+            Column(
+                modifier = Modifier.padding(20.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp),
+            ) {
+                // 标题
+                Text(
+                    "新建笔记",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                )
+                // 标题输入框：粗线边框，自动聚焦呼出键盘
+                OutlinedTextField(
+                    value = title,
+                    onValueChange = { title = it },
+                    placeholder = { Text("标题") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp))
+                        .focusRequester(focusRequester),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                    singleLine = true,
+                )
+                // 正文输入框：Markdown 内容
+                OutlinedTextField(
+                    value = content,
+                    onValueChange = { content = it },
+                    placeholder = { Text("开始写笔记...") },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(3.dp, MaterialTheme.colorScheme.outline, RoundedCornerShape(14.dp)),
+                    shape = RoundedCornerShape(14.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = Color.Transparent,
+                        unfocusedBorderColor = Color.Transparent,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ),
+                    maxLines = 5,
+                )
+                // 操作按钮
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    TextButton(
+                        onClick = onDismiss,
+                        modifier = Modifier.weight(1f),
+                        shape = RoundedCornerShape(14.dp),
+                    ) { Text("取消", fontWeight = FontWeight.SemiBold) }
+                    Button(
+                        onClick = {
+                            if (title.isNotBlank()) onAdd(
+                                title.trim(),
+                                content.trim().ifBlank { null },
+                            )
+                        },
+                        enabled = title.isNotBlank(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                        modifier = Modifier.weight(1f),
+                    ) { Text("添加", fontWeight = FontWeight.SemiBold) }
+                }
+            }
+        }
+    }
+}
 
 /**
  * 新建任务浮层 —— 从 FAB 位置 morph 展开为居中的任务创建表单。

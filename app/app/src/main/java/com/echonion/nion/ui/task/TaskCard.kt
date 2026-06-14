@@ -21,6 +21,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.RadioButtonUnchecked
@@ -69,6 +70,8 @@ fun FlatTaskRow(
     onToggleCollapse: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
     sharedElementModifier: Modifier = Modifier,
+    /** 笔记模式：true 时复选框替换为笔记图标 */
+    isNotebook: Boolean = false,
 ) {
     val task = item.task
 
@@ -84,6 +87,7 @@ fun FlatTaskRow(
             onToggleCollapse = onToggleCollapse,
             modifier = modifier,
             sharedElementModifier = sharedElementModifier,
+            isNotebook = isNotebook,
         )
     } else {
         SubTaskRow(
@@ -94,6 +98,7 @@ fun FlatTaskRow(
             isGroupSelected = isGroupSelected,
             modifier = modifier,
             sharedElementModifier = sharedElementModifier,
+            isNotebook = isNotebook,
         )
     }
 }
@@ -166,6 +171,8 @@ private fun MainTaskRow(
     onToggleCollapse: ((String) -> Unit)? = null,
     modifier: Modifier = Modifier,
     sharedElementModifier: Modifier = Modifier,
+    /** 笔记模式：true 时复选框替换为笔记图标 */
+    isNotebook: Boolean = false,
 ) {
     // 分组最后一行用 medium 圆角，否则仅顶部圆角（底部与子任务相连）
     val shape = if (isGroupLast) MaterialTheme.shapes.medium
@@ -210,6 +217,7 @@ private fun MainTaskRow(
         showCollapseArrow = showCollapseArrow,
         arrowRotation = arrowRotation,
         onToggleCollapse = { onToggleCollapse?.invoke(task.id) },
+        isNotebook = isNotebook,
         modifier = modifier
             .then(sharedElementModifier)
             .then(
@@ -242,6 +250,8 @@ private fun SubTaskRow(
     isGroupSelected: Boolean,
     modifier: Modifier = Modifier,
     sharedElementModifier: Modifier = Modifier,
+    /** 笔记模式：true 时复选框替换为笔记图标，不可点击切换完成 */
+    isNotebook: Boolean = false,
 ) {
     val task = item.task
     val priorityColors = LocalPriorityColors.current
@@ -288,27 +298,37 @@ private fun SubTaskRow(
             .padding(start = indent + 16.dp, end = 16.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Box(
-            modifier = Modifier
-                .size(checkSize)
-                .clip(CircleShape)
-                .background(if (task.isDone) MaterialTheme.colorScheme.primary else Color.Transparent)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = { onToggleDone(task) },
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            if (task.isDone) {
-                Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(10.dp))
-            } else {
-                Icon(
-                    Icons.Default.RadioButtonUnchecked,
-                    contentDescription = null,
-                    tint = priorityColor.copy(alpha = NionAlpha.TEXT_SUBTITLE),
-                    modifier = Modifier.size(checkSize)
-                )
+        if (isNotebook) {
+            // 笔记模式：显示笔记图标，不可点击切换完成
+            Icon(
+                Icons.AutoMirrored.Filled.Article,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+                modifier = Modifier.size(checkSize),
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .size(checkSize)
+                    .clip(CircleShape)
+                    .background(if (task.isDone) MaterialTheme.colorScheme.primary else Color.Transparent)
+                    .clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = { onToggleDone(task) },
+                    ),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (task.isDone) {
+                    Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(10.dp))
+                } else {
+                    Icon(
+                        Icons.Default.RadioButtonUnchecked,
+                        contentDescription = null,
+                        tint = priorityColor.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+                        modifier = Modifier.size(checkSize)
+                    )
+                }
             }
         }
         Spacer(modifier = Modifier.width(8.dp))

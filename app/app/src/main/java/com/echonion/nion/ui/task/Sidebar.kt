@@ -35,7 +35,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -80,7 +82,8 @@ import sh.calvin.reorderable.rememberReorderableLazyListState
  * @param inboxCounts "收集箱"视图的任务/子任务计数（孤儿任务）
  * @param customCounts 各真实清单的任务/子任务计数，key 为清单 ID
  * @param onSelectChecklist 点击清单项时触发，回调传入清单 ID（虚拟或真实）
- * @param onAddChecklist 新建清单时触发，回调传入清单名称
+ * @param onAddChecklist 新建任务型清单时触发，回调传入清单名称
+ * @param onAddChecklistWithType 新建指定类型清单时触发，回调传入 (名称, 类型)
  * @param onDeleteChecklist 删除清单时触发，回调传入清单 ID
  * @param onReorderChecklists 拖拽排序结束时触发，回调传入重排后的清单 ID 列表
  * @param onSidebarDrag 侧边栏拖拽中回调，传入水平偏移量
@@ -97,6 +100,7 @@ fun SidebarContent(
     customCounts: Map<String, Pair<Int, Int>>,
     onSelectChecklist: (String?) -> Unit,
     onAddChecklist: (String) -> Unit,
+    onAddChecklistWithType: (String, String) -> Unit,
     onDeleteChecklist: (String) -> Unit,
     onReorderChecklists: (List<String>) -> Unit,
     onSidebarDrag: (Float) -> Unit,
@@ -106,6 +110,8 @@ fun SidebarContent(
     var deleteConfirmId by remember { mutableStateOf<String?>(null) }
     var isAdding by remember { mutableStateOf(false) }
     var newName by remember { mutableStateOf("") }
+    /** 新建清单时选择的类型："task" 或 "notebook"，默认任务型 */
+    var newChecklistType by remember { mutableStateOf("task") }
     val focusRequester = remember { FocusRequester() }
 
     val reorderableChecklists = remember { mutableStateListOf<ChecklistItem>() }
@@ -239,21 +245,25 @@ fun SidebarContent(
                                 onClick = { onSelectChecklist(checklist.id) },
                                 showDelete = true,
                                 onDelete = { deleteConfirmId = checklist.id },
+                                checklistType = checklist.checklistType,
                             )
                         }
                     }
                 }
             }
 
-            // 新建清单输入框：展开/收起动画，确认后创建清单
+            // 新建清单输入框：展开/收起动画，确认后创建清单（带类型选择）
             AddChecklistInputField(
                 visible = isAdding,
                 name = newName,
+                selectedType = newChecklistType,
                 onNameChange = { newName = it },
+                onTypeChange = { newChecklistType = it },
                 onConfirm = {
                     if (newName.isNotBlank()) {
-                        onAddChecklist(newName.trim())
+                        onAddChecklistWithType(newName.trim(), newChecklistType)
                         newName = ""
+                        newChecklistType = "task"
                     }
                     isAdding = false
                 },
@@ -281,12 +291,14 @@ fun SidebarContent(
 }
 
 /**
- * 新建清单输入框 —— 展开时显示文本输入框，支持键盘确认和按钮确认。
+ * 新建清单输入框 —— 展开时显示文本输入框和类型选择按钮，支持键盘确认和按钮确认。
  * 带 bottom 展开/收起动画。
  *
  * @param visible 是否可见
  * @param name 当前输入的清单名称
+ * @param selectedType 当前选中的清单类型 ("task" 或 "notebook")
  * @param onNameChange 名称变更回调
+ * @param onTypeChange 类型变更回调
  * @param onConfirm 确认创建回调（键盘 Done 或点击勾选图标）
  * @param focusRequester 焦点控制器，展开时自动聚焦
  */
@@ -294,7 +306,9 @@ fun SidebarContent(
 private fun AddChecklistInputField(
     visible: Boolean,
     name: String,
+    selectedType: String,
     onNameChange: (String) -> Unit,
+    onTypeChange: (String) -> Unit,
     onConfirm: () -> Unit,
     focusRequester: FocusRequester,
 ) {
@@ -304,6 +318,29 @@ private fun AddChecklistInputField(
         exit = shrinkVertically(shrinkTowards = Alignment.Bottom, animationSpec = tween(150)) + fadeOut(tween(100)),
     ) {
         Column {
+            // 清单类型选择器：两个切换按钮，任务型 / 笔记型
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                // 任务清单按钮
+                ChecklistTypeChip(
+                    label = "任务",
+                    icon = Icons.Default.CheckCircle,
+                    isSelected = selectedType == "task",
+                    onClick = { onTypeChange("task") },
+                    modifier = Modifier.weight(1f),
+                )
+                // 笔记清单按钮
+                ChecklistTypeChip(
+                    label = "笔记",
+                    icon = Icons.AutoMirrored.Filled.Article,
+                    isSelected = selectedType == "notebook",
+                    onClick = { onTypeChange("notebook") },
+                    modifier = Modifier.weight(1f),
+                )
+            }
+            Spacer(modifier = Modifier.height(8.dp))
             OutlinedTextField(
                 value = name,
                 onValueChange = onNameChange,
@@ -345,6 +382,54 @@ private fun AddChecklistInputField(
                 },
             )
             Spacer(modifier = Modifier.height(8.dp))
+        }
+    }
+}
+
+/**
+ * 清单类型选择按钮 —— 用于新建清单时选择任务型或笔记型。
+ * 选中态使用 primary 背景，未选中态使用透明背景。
+ *
+ * @param label 按钮文字（"任务" 或 "笔记"）
+ * @param icon 按钮图标
+ * @param isSelected 是否被选中
+ * @param onClick 点击回调
+ * @param modifier 外部修饰符
+ */
+@Composable
+private fun ChecklistTypeChip(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val bg = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHigh
+    val fg = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(10.dp),
+        color = bg,
+        modifier = modifier,
+    ) {
+        Row(
+            modifier = Modifier.padding(vertical = 10.dp, horizontal = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(
+                icon,
+                contentDescription = null,
+                tint = fg,
+                modifier = Modifier.size(16.dp),
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Text(
+                label,
+                style = MaterialTheme.typography.labelLarge,
+                color = fg,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+            )
         }
     }
 }
@@ -444,6 +529,8 @@ private fun SidebarChecklistItem(
     onClick: () -> Unit,
     showDelete: Boolean,
     onDelete: () -> Unit,
+    /** 清单类型："task" 或 "notebook"，用于显示不同图标 */
+    checklistType: String = "task",
 ) {
     val inactiveColor = MaterialTheme.colorScheme.surfaceContainer
     // 活跃清单项使用 secondaryContainer 背景，与主操作 primary 区分
@@ -485,6 +572,14 @@ private fun SidebarChecklistItem(
                 )
                 Spacer(modifier = Modifier.width(10.dp))
             }
+            // 清单类型图标：任务型用 CheckCircle，笔记型用 Article
+            Icon(
+                imageVector = if (checklistType == "notebook") Icons.AutoMirrored.Filled.Article else Icons.Default.CheckCircle,
+                contentDescription = null,
+                tint = contentColor.copy(alpha = NionAlpha.TEXT_SUBTLE),
+                modifier = Modifier.size(18.dp),
+            )
+            Spacer(modifier = Modifier.width(8.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     name,
@@ -494,7 +589,14 @@ private fun SidebarChecklistItem(
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
-                if (taskCount > 0 || subtaskCount > 0) {
+                if (checklistType == "notebook") {
+                    // 笔记型清单：只显示笔记条数
+                    Text(
+                        if (taskCount > 0) "$taskCount 条笔记" else "空笔记",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = contentColor.copy(alpha = NionAlpha.TEXT_SUBTLE),
+                    )
+                } else if (taskCount > 0 || subtaskCount > 0) {
                     Text(
                         "${taskCount}任务 · ${subtaskCount}子任务",
                         style = MaterialTheme.typography.labelSmall,
