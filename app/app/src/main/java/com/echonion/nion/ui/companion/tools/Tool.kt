@@ -20,6 +20,8 @@ enum class DataType {
     MEMORIES,
     /** 应用设置变更（主题配色切换/自定义） → NionApp 重新加载 ThemePalette */
     SETTINGS,
+    /** 笔记数据变更（笔记型清单的增删改、搜索、关联） → TaskViewModel 刷新 */
+    NOTEBOOK_DATA,
 }
 
 /**

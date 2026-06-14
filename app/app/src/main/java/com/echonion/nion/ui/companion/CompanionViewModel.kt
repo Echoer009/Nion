@@ -1650,6 +1650,7 @@ class CompanionViewModel(
                 "task" -> "任务"
                 "checklist" -> "清单"
                 "group" -> "分组"
+                "note" -> "笔记"
                 "weather" -> "天气"
                 else -> null
             }
@@ -1663,7 +1664,12 @@ class CompanionViewModel(
             "delete" -> "正在删除$suffix"
             "manage" -> {
                 val action = try { JSONObject(argumentsJson).optString("action", "") } catch (_: Exception) { "" }
-                if (action == "move") "正在移动$suffix" else "正在排序$suffix"
+                when (action) {
+                    "move" -> "正在移动$suffix"
+                    "link" -> "正在关联笔记..."
+                    "unlink" -> "正在取消关联..."
+                    else -> "正在排序$suffix"
+                }
             }
             "memory" -> {
                 val scope = try { JSONObject(argumentsJson).optString("scope", "fact") } catch (_: Exception) { "fact" }
@@ -1736,11 +1742,13 @@ class CompanionViewModel(
                 "task" -> "任务"
                 "checklist" -> "清单"
                 "group" -> "分组"
+                "note" -> "笔记"
                 else -> ""
             }
 
             // 从结果 JSON 中提取实体名称（create/update 返回完整实体对象）
-            val entityObj = resultJson.optJSONObject(entityType)
+            // note 类型用 "note" 键而非 entityType 原值
+            val entityObj = resultJson.optJSONObject(if (entityType == "note") "note" else entityType)
             val entityName = entityObj?.optString("name", "")?.takeIf { it.isNotEmpty() }
                 ?: entityObj?.optString("title", "")?.takeIf { it.isNotEmpty() }
                 ?: ""
@@ -1765,10 +1773,14 @@ class CompanionViewModel(
                 }
                 "delete" -> ToolPhrasePool.pick(companionStyle, "delete")
                 "manage" -> {
-                    // manage 工具包含 move 和 reorder 两种操作
+                    // manage 工具包含 move、reorder、link、unlink 操作
                     val action = args.optString("action", "")
-                    if (action == "move") ToolPhrasePool.pick(companionStyle, "move")
-                    else ToolPhrasePool.pick(companionStyle, "manage")
+                    when (action) {
+                        "move" -> ToolPhrasePool.pick(companionStyle, "move")
+                        "link" -> ToolPhrasePool.pick(companionStyle, "notebook_linked")
+                        "unlink" -> ToolPhrasePool.pick(companionStyle, "notebook_linked")
+                        else -> ToolPhrasePool.pick(companionStyle, "manage")
+                    }
                 }
                 "memory" -> {
                     // memory 工具通过 scope 区分偏好和事实

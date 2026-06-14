@@ -308,7 +308,7 @@ private fun buildScopeHint(checklistName: String?, groupName: String?): String {
 object QueryTool : Tool {
     override val name = "query"
     override val affectsData = emptySet<DataType>()
-    override val description = "查询数据。entity_type: task/checklist/group/weather。可用 checklist/group 按名称筛选，name 按名称搜索。"
+    override val description = "查询数据。entity_type: task/checklist/group/note/weather。可用 checklist/group 按名称筛选，name 按名称搜索。note 类型支持全文搜索标题和正文。"
 
     private val schema = """
     {
@@ -316,7 +316,7 @@ object QueryTool : Tool {
         "properties": {
             "entity_type": {
                 "type": "string",
-                "enum": ["task", "checklist", "group", "weather"]
+                "enum": ["task", "checklist", "group", "note", "weather"]
             },
             "checklist": { "type": "string" },
             "group": { "type": "string" },
@@ -339,6 +339,7 @@ object QueryTool : Tool {
             "task" -> executeTaskQuery(params, core)
             "checklist" -> executeChecklistQuery(params, core)
             "group" -> executeGroupQuery(params, core)
+            "note" -> executeNoteQuery(params, core)
             "weather" -> executeWeatherQuery(params, core)
             else -> """{"error":"不支持的 entity_type: $entityType"}"""
         }
@@ -600,6 +601,34 @@ object QueryTool : Tool {
 
         return sb.toString()
     }
+
+    /**
+     * 笔记查询 —— 全文搜索笔记型清单中的笔记。
+     * 使用 Rust 核心库的 searchNotes 方法，匹配笔记标题（name）和正文（description）。
+     * 可通过 checklist 参数限定搜索范围。
+     */
+    private fun executeNoteQuery(params: JSONObject, core: NionCore): String {
+        val nameParam = params.optString("name", "").takeIf { it.isNotEmpty() }
+            ?: return """{"error":"查询笔记必须提供 name（搜索关键词）"}"""
+
+        val checklistParam = params.optString("checklist", "").takeIf { it.isNotEmpty() }
+
+        // 解析可选的清单范围：找到名称匹配的笔记型清单
+        val checklistId: String? = if (checklistParam != null) {
+            val matched = resolveChecklistsByName(checklistParam, core)
+                .filter { it.checklistType == "notebook" }
+            if (matched.isEmpty()) {
+                return """{"error":"未找到名称包含「$checklistParam」的笔记型清单"}"""
+            }
+            matched.first().id
+        } else null
+
+        val notes = core.searchNotes(nameParam, checklistId)
+        return JSONObject().apply {
+            put("notes", taskListToJson(notes))
+            put("count", notes.size)
+        }.toString()
+    }
 }
 
 /**
@@ -642,7 +671,7 @@ object CreateTool : Tool {
         "properties": {
             "entity_type": {
                 "type": "string",
-                "enum": ["task", "checklist", "group"]
+                "enum": ["task", "checklist", "group", "note"]
             },
             "name": { "type": "string" },
             "description": { "type": "string" },
@@ -682,6 +711,7 @@ object CreateTool : Tool {
             "task" -> executeCreateTask(params, core)
             "checklist" -> executeCreateChecklist(params, core)
             "group" -> executeCreateGroup(params, core)
+            "note" -> executeCreateNote(params, core)
             else -> """{"error":"不支持的 entity_type: $entityType"}"""
         }
     }
@@ -831,6 +861,39 @@ object CreateTool : Tool {
         return JSONObject().apply {
             put("success", true)
             put("task", taskToJson(finalTask))
+        }.toString()
+    }
+
+    /**
+     * 创建笔记 —— 在指定的笔记型清单中新建一条笔记。
+     * 笔记复用 task 结构：name=标题，description=Markdown 正文。
+     * checklist 参数必须指向一个笔记型清单（checklist_type=notebook）。
+     */
+    private fun executeCreateNote(params: JSONObject, core: NionCore): String {
+        val title = params.optString("name", "").takeIf { it.isNotEmpty() }
+            ?: return """{"error":"创建笔记时必须指定 name（标题）"}"""
+
+        val content = params.optString("description", "").takeIf { it.isNotEmpty() }
+        val checklistName = params.optString("checklist", "").takeIf { it.isNotEmpty() }
+            ?: return """{"error":"创建笔记时必须指定 checklist（目标笔记本名称）"}"""
+
+        // 查找目标笔记型清单
+        val matchedChecklists = resolveChecklistsByName(checklistName, core)
+            .filter { it.checklistType == "notebook" }
+        if (matchedChecklists.isEmpty()) {
+            return """{"error":"未找到名称包含「$checklistName」的笔记型清单"}"""
+        }
+
+        val checklistId = matchedChecklists.first().id
+
+        // 笔记复用 createTask：name=标题，description=正文
+        val note = core.createTask(
+            title, content, "medium", checklistId,
+            null, null, null, null, null,
+        )
+        return JSONObject().apply {
+            put("success", true)
+            put("note", taskToJson(note))
         }.toString()
     }
 
@@ -1003,7 +1066,7 @@ object CreateTool : Tool {
 object UpdateTool : Tool {
     override val name = "update"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "更新实体。优先用id/ids精确定位，回退name/names。checklist/group/parent变更归属。支持批量。"
+    override val description = "更新实体。优先用id/ids精确定位，回退name/names。checklist/group/parent变更归属。支持批量。entity_type=note时append=true可追加内容。"
 
     private val schema = """
     {
@@ -1011,7 +1074,7 @@ object UpdateTool : Tool {
         "properties": {
             "entity_type": {
                 "type": "string",
-                "enum": ["task", "checklist", "group"]
+                "enum": ["task", "checklist", "group", "note"]
             },
             "id": { "type": "string", "description": "按 ID 定位单个实体，跳过名称解析" },
             "ids": {
@@ -1026,7 +1089,8 @@ object UpdateTool : Tool {
                 "description": "按名称数组批量更新"
             },
             "new_name": { "type": "string", "description": "新名称，用于改名" },
-            "description": { "type": "string", "description": "任务描述" },
+            "description": { "type": "string", "description": "任务描述或笔记正文" },
+            "append": { "type": "boolean", "description": "仅entity_type=note有效：true=追加内容到末尾，false=替换全部" },
             "priority": {
                 "type": "string",
                 "enum": ["low", "medium", "high"],
@@ -1055,15 +1119,19 @@ object UpdateTool : Tool {
     override suspend fun execute(params: JSONObject, core: NionCore): String {
         val entityType = params.getString("entity_type")
 
+        // note 类型复用 task 的更新逻辑（笔记本质是 task），追加模式单独处理
+        // 将 entity_type=note 映射为 task，让后续 ID/名称解析逻辑正常工作
+        val effectiveType = if (entityType == "note") "task" else entityType
+
         // ── ID 路径：优先级最高，跳过所有名称解析 ──
         val idsArray = params.optJSONArray("ids")
         if (idsArray != null && idsArray.length() > 0) {
-            return executeBatchUpdateByIds(entityType, idsArray, params, core)
+            return executeBatchUpdateByIds(effectiveType, idsArray, params, core)
         }
 
         val singleId = params.optString("id", "").takeIf { it.isNotEmpty() }
         if (singleId != null) {
-            return when (entityType) {
+            return when (effectiveType) {
                 "task" -> executeUpdateTask("", params, core, resolvedId = singleId)
                 "checklist" -> executeUpdateChecklist("", params, core, resolvedId = singleId)
                 "group" -> executeUpdateGroup("", params, core, resolvedId = singleId)
@@ -1074,13 +1142,13 @@ object UpdateTool : Tool {
         // ── 名称路径：原有逻辑 ──
         val namesArray = params.optJSONArray("names")
         if (namesArray != null && namesArray.length() > 0) {
-            return executeBatchUpdate(entityType, namesArray, params, core)
+            return executeBatchUpdate(effectiveType, namesArray, params, core)
         }
 
         val name = params.optString("name", "").takeIf { it.isNotEmpty() }
             ?: return """{"error":"更新操作必须指定 id、ids、name 或 names"}"""
 
-        return when (entityType) {
+        return when (effectiveType) {
             "task" -> executeUpdateTask(name, params, core)
             "checklist" -> executeUpdateChecklist(name, params, core)
             "group" -> executeUpdateGroup(name, params, core)
@@ -1296,10 +1364,21 @@ object UpdateTool : Tool {
         }
 
         // ── 执行更新 ──
+        // append 模式（仅笔记）：先读取原 description，追加新内容而非替换
+        val descriptionParam = params.optString("description", "").takeIf { it.isNotEmpty() }
+        val appendMode = params.optBoolean("append", false) && descriptionParam != null
+        val finalDescription = if (appendMode) {
+            // 追加模式：读取当前内容，在末尾追加新内容
+            val existing = core.getTask(id).description ?: ""
+            if (existing.isEmpty()) descriptionParam else "$existing\n\n$descriptionParam"
+        } else {
+            descriptionParam
+        }
+
         val task = core.updateTask(
             id = id,
             name = params.optString("new_name", "").takeIf { it.isNotEmpty() },
-            description = params.optString("description", "").takeIf { it.isNotEmpty() },
+            description = finalDescription,
             priority = params.optString("priority", "").takeIf { it.isNotEmpty() },
             status = params.optString("status", "").takeIf { it.isNotEmpty() },
             categoryId = newCategoryId,
@@ -1421,7 +1500,7 @@ object UpdateTool : Tool {
 object DeleteTool : Tool {
     override val name = "delete"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "删除实体。优先用id/ids精确定位，回退name/names+checklist/group。支持批量。不可撤销。"
+    override val description = "删除实体。优先用id/ids精确定位，回退name/names+checklist/group。支持批量。不可撤销。entity_type=note等同于task（笔记本质是任务）。"
 
     private val schema = """
     {
@@ -1429,7 +1508,7 @@ object DeleteTool : Tool {
         "properties": {
             "entity_type": {
                 "type": "string",
-                "enum": ["task", "checklist", "group"]
+                "enum": ["task", "checklist", "group", "note"]
             },
             "id": { "type": "string", "description": "按 ID 定位单个实体，跳过名称解析" },
             "ids": {
@@ -1454,28 +1533,30 @@ object DeleteTool : Tool {
 
     override suspend fun execute(params: JSONObject, core: NionCore): String {
         val entityType = params.getString("entity_type")
+        // note 映射为 task（笔记本质是任务，删除逻辑完全相同）
+        val effectiveType = if (entityType == "note") "task" else entityType
 
         // ── ID 路径：优先级最高，跳过所有名称解析 ──
         val idsArray = params.optJSONArray("ids")
         if (idsArray != null && idsArray.length() > 0) {
-            return executeBatchDeleteByIds(entityType, idsArray, core)
+            return executeBatchDeleteByIds(effectiveType, idsArray, core)
         }
 
         val singleId = params.optString("id", "").takeIf { it.isNotEmpty() }
         if (singleId != null) {
-            return executeSingleDeleteById(entityType, singleId, core)
+            return executeSingleDeleteById(effectiveType, singleId, core)
         }
 
         // ── 名称路径：原有逻辑 ──
         val namesArray = params.optJSONArray("names")
         if (namesArray != null && namesArray.length() > 0) {
-            return executeBatchDelete(entityType, namesArray, params, core)
+            return executeBatchDelete(effectiveType, namesArray, params, core)
         }
 
         val name = params.optString("name", "").takeIf { it.isNotEmpty() }
             ?: return """{"error":"删除操作必须指定 id、ids、name 或 names"}"""
 
-        return executeSingleDelete(entityType, name, params, core)
+        return executeSingleDelete(effectiveType, name, params, core)
     }
 
     /**
@@ -1668,7 +1749,7 @@ object DeleteTool : Tool {
 object ManageTool : Tool {
     override val name = "manage"
     override val affectsData = setOf(DataType.TASK_DATA)
-    override val description = "排序操作。优先用ordered_ids精确定位，回退ordered_names。支持task/checklist/group。"
+    override val description = "排序和关联操作。action=reorder排序，action=link/unlink关联笔记和任务。优先用ordered_ids/note_id/task_id精确定位，回退ordered_names/note_name/task_name。"
 
     private val schema = """
     {
@@ -1676,7 +1757,7 @@ object ManageTool : Tool {
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["reorder"]
+                "enum": ["reorder", "link", "unlink"]
             },
             "entity_type": {
                 "type": "string",
@@ -1693,7 +1774,11 @@ object ManageTool : Tool {
                 "description": "按名称数组排序，精确优先包含兜底"
             },
             "checklist": { "type": "string", "description": "按清单名称限定范围，用于解析task和group" },
-            "group": { "type": "string", "description": "按分组名称限定范围，用于解析task" }
+            "group": { "type": "string", "description": "按分组名称限定范围，用于解析task" },
+            "note_id": { "type": "string", "description": "link/unlink：笔记ID" },
+            "note_name": { "type": "string", "description": "link/unlink：按名称查找笔记" },
+            "task_id": { "type": "string", "description": "link/unlink：任务ID" },
+            "task_name": { "type": "string", "description": "link/unlink：按名称查找任务" }
         },
         "required": ["action"]
     }
@@ -1706,8 +1791,58 @@ object ManageTool : Tool {
 
         return when (action) {
             "reorder" -> executeReorder(params, core)
+            "link" -> executeLink(params, core, unlink = false)
+            "unlink" -> executeLink(params, core, unlink = true)
             else -> """{"error":"不支持的 action: $action"}"""
         }
+    }
+
+    /**
+     * 关联/取消关联笔记和任务（双向写入）。
+     * 笔记和任务都通过 ID 或名称定位，名称解析使用 searchNotes / getTasks。
+     *
+     * @param params 参数对象，包含 note_id/note_name 和 task_id/task_name
+     * @param core NionCore 单例
+     * @param unlink true=取消关联，false=建立关联
+     */
+    private fun executeLink(params: JSONObject, core: NionCore, unlink: Boolean): String {
+        // ── 解析笔记 ID ──
+        val noteId = params.optString("note_id", "").takeIf { it.isNotEmpty() }
+            ?: run {
+                // 按名称搜索笔记
+                val noteName = params.optString("note_name", "").takeIf { it.isNotEmpty() }
+                    ?: return """{"error":"link/unlink 操作必须指定 note_id 或 note_name"}"""
+                val notes = core.searchNotes(noteName, null)
+                notes.firstOrNull()?.id
+                    ?: return """{"error":"未找到名称包含「$noteName」的笔记"}"""
+            }
+
+        // ── 解析任务 ID ──
+        val taskId = params.optString("task_id", "").takeIf { it.isNotEmpty() }
+            ?: run {
+                val taskName = params.optString("task_name", "").takeIf { it.isNotEmpty() }
+                    ?: return """{"error":"link/unlink 操作必须指定 task_id 或 task_name"}"""
+                val allTasks = core.getTasks()
+                val exact = allTasks.filter { it.name == taskName }
+                val matched = if (exact.isNotEmpty()) exact else allTasks.filter { it.name.contains(taskName) }
+                matched.firstOrNull()?.id
+                    ?: return """{"error":"未找到名称包含「$taskName」的任务"}"""
+            }
+
+        // ── 执行关联/取消关联 ──
+        if (unlink) {
+            core.unlinkNoteFromTask(noteId, taskId)
+        } else {
+            core.linkNoteToTask(noteId, taskId)
+        }
+
+        return JSONObject().apply {
+            put("success", true)
+            put("action", if (unlink) "unlink" else "link")
+            put("note_id", noteId)
+            put("task_id", taskId)
+            put("message", if (unlink) "已取消笔记与任务的关联" else "已关联笔记与任务")
+        }.toString()
     }
 
     /**
