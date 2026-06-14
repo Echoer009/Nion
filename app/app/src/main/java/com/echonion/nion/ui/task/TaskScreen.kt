@@ -297,6 +297,18 @@ fun TaskScreen(
                             onUnlinkTask = { taskToUnlinkId ->
                                 viewModel.unlinkNoteFromTask(taskId, taskToUnlinkId)
                             },
+                            // 与列表中笔记卡片共享 bounds，实现卡片放大/缩回的 morph 动画
+                            // key 与 TaskDetailOverlay 一致格式 "task_detail_$taskId"
+                            sharedElementModifier = Modifier.sharedElement(
+                                sharedContentState = rememberSharedContentState("task_detail_$taskId"),
+                                animatedVisibilityScope = this@AnimatedContent,
+                                boundsTransform = { _, _ ->
+                                    spring(
+                                        dampingRatio = 0.8f,
+                                        stiffness = Spring.StiffnessMediumLow,
+                                    )
+                                },
+                            ),
                             onDismiss = { expandedTaskId = null },
                         )
                     }

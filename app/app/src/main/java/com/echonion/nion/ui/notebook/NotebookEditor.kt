@@ -1,32 +1,31 @@
 package com.echonion.nion.ui.notebook
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Assignment
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
-import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBar
-import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -35,11 +34,10 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import com.echonion.nion.ui.task.TaskItem
 import com.echonion.nion.ui.theme.NionAlpha
 
@@ -59,6 +57,7 @@ import com.echonion.nion.ui.theme.NionAlpha
  * @param onUpdateContent 正文变更回调
  * @param onLinkTask 关联任务回调，传入任务 ID
  * @param onUnlinkTask 取消关联任务回调，传入任务 ID
+ * @param sharedElementModifier shared element 动画 modifier，与列表中笔记卡片共享 bounds 实现打开放大/关闭缩回的 morph
  * @param onDismiss 关闭编辑器回调（返回按钮或外部返回手势）
  */
 @OptIn(ExperimentalMaterial3Api::class)
@@ -71,6 +70,8 @@ fun NotebookEditor(
     onUpdateContent: (String) -> Unit,
     onLinkTask: (String) -> Unit = {},
     onUnlinkTask: (String) -> Unit = {},
+    /** shared element 动画 modifier：与列表中的笔记卡片共享 bounds，实现打开放大/关闭缩回的 morph 动画 */
+    sharedElementModifier: Modifier,
     onDismiss: () -> Unit,
 ) {
     // 正文使用 rememberSaveable，确保屏幕旋转等配置变更时内容不丢失
@@ -82,79 +83,110 @@ fun NotebookEditor(
     // 关联任务选择器对话框：true=显示，false=隐藏
     var showLinkDialog by remember { mutableStateOf(false) }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(
-            usePlatformDefaultWidth = false,
-            decorFitsSystemWindows = false,
-        ),
+    // 半透明 scrim 遮罩：morph 期间（Surface 尚未铺满）可见，提供暗化背景
+    // 点击空白区域关闭编辑器（铺满后被 Surface 完全遮挡，此回调仅在 morph 过程中可达）
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = NionAlpha.OVERLAY_SCRIM))
+            .clickable(
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss,
+            ),
+        contentAlignment = Alignment.Center,
     ) {
-        // 用 Column 包裹 Scaffold，在最顶部放一条彩色装饰条，
-        // 视觉上区分笔记编辑页和普通任务页
-        Column(modifier = Modifier.fillMaxSize()) {
-            // 顶部彩色装饰条：4dp 高的 tertiary 色，标记笔记编辑器身份
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .background(MaterialTheme.colorScheme.tertiary),
-            )
-            Scaffold(
-                modifier = Modifier.weight(1f),
+        // 全屏编辑器 Surface：通过 sharedElementModifier 与笔记卡片共享 bounds
+        // 打开时卡片放大 morph 为编辑器，关闭时编辑器缩回卡片
+        // 不透明背景，确保 morph 过程中底层列表不透出
+        Surface(
+            modifier = sharedElementModifier
+                .fillMaxSize()
+                // 消费点击事件，阻止穿透到外层 scrim 误触发 onDismiss
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                ),
+            color = MaterialTheme.colorScheme.surface,
+        ) {
+        Scaffold(
             topBar = {
-                TopAppBar(
-                    navigationIcon = {
-                        // 返回按钮：关闭编辑器
-                        IconButton(onClick = onDismiss) {
+                // 顶栏整体用 surfaceContainer 底色，与关联任务栏一致，形成统一的头部区域
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainer),
+                ) {
+                    // 取状态栏高度的约 60% 作为顶部间距（不是全量 statusBarsPadding），
+                    // 让标题更贴近屏幕顶部但仍避开状态栏图标
+                    val density = LocalDensity.current
+                    val compactTopPad = with(density) {
+                        (WindowInsets.statusBars.getTop(density) * 3 / 5).toDp()
+                    }
+                    // 标题行：用 Box 替代 IconButton 消除 48dp 最小触摸目标限制
+                    // Row 实际高度由 Box(32dp) 决定，标题中心仅离屏幕顶 compactTopPad + 16dp
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = compactTopPad)
+                            .padding(start = 4.dp, end = 16.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        // 返回按钮：自定义 Box 避免 IconButton 的 48dp minimumInteractiveComponentSize 约束
+                        Box(
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clickable(
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                    onClick = onDismiss,
+                                ),
+                            contentAlignment = Alignment.Center,
+                        ) {
                             Icon(
                                 Icons.AutoMirrored.Filled.ArrowBack,
                                 contentDescription = "返回",
+                                modifier = Modifier.size(20.dp),
                             )
                         }
-                    },
-                    title = {
-                        // 可编辑标题：透明背景无边框的 TextField，实时回调持久化
-                        OutlinedTextField(
+                        // 可编辑标题：BasicTextField 无最小高度约束，文字在 Row 内垂直居中
+                        BasicTextField(
                             value = title,
                             onValueChange = {
                                 title = it
                                 onUpdateTitle(it)
                             },
-                            modifier = Modifier.fillMaxWidth(),
-                            placeholder = {
-                                Text(
-                                    "无标题",
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
-                                )
-                            },
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(start = 12.dp),
+                            singleLine = true,
                             textStyle = MaterialTheme.typography.titleMedium.copy(
                                 fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
                             ),
-                            singleLine = true,
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedContainerColor = Color.Transparent,
-                                unfocusedContainerColor = Color.Transparent,
-                                focusedBorderColor = Color.Transparent,
-                                unfocusedBorderColor = Color.Transparent,
-                                cursorColor = MaterialTheme.colorScheme.tertiary,
-                            ),
-                            shape = RoundedCornerShape(0.dp),
+                            cursorBrush = SolidColor(MaterialTheme.colorScheme.tertiary),
+                            decorationBox = { innerTextField ->
+                                // 占位符：标题为空时显示灰色提示
+                                if (title.isEmpty()) {
+                                    Text(
+                                        "无标题",
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                    )
+                                }
+                                innerTextField()
+                            },
                         )
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                    ),
-                )
-            },
-            bottomBar = {
-                // 底部工具栏：关联任务区域
-                LinkedTasksBar(
-                    linkedTasks = linkedTasks,
-                    onAddLink = { showLinkDialog = true },
-                    onUnlinkTask = onUnlinkTask,
-                )
+                    }
+                    // 关联任务栏：紧接标题下方，元信息集中在顶部
+                    LinkedTasksBar(
+                        linkedTasks = linkedTasks,
+                        onAddLink = { showLinkDialog = true },
+                        onUnlinkTask = onUnlinkTask,
+                    )
+                }
             },
         ) { innerPadding ->
             // Markdown 实时编辑器：占满剩余空间，IME padding 确保键盘不遮挡
@@ -169,7 +201,7 @@ fun NotebookEditor(
                     .padding(innerPadding)
                     .imePadding(),
             )
-            } // 关闭 Scaffold → Column
+            } // 关闭 Scaffold 内容 lambda → Surface → Box
         }
     }
 
