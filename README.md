@@ -68,7 +68,6 @@
 <p align="center">
   <img src="docs/gifs/和伙伴第一次打招呼.gif" width="260" alt="第一次打招呼">
   <img src="docs/gifs/伙伴界面介绍.gif" width="260" alt="伙伴界面介绍">
-  <img src="docs/gifs/不同界面都可呼出伙伴,不同界面有不同的侧界面.gif" width="260" alt="不同界面呼出伙伴">
 </p>
 
 让我帮你换个主题色也是一句话的事～
