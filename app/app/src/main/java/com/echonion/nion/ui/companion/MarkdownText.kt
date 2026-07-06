@@ -76,6 +76,12 @@ private const val TAG = "MarkdownText"
  * @param modifier 修饰符
  * @param style    普通文本的文字样式
  * @param stickers 可用的表情包列表，用于将 <标签名> 渲染为行内图片
+ * @param tableSharedModifier 为每个表格生成 sharedElement modifier 的函数，
+ *        参数为该表格在消息内的序号（0-based）。由外层（CompanionSidebar）
+ *        注入，用 rememberSharedContentState("md_table_${messageId}_$idx") 实现
+ *        表格从气泡预览态到全屏 overlay 的 morph 动画。默认值表示无 morph（悬浮窗等场景）。
+ * @param onTableClick 用户点击某个表格时触发，参数为该表格在消息内的序号（0-based）。
+ *        外层据此切换 AnimatedContent 到全屏 overlay 分支。
  */
 @Composable
 fun MarkdownText(
@@ -86,6 +92,8 @@ fun MarkdownText(
         lineHeight = 22.sp,
     ),
     stickers: List<StickerData> = emptyList(),
+    tableSharedModifier: @Composable (tableIndex: Int) -> Modifier = { Modifier },
+    onTableClick: (tableIndex: Int) -> Unit = {},
 ) {
     val textColor = style.color
     // 高亮背景色：primary 色 12% 透明度，跟随主题变化
@@ -102,6 +110,8 @@ fun MarkdownText(
     }
 
     Column(modifier = modifier) {
+        // 表格在消息内的独立序号：仅对 TableBlock 递增，用作 sharedElement 的 key 组成部分
+        var tableIndex = 0
         for ((index, block) in blocks.withIndex()) {
             when (block) {
                 is MdBlock.Header -> HeaderBlock(block, textColor, stickerMap, highlightColor)
@@ -109,7 +119,22 @@ fun MarkdownText(
                 is MdBlock.ListBlock -> ListBlockBlock(block, style, textColor, stickerMap, highlightColor)
                 is MdBlock.TaskListBlock -> TaskListBlockBlock(block, style, textColor, stickerMap, highlightColor)
                 is MdBlock.Blockquote -> BlockquoteBlock(block, style, textColor, stickerMap, highlightColor)
-                is MdBlock.TableBlock -> TableBlockBlock(block, style, textColor, stickerMap, highlightColor)
+                is MdBlock.TableBlock -> {
+                    // 捕获当前表格的序号（自增），用于 sharedElement key 匹配
+                    val currentTableIndex = tableIndex
+                    tableIndex++
+                    // 预览态：紧凑表格（maxLines 截断），点击触发全屏展开 morph
+                    TableGrid(
+                        block = block,
+                        baseStyle = style,
+                        textColor = textColor,
+                        stickerMap = stickerMap,
+                        highlightColor = highlightColor,
+                        compact = true,
+                        modifier = tableSharedModifier(currentTableIndex)
+                            .clickable { onTableClick(currentTableIndex) },
+                    )
+                }
                 is MdBlock.Paragraph -> ParagraphBlock(block, style, textColor, stickerMap, highlightColor)
                 is MdBlock.HorizontalRule -> HorizontalRuleBlock()
             }
@@ -152,8 +177,11 @@ private val PARAGRAPH_HEADER_REGEX = Regex("""^(#{1,6}\s)""")
 /**
  * Markdown 块级元素的数据模型。
  * 每种块类型对应一个子类，包含渲染所需的全部数据。
+ *
+ * 注意：声明为 internal 以便表格展开浮层（TableFullscreenOverlay）能接收
+ * MdBlock.TableBlock 数据 —— 该浮层定义在 CompanionSidebar.kt（同 module）。
  */
-private sealed class MdBlock {
+internal sealed class MdBlock {
     /** 标题块：level 为 1-6，text 为标题文字 */
     data class Header(val level: Int, val text: String) : MdBlock()
 
@@ -253,6 +281,26 @@ private fun parseBlocks(markdown: String): List<MdBlock> {
         }
     }
     return blocks
+}
+
+/**
+ * 从 Markdown 文本中提取所有表格块。
+ *
+ * 用于表格全屏展开浮层：当用户点击某条消息里的第 N 个表格时，
+ * 外层（CompanionSidebar）需重新解析该消息原文以获取目标 TableBlock，
+ * 渲染到全屏 overlay 中（因为列表分支与 overlay 分支在 AnimatedContent 中互斥，
+ * 无法直接从列表组件传递表格数据）。
+ *
+ * @param content Markdown 原始文本
+ * @return 按出现顺序排列的表格块列表；解析失败返回空列表
+ */
+internal fun extractTableBlocks(content: String): List<MdBlock.TableBlock> {
+    return try {
+        parseBlocks(content).filterIsInstance<MdBlock.TableBlock>()
+    } catch (e: Exception) {
+        Log.e(TAG, "extractTableBlocks parse crash. ${content.take(200)}", e)
+        emptyList()
+    }
 }
 
 // ──────────── 块级解析子函数 ────────────
@@ -653,17 +701,32 @@ private fun BlockquoteBlock(
 }
 
 /**
- * 渲染表格。
- * 表头行背景加粗，与数据行之间用分割线分隔。
- * 每列使用 weight(1f) 等宽分配，支持对齐方式和文本溢出省略。
+ * 表格网格渲染 —— 预览态（紧凑）与全屏展开态（完整）共用的核心渲染组件。
+ *
+ * 两种形态的差异（通过 compact 控制）：
+ * - compact = true（气泡内预览）：等宽列 + 表头 maxLines=4 / 数据 maxLines=5 + Ellipsis 省略，
+ *   长内容截断以保持气泡紧凑。点击触发全屏展开。
+ * - compact = false（全屏 overlay）：等宽列 + maxLines=Int.MAX_VALUE + Clip（不省略），
+ *   单元格内容完整换行显示，信息零丢失。超高时由 overlay 外层竖滚承载。
+ *
+ * @param block          表格数据块（header / alignments / rows）
+ * @param baseStyle      基础文字样式
+ * @param textColor      文本颜色
+ * @param stickerMap     标签名 → 表情包的映射，用于单元格内联表情
+ * @param highlightColor ==高亮== 背景色
+ * @param compact        true=预览态截断，false=展开态完整
+ * @param modifier       外部修饰符：预览态用于挂 sharedElement + clickable，
+ *                       展开态用于挂 sharedElement（全屏 overlay 处）
  */
 @Composable
-private fun TableBlockBlock(
+internal fun TableGrid(
     block: MdBlock.TableBlock,
     baseStyle: TextStyle,
     textColor: androidx.compose.ui.graphics.Color,
     stickerMap: Map<String, StickerData> = emptyMap(),
     highlightColor: androidx.compose.ui.graphics.Color = androidx.compose.ui.graphics.Color.Transparent,
+    compact: Boolean = true,
+    modifier: Modifier = Modifier,
 ) {
     val header = block.header
     val rows = block.rows
@@ -674,7 +737,7 @@ private fun TableBlockBlock(
         shape = RoundedCornerShape(8.dp),
         color = MaterialTheme.colorScheme.surfaceContainerLow,
         tonalElevation = 1.dp,
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
     ) {
         Column {
             // ── 表头行：加粗 + 深色背景 ──
@@ -696,8 +759,9 @@ private fun TableBlockBlock(
                         color = textColor,
                         textAlign = getCellAlignment(block.alignments, colIndex),
                         softWrap = true,
-                        maxLines = 4,
-                        overflow = TextOverflow.Ellipsis,
+                        // 预览态限 4 行省略；展开态完整显示不截断
+                        maxLines = if (compact) 4 else Int.MAX_VALUE,
+                        overflow = if (compact) TextOverflow.Ellipsis else TextOverflow.Clip,
                     )
                 }
             }
@@ -717,8 +781,9 @@ private fun TableBlockBlock(
                                 .weight(1f)
                                 .padding(horizontal = 10.dp, vertical = 10.dp),
                             textAlign = getCellAlignment(block.alignments, colIndex),
-                            maxLines = 5,
-                            overflow = TextOverflow.Ellipsis,
+                            // 预览态限 5 行省略；展开态完整显示不截断
+                            maxLines = if (compact) 5 else Int.MAX_VALUE,
+                            overflow = if (compact) TextOverflow.Ellipsis else TextOverflow.Clip,
                         )
                     }
                 }

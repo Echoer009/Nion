@@ -11,6 +11,8 @@ import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibilityScope
+import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
@@ -111,12 +113,14 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.compose.BackHandler
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -2241,9 +2245,11 @@ private fun ChatContent(
     }
 
     // 新消息到达时自动滚动到底部（仅面板打开时）
-    // 用户发消息或 AI 回复完成后，无条件滚到底部
+    // 仅用户发送消息时滚到底部；AI 回复完成（流式结束）不再强制跳转，
+    // 流式过程中的跟随滚动已由下方 LaunchedEffect(streamingText) 处理，
+    // 结束时再 animateScrollToItem 跳一次会产生突兀的动画
     LaunchedEffect(messages.size) {
-        if (messages.size > 0 && isVisible) {
+        if (messages.size > 0 && isVisible && messages.last().isFromUser) {
             listState.animateScrollToItem(listState.layoutInfo.totalItemsCount - 1)
         }
     }
@@ -2274,11 +2280,46 @@ private fun ChatContent(
         }
     }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(vertical = 24.dp, horizontal = 16.dp),
-    ) {
+    // 当前展开的表格标识：null=未展开，Pair(messageId, tableIndex)=某条消息内第 N 个表格
+    // 提升到 AnimatedContent 外，确保 morph 切换分支时状态不丢失
+    var expandedTable by remember { mutableStateOf<Pair<String, Int>?>(null) }
+
+    // 记录已播放入场动画的消息 id（提升到 AnimatedContent 外，跨表格 overlay 切换保留）。
+    // 修复：表格 overlay 收回时 AnimatedContent 会重建列表分支，若消息入场动画重新播放，
+    // scaleIn/fadeIn 会使表格消息的 bounds 从 scale 0.9 生长，干扰 sharedElement 的 morph
+    // 目标，导致退出时表格"覆盖"在列表上而非干净缩回气泡。用此集合确保入场动画仅对
+    // 真正新加入的消息播放，已显示过的消息在重建时立即以最终状态呈现。
+    val animatedMessageIds = remember { hashSetOf<String>() }
+
+    // 表格全屏展开 overlay 容器：SharedTransitionLayout + AnimatedContent 互斥两分支。
+    // 复刻 TaskScreen.kt 的任务详情 morph 范式 —— 源（气泡内预览表格）与目标（全屏 overlay
+    // 内的完整表格）挂同一个 sharedElement key（md_table_${msgId}_$idx），配合 spring
+    // boundsTransform 实现表格从气泡位置弹性放大到全屏的变形动画。
+    SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
+        AnimatedContent(
+            targetState = expandedTable,
+            transitionSpec = {
+                // 展开方向：overlay 立即出现不淡入（避免 scrim 透明期透出底层白色列表），
+                // 仅让聊天界面淡出
+                if (targetState != null) {
+                    (EnterTransition.None togetherWith fadeOut(tween(250, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                } else {
+                    // 收回方向：聊天界面快速淡入，overlay 缓慢淡出
+                    (fadeIn(tween(250, easing = FastOutSlowInEasing))
+                        togetherWith fadeOut(tween(400, easing = FastOutSlowInEasing)))
+                        .using(SizeTransform(clip = false))
+                }
+            },
+            label = "tableExpand",
+        ) { tableTarget ->
+            if (tableTarget == null) {
+                // ── 列表分支：正常聊天界面（ChatHeader + 消息列表 + 输入框）──
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(vertical = 24.dp, horizontal = 16.dp),
+                ) {
         // 顶部标题栏：头像（点击编辑） + 伙伴名字 + 历史/切换按钮
         ChatHeader(
             companionName = viewModel.companionName,
@@ -2316,13 +2357,18 @@ private fun ChatContent(
             items(messages, key = { it.id }) { message ->
                 // 当前消息是否被长按选中
                 val isSelected = selectedMessageId == message.id
-                // 消息入场动画：淡入 + 缩放
+                // 仅首次出现的消息播放入场动画：表格 overlay 收回时 AnimatedContent 重建列表，
+                // 若所有消息重新播放 scaleIn/fadeIn 会干扰 sharedElement 表格的 bounds，导致
+                // morph 退出时表格"覆盖"在列表上。已记录过的消息直接以最终状态显示，保证
+                // sharedElement 退出动画干净缩回气泡。
+                val isFirstAppearance = message.id !in animatedMessageIds
+                LaunchedEffect(message.id) { animatedMessageIds.add(message.id) }
                 androidx.compose.animation.AnimatedVisibility(
                     visible = true,
-                    enter = fadeIn(tween(300)) + scaleIn(
+                    enter = if (isFirstAppearance) fadeIn(tween(300)) + scaleIn(
                         initialScale = 0.9f,
                         animationSpec = tween(350),
-                    ),
+                    ) else EnterTransition.None,
                 ) {
                     MessageBubble(
                         message,
@@ -2347,6 +2393,11 @@ private fun ChatContent(
                             viewModel.deleteMessage(message.id)
                             selectedMessageId = null
                         },
+                        // 表格 morph 动画作用域：来自外层 SharedTransitionLayout + AnimatedContent
+                        sharedTransitionScope = this@SharedTransitionLayout,
+                        animatedVisibilityScope = this@AnimatedContent,
+                        // 点击表格回调：记录展开的消息 ID + 表格序号，触发 AnimatedContent 切到 overlay 分支
+                        onTableClick = { tableIdx -> expandedTable = message.id to tableIdx },
                     )
                 }
             }
@@ -2414,7 +2465,42 @@ private fun ChatContent(
             },
             onRemoveImage = { uri -> viewModel.removePendingImage(uri) },
         )
-    }
+                }  // Column 结束（列表分支内的聊天界面 Column）
+                }  // if (tableTarget == null) 列表分支结束
+
+                // ── overlay 分支：全屏展开表格，与列表分支的预览表格共用 sharedElement key ──
+                else {
+                    val (msgId, tableIdx) = tableTarget
+                    // 从消息原文重新解析目标表格：列表分支移除组合树后无法直接传递数据，
+                    // 这里用 extractTableBlocks 独立解析（开销极小，单条消息文本）
+                    val block = remember(msgId, tableIdx) {
+                        messages.find { it.id == msgId }?.text?.let { extractTableBlocks(it) }
+                    }?.getOrNull(tableIdx)
+                    if (block != null) {
+                        TableFullscreenOverlay(
+                            block = block,
+                            // 与列表分支预览表格共用 key，触发 spring morph 动画
+                            sharedElementModifier = Modifier.sharedElement(
+                                sharedContentState = rememberSharedContentState("md_table_${msgId}_$tableIdx"),
+                                animatedVisibilityScope = this@AnimatedContent,
+                                boundsTransform = { _, _ ->
+                                    spring(
+                                        dampingRatio = 0.8f,
+                                        stiffness = Spring.StiffnessMediumLow,
+                                    )
+                                },
+                            ),
+                            baseStyle = MaterialTheme.typography.bodyMedium.copy(
+                                fontSize = 15.sp,
+                                lineHeight = 22.sp,
+                            ),
+                            stickers = viewModel.stickers,
+                            onDismiss = { expandedTable = null },
+                        )
+                    }
+                }
+            }  // AnimatedContent 结束
+        }  // SharedTransitionLayout 结束
 }
 
 /**
@@ -2560,6 +2646,10 @@ private fun MessageActionBar(
  * @param onCopy 点击复制按钮时触发，传入消息 ID
  * @param onRetry 点击重试按钮时触发，传入消息 ID（仅 AI 消息有效）
  * @param onDelete 点击删除按钮时触发，传入消息 ID
+ * @param sharedTransitionScope SharedTransitionLayout 提供的作用域，用于表格 sharedElement morph
+ * @param animatedVisibilityScope AnimatedContent 提供的作用域，用于表格 sharedElement morph
+ * @param onTableClick 用户点击 AI 消息里的表格时触发，参数为该表格在消息内的序号（0-based）；
+ *        外层据此切换到全屏 overlay 分支展示完整表格
  */
 @Composable
 private fun MessageBubble(
@@ -2570,6 +2660,11 @@ private fun MessageBubble(
     onCopy: () -> Unit = {},
     onRetry: () -> Unit = {},
     onDelete: () -> Unit = {},
+    // 表格全屏展开相关：由 CompanionSidebar 的 SharedTransitionLayout + AnimatedContent 注入。
+    // 为可空+默认值，保持 MessageBubble 在其它潜在调用点（无 morph 需求）的可用性
+    sharedTransitionScope: SharedTransitionScope? = null,
+    animatedVisibilityScope: AnimatedVisibilityScope? = null,
+    onTableClick: (tableIndex: Int) -> Unit = {},
 ) {
     val isUser = message.isFromUser
     // 工具消息：简洁状态行，不渲染气泡，不支持长按操作
@@ -2718,6 +2813,31 @@ private fun MessageBubble(
                                 color = textColor,
                             ),
                             stickers = stickers,
+                            // 为每个表格生成 sharedElement modifier：仅当 sts + avs 都注入时
+                            // 才挂 morph 动画（聊天列表场景），悬浮窗等场景不注入则返回普通 Modifier。
+                            // key 格式 md_table_${messageId}_$tableIndex 与 overlay 分支保持一致，
+                            // 两处挂同一 key 即可触发 spring 弹性变形。
+                            tableSharedModifier = { tableIndex ->
+                                if (sharedTransitionScope != null && animatedVisibilityScope != null) {
+                                    with(sharedTransitionScope) {
+                                        Modifier.sharedElement(
+                                            sharedContentState = rememberSharedContentState(
+                                                "md_table_${message.id}_$tableIndex"
+                                            ),
+                                            animatedVisibilityScope = animatedVisibilityScope,
+                                            boundsTransform = { _, _ ->
+                                                spring(
+                                                    dampingRatio = 0.8f,
+                                                    stiffness = Spring.StiffnessMediumLow,
+                                                )
+                                            },
+                                        )
+                                    }
+                                } else {
+                                    Modifier
+                                }
+                            },
+                            onTableClick = onTableClick,
                         )
                     }
                 }
@@ -2738,6 +2858,109 @@ private fun MessageBubble(
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
         )
+    }
+}
+
+/**
+ * 表格全屏展开浮层 —— 用户点击 AI 消息里的表格后，表格 morph 放大到全屏显示完整内容。
+ *
+ * 配合 CompanionSidebar 的 SharedTransitionLayout + AnimatedContent 工作：
+ * - [sharedElementModifier] 由调用方构造（挂全屏表格根容器），与气泡内预览表格共用
+ *   `md_table_${msgId}_$idx` key，触发 spring 弹性变形动画（从气泡位置放大到全屏，关闭时缩回）。
+ * - 内部用 MarkdownText.TableGrid(compact=false) 渲染完整表格（maxLines 无限，信息零丢失），
+ *   外层竖向滚动承载超高表格。
+ *
+ * 关闭方式（三选一）：右上角 ✕ 按钮 / 点击表格外的 scrim 暗化区 / 系统返回键（BackHandler）。
+ *
+ * @param block                 要展示的表格数据块
+ * @param sharedElementModifier 调用方构造的 sharedElement modifier（挂全屏表格根容器）
+ * @param baseStyle             表格基础文字样式（应与气泡内预览一致以保证 morph 视觉连贯）
+ * @param stickers              表情包列表（单元格内联表情渲染用）
+ * @param onDismiss             用户关闭浮层时触发（点击 ✕ / scrim / 返回键）
+ */
+@Composable
+private fun TableFullscreenOverlay(
+    block: MdBlock.TableBlock,
+    sharedElementModifier: Modifier,
+    baseStyle: TextStyle = MaterialTheme.typography.bodyMedium,
+    stickers: List<StickerData> = emptyList(),
+    onDismiss: () -> Unit,
+) {
+    // 支持系统返回键关闭浮层
+    BackHandler(onBack = onDismiss)
+
+    // 表情包映射 + 高亮色，供 TableGrid 内联解析使用
+    val stickerMap = remember(stickers) { stickers.associateBy { it.tag } }
+    val textColor = baseStyle.color
+    val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = NionAlpha.BG_HIGHLIGHT)
+
+    // 全屏 scrim 背景：半透明遮罩 + 居中表格卡片
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f))
+            .clickable(
+                // 点击 scrim 暗化区（表格卡片外）关闭浮层
+                interactionSource = remember { MutableInteractionSource() },
+                indication = null,
+                onClick = onDismiss,
+            ),
+        contentAlignment = Alignment.Center,
+    ) {
+        // 表格卡片容器：挂 sharedElement（morph 动画的目标），从气泡预览位置变形而来。
+        // 用 Surface 提供圆角 + tonal elevation + 阴影，增强"浮于内容之上"的层次感
+        Surface(
+            shape = RoundedCornerShape(16.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 3.dp,
+            shadowElevation = 8.dp,
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth()
+                .fillMaxHeight(0.85f) // 限制最大高度，预留顶部关闭按钮与呼吸空间
+                .then(sharedElementModifier)
+                .clickable(
+                    // 拦截卡片内部点击事件，阻止冒泡到 scrim 的关闭逻辑
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = {},
+                ),
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                // 关闭按钮：右上角，始终可点
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(4.dp)
+                        .size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "关闭表格",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+
+                // 表格内容：compact=false 完整渲染（无 maxLines 截断），
+                // 外层竖向滚动承载行数很多的超高表格
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(top = 8.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    TableGrid(
+                        block = block,
+                        baseStyle = baseStyle,
+                        textColor = textColor,
+                        stickerMap = stickerMap,
+                        highlightColor = highlightColor,
+                        compact = false,
+                    )
+                }
+            }
+        }
     }
 }
 

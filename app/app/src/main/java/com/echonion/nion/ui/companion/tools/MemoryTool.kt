@@ -35,7 +35,8 @@ object MemoryTool : Tool {
     override val affectsData = setOf(DataType.PREFERENCES, DataType.MEMORIES)
     override val description = "记忆工具。scope=preference: AI行为偏好；scope=fact: 用户事实。" +
         "action=add需content+category/list/update仅fact/remove需id。" +
-        "preference分类: style/behavior/format/other；fact分类: identity/study/work/hobby/habit/health/emotion/goal/schedule/social/location/pet/context/other。"
+        "preference分类: style/behavior/format/other；fact分类: identity/study/work/hobby/habit/health/emotion/goal/schedule/social/location/pet/context/other。" +
+        "应主动、积极地记住用户的一切,无需等用户明确要求;同类已有相关记忆优先 update,不要重复新增。"
 
     /** preference scope 的 setting key，用于在 Rust 层 settings 表中读写偏好数据 */
     const val PREFS_SETTING_KEY = "companion_user_preferences"
