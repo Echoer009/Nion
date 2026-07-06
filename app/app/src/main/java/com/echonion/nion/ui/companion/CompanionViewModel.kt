@@ -20,6 +20,7 @@ import com.echonion.nion.ui.companion.tools.DataType
 import com.echonion.nion.ui.companion.tools.ToolPhrasePool
 import com.echonion.nion.preset.CharacterPreset
 import com.echonion.nion.preset.CharacterPresetInitializer
+import com.echonion.nion.util.HolidayUtils
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
@@ -1570,7 +1571,8 @@ class CompanionViewModel(
             messages = messages + userMessage
             requestSave()
 
-            val timeSuffix = "\n\n[时间：${java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm"))}]"
+            // 时间后缀：含年月日、星期、节日、节气，拼到 user 消息末尾（不进 system prompt 以保前缀缓存）
+            val timeSuffix = HolidayUtils.buildTimeSuffix()
 
             conversationHistory.add(JSONObject().apply {
                 put("role", "user")

@@ -121,6 +121,9 @@ dependencies {
     // Jsoup —— HTML 解析，用于 DDG 搜索结果抓取
     implementation("org.jsoup:jsoup:1.18.3")
 
+    // tyme4kt —— 农历/公历节日、二十四节气查询，用于 LLM 上下文时间后缀的日期与节日标注
+    implementation("cn.6tail:tyme4kt:1.5.0")
+
     // Markwon —— Markdown 渲染引擎，用于笔记型清单的实时 Markdown 编辑和预览
     implementation("io.noties.markwon:core:4.6.2")
     implementation("io.noties.markwon:editor:4.6.2") // 实时编辑高亮
