@@ -688,8 +688,6 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_linked_tasks(
     ): Short
-    external fun uniffi_nion_core_checksum_method_nioncore_get_overdue_daily_tasks(
-    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_setting(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_get_sticker_by_tag(
@@ -827,8 +825,6 @@ external fun uniffi_nion_core_fn_method_nioncore_get_groups_by_checklist(`ptr`: 
 external fun uniffi_nion_core_fn_method_nioncore_get_linked_notes(`ptr`: Long,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_get_linked_tasks(`ptr`: Long,`noteId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
-): RustBuffer.ByValue
-external fun uniffi_nion_core_fn_method_nioncore_get_overdue_daily_tasks(`ptr`: Long,`beforeDate`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_get_setting(`ptr`: Long,`key`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
@@ -1087,9 +1083,6 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_linked_tasks() != 26066.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_nion_core_checksum_method_nioncore_get_overdue_daily_tasks() != 28623.toShort()) {
-        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
-    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_setting() != 36220.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1111,7 +1104,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_tasks_by_category() != 40304.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_nion_core_checksum_method_nioncore_get_tasks_due_today() != 2268.toShort()) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_get_tasks_due_today() != 60780.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_get_tasks_for_date() != 30602.toShort()) {
@@ -1697,13 +1690,6 @@ public interface NionCoreInterface {
      */
     fun `getLinkedTasks`(`noteId`: kotlin.String): List<TaskData>
     
-    /**
-     * 获取所有过期的每日任务实例
-     * 新模型：查找 recurrence_rule='daily'、status='todo'、reminder 日期 < before_date 的任务
-     * 这些是未完成的每日任务实例（被跳过的日期），按过期日期降序排列
-     */
-    fun `getOverdueDailyTasks`(`beforeDate`: kotlin.String): List<OverdueDailyTask>
-    
     fun `getSetting`(`key`: kotlin.String): kotlin.String?
     
     /**
@@ -1734,8 +1720,10 @@ public interface NionCoreInterface {
     /**
      * 获取今日需关注的任务（带每日任务完成状态）：
      * 1. reminder 日期部分 = 今天的任务（普通任务，看 status 判断完成）
-     * 2. 设置了每日循环（recurrence_rule='daily'）的任务
-     * 每日任务的完成状态由 daily_completions 表决定，不看 tasks.status
+     * 2. 设置了每日循环（recurrence_rule='daily'）的旧模板任务（reminder IS NULL，迁移后应不再出现）
+     * 3. 过期的每日任务实例：recurrence_rule='daily' AND status='todo' AND reminder 日期 < date。
+     * 这些是历史未完成的每日实例，合并进今日列表由 UI 红色标记后逐天清算，
+     * 完成后（status 变 done）不再被本查询返回。
      *
      * 参数 date: "YYYY-MM-DD" 格式的日期字符串
      * 返回：跨所有清单聚合的顶层任务（parent_id IS NULL），附带当日完成状态
@@ -2413,25 +2401,6 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     
 
     
-    /**
-     * 获取所有过期的每日任务实例
-     * 新模型：查找 recurrence_rule='daily'、status='todo'、reminder 日期 < before_date 的任务
-     * 这些是未完成的每日任务实例（被跳过的日期），按过期日期降序排列
-     */
-    @Throws(NionException::class)override fun `getOverdueDailyTasks`(`beforeDate`: kotlin.String): List<OverdueDailyTask> {
-            return FfiConverterSequenceTypeOverdueDailyTask.lift(
-    callWithHandle {
-    uniffiRustCallWithError(NionException) { _status ->
-    UniffiLib.uniffi_nion_core_fn_method_nioncore_get_overdue_daily_tasks(
-        it,
-        FfiConverterString.lower(`beforeDate`),_status)
-}
-    }
-    )
-    }
-    
-
-    
     @Throws(NionException::class)override fun `getSetting`(`key`: kotlin.String): kotlin.String? {
             return FfiConverterOptionalString.lift(
     callWithHandle {
@@ -2546,8 +2515,10 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     /**
      * 获取今日需关注的任务（带每日任务完成状态）：
      * 1. reminder 日期部分 = 今天的任务（普通任务，看 status 判断完成）
-     * 2. 设置了每日循环（recurrence_rule='daily'）的任务
-     * 每日任务的完成状态由 daily_completions 表决定，不看 tasks.status
+     * 2. 设置了每日循环（recurrence_rule='daily'）的旧模板任务（reminder IS NULL，迁移后应不再出现）
+     * 3. 过期的每日任务实例：recurrence_rule='daily' AND status='todo' AND reminder 日期 < date。
+     * 这些是历史未完成的每日实例，合并进今日列表由 UI 红色标记后逐天清算，
+     * 完成后（status 变 done）不再被本查询返回。
      *
      * 参数 date: "YYYY-MM-DD" 格式的日期字符串
      * 返回：跨所有清单聚合的顶层任务（parent_id IS NULL），附带当日完成状态
@@ -3564,53 +3535,6 @@ public object FfiConverterTypeGroupData: FfiConverterRustBuffer<GroupData> {
 
 
 /**
- * 过期的每日任务 —— 某个每日模板在某个历史日期没有完成记录
- */
-data class OverdueDailyTask (
-    /**
-     * 原始任务数据（模板）
-     */
-    var `task`: TaskData
-    , 
-    /**
-     * 哪一天过期的，格式 "YYYY-MM-DD"
-     */
-    var `overdueDate`: kotlin.String
-    
-){
-    
-
-    
-
-    
-    companion object
-}
-
-/**
- * @suppress
- */
-public object FfiConverterTypeOverdueDailyTask: FfiConverterRustBuffer<OverdueDailyTask> {
-    override fun read(buf: ByteBuffer): OverdueDailyTask {
-        return OverdueDailyTask(
-            FfiConverterTypeTaskData.read(buf),
-            FfiConverterString.read(buf),
-        )
-    }
-
-    override fun allocationSize(value: OverdueDailyTask) = (
-            FfiConverterTypeTaskData.allocationSize(value.`task`) +
-            FfiConverterString.allocationSize(value.`overdueDate`)
-    )
-
-    override fun write(value: OverdueDailyTask, buf: ByteBuffer) {
-            FfiConverterTypeTaskData.write(value.`task`, buf)
-            FfiConverterString.write(value.`overdueDate`, buf)
-    }
-}
-
-
-
-/**
  * 表情包 —— 用户上传的表情图片，AI 可在回复中用 <标签名> 引用
  */
 data class StickerData (
@@ -4305,34 +4229,6 @@ public object FfiConverterSequenceTypeGroupData: FfiConverterRustBuffer<List<Gro
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeGroupData.write(it, buf)
-        }
-    }
-}
-
-
-
-
-/**
- * @suppress
- */
-public object FfiConverterSequenceTypeOverdueDailyTask: FfiConverterRustBuffer<List<OverdueDailyTask>> {
-    override fun read(buf: ByteBuffer): List<OverdueDailyTask> {
-        val len = buf.getInt()
-        return List<OverdueDailyTask>(len) {
-            FfiConverterTypeOverdueDailyTask.read(buf)
-        }
-    }
-
-    override fun allocationSize(value: List<OverdueDailyTask>): ULong {
-        val sizeForLength = 4UL
-        val sizeForItems = value.map { FfiConverterTypeOverdueDailyTask.allocationSize(it) }.sum()
-        return sizeForLength + sizeForItems
-    }
-
-    override fun write(value: List<OverdueDailyTask>, buf: ByteBuffer) {
-        buf.putInt(value.size)
-        value.iterator().forEach {
-            FfiConverterTypeOverdueDailyTask.write(it, buf)
         }
     }
 }

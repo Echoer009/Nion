@@ -29,7 +29,6 @@ import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import uniffi.nion_core.NionCore
 import uniffi.nion_core.TaskData
-import uniffi.nion_core.OverdueDailyTask
 
 @Stable
 data class TaskItem(
@@ -177,10 +176,6 @@ class TaskViewModel(
         }
     }
 
-    /** 过期的每日任务列表（所有历史未完成的每日任务），仅在"今天"视图中加载 */
-    var overdueDailyTasks by mutableStateOf<List<OverdueDailyTask>>(emptyList())
-        private set
-
     val isSelectionMode: Boolean by derivedStateOf { selectedTaskIds.isNotEmpty() }
 
     /** 当前正在执行的刷新协程，用于 cancelPrevious 防止并发刷新导致旧数据覆盖新数据 */
@@ -303,10 +298,6 @@ class TaskViewModel(
                 }
             }
             tasks = loadedTasks
-            // "今天"视图同时加载过期每日任务
-            if (activeChecklistId == TODAY_ID) {
-                withContext(Dispatchers.IO) { loadOverdueDailyTasks() }
-            }
         } catch (e: Exception) {
             onError("加载任务失败: ${e.message}")
         }
@@ -345,13 +336,6 @@ class TaskViewModel(
                     }
                 }
                 tasks = loadedTasks
-                // "今天"视图同时加载过期每日任务
-                if (id == TODAY_ID) {
-                    withContext(Dispatchers.IO) { loadOverdueDailyTasks() }
-                } else {
-                    // 非"今天"视图清空过期列表
-                    overdueDailyTasks = emptyList()
-                }
                 scheduleRefreshCounts()
             } catch (e: Exception) {
                 onError("切换清单失败: ${e.message}")
@@ -495,48 +479,6 @@ class TaskViewModel(
     }
 
     /**
-     * 完成或取消完成过期每日任务的某一天（新模型：实例化）。
-     * 过期任务是一个独立的任务实例，直接用 completeDailyTaskInstance 完成
-     * （会自动创建下一天的实例）或用 uncompleteDailyTaskInstance 取消。
-     * @param taskId 过期每日任务实例的 ID
-     * @param date 该实例的日期（从 overdueDate 获取）
-     * @param isCompleted 当前是否已完成（true = 要取消完成，false = 要标记完成）
-     */
-    fun toggleOverdueDailyDone(taskId: String, date: String, isCompleted: Boolean) {
-        viewModelScope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    if (isCompleted) {
-                        // 取消完成：恢复任务，删除明天自动生成的实例
-                        val result = core.uncompleteDailyTaskInstance(taskId)
-                        // 恢复原任务的提醒闹钟
-                        scheduleReminderIfNeeded(result)
-                    } else {
-                        // 完成：标记 done，自动创建明天的实例
-                        val result = core.completeDailyTaskInstance(taskId)
-                        // 取消已完成任务的提醒
-                        ReminderStore.resetTriggerCount(app, taskId)
-                        ReminderScheduler.cancelReminder(app, taskId)
-                        NotificationHelper.dismissNotification(app, taskId)
-                        // 为自动生成的明天实例注册提醒闹钟
-                        result.newTask?.let { newTask ->
-                            scheduleReminderIfNeeded(newTask)
-                        }
-                    }
-                }
-                // 重新加载过期列表和今日任务
-                overdueDailyTasks = withContext(Dispatchers.IO) {
-                    val todayStr = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
-                    core.getOverdueDailyTasks(todayStr)
-                }
-                tasks = loadTasksForCurrentView()
-            } catch (e: Exception) {
-                onError("更新过期任务失败: ${e.message}")
-            }
-        }
-    }
-
-    /**
      * 每日任务的完成/取消（新模型：实例化）。
      * 完成：调用 completeDailyTaskInstance → status 变 done + 自动创建明天的实例
      * 取消：调用 uncompleteDailyTaskInstance → status 恢复 todo + 自动删除明天实例
@@ -548,7 +490,6 @@ class TaskViewModel(
      * 非"今天"视图仍然全量刷新，因为明天的新实例可能影响其他清单的显示。
      */
     private fun toggleDailyDone(task: TaskItem) {
-        val todayStr = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
         val markDone = !task.isCompletedForDate
         // 乐观更新 UI（立即生效，启动 animateItem 位移动画）
         val updatedTask = task.copy(isDone = markDone, isCompletedForDate = markDone)
@@ -582,10 +523,6 @@ class TaskViewModel(
                 // 非今天视图：需要全量刷新，因为新建/删除了明天的任务可能影响当前清单。
                 if (activeChecklistId != TODAY_ID) {
                     tasks = loadTasksForCurrentView()
-                }
-                // 刷新过期列表（独立状态，不影响主列表动画）
-                overdueDailyTasks = withContext(Dispatchers.IO) {
-                    core.getOverdueDailyTasks(todayStr)
                 }
                 scheduleRefreshCounts()
             } catch (e: Exception) {
@@ -879,15 +816,6 @@ class TaskViewModel(
             val subs = loadChildren(status.task.id)
             status.toUi().copy(subtasks = subs)
         }
-    }
-
-    /**
-     * 加载过期每日任务列表（所有历史未完成）。
-     * 应在加载今日任务后调用，仅在"今天"视图中使用。
-     */
-    private fun loadOverdueDailyTasks() {
-        val todayStr = java.time.LocalDate.now().format(java.time.format.DateTimeFormatter.ISO_LOCAL_DATE)
-        overdueDailyTasks = core.getOverdueDailyTasks(todayStr)
     }
 
     /**

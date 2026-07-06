@@ -104,15 +104,6 @@ pub struct DailyTaskStatus {
     pub completion_date: Option<String>,
 }
 
-/// 过期的每日任务 —— 某个每日模板在某个历史日期没有完成记录
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
-pub struct OverdueDailyTask {
-    /// 原始任务数据（模板）
-    pub task: TaskData,
-    /// 哪一天过期的，格式 "YYYY-MM-DD"
-    pub overdue_date: String,
-}
-
 /// 日历日期标记 —— 用于日程页面标记日历上的日期状态
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
 pub struct CalendarDateMarker {

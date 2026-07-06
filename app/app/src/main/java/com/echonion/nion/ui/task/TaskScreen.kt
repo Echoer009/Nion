@@ -535,6 +535,83 @@ private fun TaskScreenContent(
     /** 笔记模式：true 时列表标题显示"笔记"，SharedTaskCard 显示笔记图标 */
     isNotebook: Boolean = false,
 ) {
+    // ============ 完成动画协调状态 ============
+    // animatingDoneIds：正在播放完成动画的任务 ID。
+    // 这些任务 visualDone=true（UI 呈现已完成），但 model.isDone 还是 false。
+    // 动画结束后通过 onCompletionAnimEnd 回调移除并调用真正的 toggleDone，任务才移入已完成区。
+    val animatingDoneIds = remember { mutableStateListOf<String>() }
+    // burstTaskIds：动画期间需要显示光芒射线爆发的任务 ID（每天第一个/最后一个，规则见 handleToggleDone）
+    val burstTaskIds = remember { mutableStateListOf<String>() }
+    // grandBurstTaskIds：盛大爆发的任务 ID（仅"今天"清单清空全部待办时，射线翻倍）
+    val grandBurstTaskIds = remember { mutableStateListOf<String>() }
+
+    // 用 derivedStateOf 把 SnapshotStateList 转成 Set 传给 SharedTaskList，
+    // 避免每次重组都 toSet()，只在列表变化时重算
+    val playCompletionAnimIds by remember { derivedStateOf { animatingDoneIds.toSet() } }
+    val burstTaskIdSet by remember { derivedStateOf { burstTaskIds.toSet() } }
+    val grandBurstTaskIdSet by remember { derivedStateOf { grandBurstTaskIds.toSet() } }
+
+    /**
+     * 包装后的 toggleDone 回调 —— 实现完成动画的延迟乐观更新。
+     *
+     * - 取消完成（done→todo）：立即调用 viewModel.toggleDone，保持现状（瞬间切换）。
+     * - 完成（todo→done）：不立即写库，先把任务加入 animatingDoneIds 启动动画；
+     *   同时根据"第一个/最后一个"规则决定是否加入 burstTaskIds。
+     *   真正的写库在动画结束后的 handleCompletionAnimEnd 中进行。
+     * - 动画期间禁用连点（同一任务 id 在 animatingDoneIds 中时忽略）。
+     */
+    val handleToggleDone: (TaskItem) -> Unit = { task ->
+        if (task.id !in animatingDoneIds) {
+            if (task.isDone) {
+                // 取消完成：立即切换，保持现状
+                viewModel.toggleDone(task)
+            } else {
+                // 完成：启动动画，延迟写库
+                // 判断"第一个"：当前已完成列表为空
+                val isFirst = viewModel.doneTasks.isEmpty()
+                // 判断"最后一个"（完成后 todo 区清空）：
+                // 收集完成该任务后会从 todo 区移除的所有任务 id（任务本身；若是主任务则含全部子任务后代）
+                val affectedIds = mutableSetOf(task.id)
+                val topLevel = viewModel.tasks.find { it.id == task.id }
+                if (topLevel != null) {
+                    fun collectAll(t: TaskItem) {
+                        for (sub in t.subtasks) {
+                            affectedIds.add(sub.id)
+                            collectAll(sub)
+                        }
+                    }
+                    collectAll(topLevel)
+                }
+                val isLast = viewModel.flatTodoTasks.none { it.task.id !in affectedIds }
+                // 爆发规则："今天"清单第一个或最后一个；其他清单仅第一个
+                val burst = when (viewModel.activeChecklistId) {
+                    TaskViewModel.TODAY_ID -> isFirst || isLast
+                    else -> isFirst
+                }
+                // 盛大爆发：仅"今天"清单的"最后一个"（清空全部待办）
+                val grand = viewModel.activeChecklistId == TaskViewModel.TODAY_ID && isLast
+                animatingDoneIds.add(task.id)
+                if (burst) {
+                    burstTaskIds.add(task.id)
+                    if (grand) grandBurstTaskIds.add(task.id)
+                }
+            }
+        }
+    }
+
+    /**
+     * 完成动画结束回调 —— 移除各动画集合中的任务 id，并调用真正的 toggleDone 写入完成状态。
+     *
+     * 此时完成动画（对勾绘制/删除线/爆发）已播完，viewModel.toggleDone 触发的乐观更新
+     * 会让任务经 animateItem 从 todo 区滑入已完成区，视觉上"先在原位完成，再移走"。
+     */
+    val handleCompletionAnimEnd: (TaskItem) -> Unit = { task ->
+        animatingDoneIds.remove(task.id)
+        burstTaskIds.remove(task.id)
+        grandBurstTaskIds.remove(task.id)
+        viewModel.toggleDone(task)
+    }
+
     Scaffold(
         contentWindowInsets = WindowInsets.statusBars,
         topBar = {
@@ -612,10 +689,10 @@ private fun TaskScreenContent(
                     SharedTaskList(
                         todoItems = viewModel.flatTodoTasks,
                         doneItems = viewModel.flatDoneTasks,
-                        overdueTasks = viewModel.overdueDailyTasks,
-                        onToggleDone = { viewModel.toggleDone(it) },
+                        // 用包装后的 handleToggleDone 替代直接 viewModel.toggleDone，
+                        // 实现完成时"先动画后写库"的延迟乐观更新
+                        onToggleDone = handleToggleDone,
                         onTaskClick = onTaskClick,
-                        onToggleOverdueDailyDone = { taskId, date, done -> viewModel.toggleOverdueDailyDone(taskId, date, done) },
                         onToggleSelection = { viewModel.toggleSelection(it) },
                         reorderCallback = { draggedId, newParentId, siblingIds -> viewModel.moveAndReorderTasks(draggedId, newParentId, siblingIds) },
                         isSelectionMode = viewModel.isSelectionMode,
@@ -627,6 +704,11 @@ private fun TaskScreenContent(
                         modifier = Modifier.weight(1f),
                         onToggleCollapse = { viewModel.toggleCollapse(it) },
                         isNotebook = isNotebook,
+                        // 完成动画协调参数：由上面的状态集合驱动
+                        playCompletionAnimIds = playCompletionAnimIds,
+                        burstTaskIds = burstTaskIdSet,
+                        grandBurstTaskIds = grandBurstTaskIdSet,
+                        onCompletionAnimEnd = handleCompletionAnimEnd,
                     )
                 }
             }

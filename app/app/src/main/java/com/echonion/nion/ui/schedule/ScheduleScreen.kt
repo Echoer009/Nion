@@ -350,7 +350,6 @@ private fun ScheduleContent(
                 SharedTaskList(
                     todoItems = viewModel.flatTodoItems,
                     doneItems = viewModel.flatDoneItems,
-                    overdueTasks = emptyList(),
                     onToggleDone = { task ->
                         val scheduleItem = tasks.find { it.id == task.id }
                         if (scheduleItem != null) {
@@ -358,7 +357,6 @@ private fun ScheduleContent(
                         }
                     },
                     onTaskClick = { task -> onTaskClick(task.id) },
-                    onToggleOverdueDailyDone = { _, _, _ -> },
                     onToggleSelection = {},
                     reorderCallback = { draggedId, _, siblingIds ->
                         viewModel.reorderTasks(draggedId, null, siblingIds)

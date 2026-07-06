@@ -322,8 +322,10 @@ impl NionCore {
 
     /// 获取今日需关注的任务（带每日任务完成状态）：
     /// 1. reminder 日期部分 = 今天的任务（普通任务，看 status 判断完成）
-    /// 2. 设置了每日循环（recurrence_rule='daily'）的任务
-    ///    每日任务的完成状态由 daily_completions 表决定，不看 tasks.status
+    /// 2. 设置了每日循环（recurrence_rule='daily'）的旧模板任务（reminder IS NULL，迁移后应不再出现）
+    /// 3. 过期的每日任务实例：recurrence_rule='daily' AND status='todo' AND reminder 日期 < date。
+    ///    这些是历史未完成的每日实例，合并进今日列表由 UI 红色标记后逐天清算，
+    ///    完成后（status 变 done）不再被本查询返回。
     ///
     /// 参数 date: "YYYY-MM-DD" 格式的日期字符串
     /// 返回：跨所有清单聚合的顶层任务（parent_id IS NULL），附带当日完成状态
@@ -334,8 +336,9 @@ impl NionCore {
 
         // 新模型：每日任务是独立实例（每天一个任务行），直接通过 reminder 日期匹配。
         // 不再查 daily_completions 表，每日任务的完成状态由 tasks.status 决定。
-        // 兼容：仍包含 reminder IS NULL 的旧模板任务（迁移后应不再出现）
-        let sql = "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time, linked_task_ids FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL)) ORDER BY COALESCE(SUBSTR(reminder, 12, 5), recurrence_reminder_time, '99:99') ASC, sort_order ASC, created_at DESC";
+        // 第三个 OR 分支把"过期未完成"的每日实例也并入今日列表，
+        // 让 UI 统一渲染（reminder 日期 < 今天时自动标红），完成后即从结果中消失。
+        let sql = "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time, linked_task_ids FROM tasks WHERE parent_id IS NULL AND (SUBSTR(reminder, 1, 10) = ?1 OR (recurrence_rule = 'daily' AND reminder IS NULL) OR (recurrence_rule = 'daily' AND status = 'todo' AND SUBSTR(reminder, 1, 10) < ?1)) ORDER BY COALESCE(SUBSTR(reminder, 12, 5), recurrence_reminder_time, '99:99') ASC, sort_order ASC, created_at DESC";
         let mut stmt = db.prepare(sql)
             .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
 
@@ -1516,44 +1519,6 @@ impl NionCore {
         Ok(result)
     }
 
-    /// 获取所有过期的每日任务实例
-    /// 新模型：查找 recurrence_rule='daily'、status='todo'、reminder 日期 < before_date 的任务
-    /// 这些是未完成的每日任务实例（被跳过的日期），按过期日期降序排列
-    pub fn get_overdue_daily_tasks(&self, before_date: String) -> Result<Vec<OverdueDailyTask>, NionError> {
-        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
-            msg: e.to_string(),
-        })?;
-
-        let mut stmt = db
-            .prepare(
-                "SELECT id, name, description, priority, status, reminder, parent_id, category_id, group_id, created_at, updated_at, completed_at, focus_seconds, recurrence_rule, recurrence_reminder_time, linked_task_ids \
-                 FROM tasks WHERE recurrence_rule = 'daily' AND status = 'todo' AND parent_id IS NULL \
-                 AND reminder IS NOT NULL AND SUBSTR(reminder, 1, 10) < ?1 \
-                 ORDER BY SUBSTR(reminder, 1, 10) DESC",
-            )
-            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
-        let rows = stmt
-            .query_map(params![before_date], |row| map_task_row(row))
-            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
-
-        let mut result = Vec::new();
-        for row in rows {
-            let task = row.map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
-            // 提取 reminder 的日期部分作为过期日期
-            let overdue_date = task.reminder.as_deref()
-                .map(|r| r[..10].to_string())
-                .unwrap_or_default();
-            if !overdue_date.is_empty() {
-                result.push(OverdueDailyTask {
-                    task,
-                    overdue_date,
-                });
-            }
-        }
-
-        Ok(result)
-    }
-
     /// 获取指定日期的所有任务（含每日任务实例的完成状态）
     /// 新模型：每日任务是独立实例，完成状态由 tasks.status 决定
     pub fn get_tasks_for_date(&self, date: String) -> Result<Vec<DailyTaskStatus>, NionError> {
@@ -2591,8 +2556,11 @@ mod tests {
         let restored = core.uncomplete_daily_task_instance(task.id.clone()).unwrap();
         assert_eq!(restored.status, "todo");
 
-        // 明天的自动生成实例应该被删除了
-        let tomorrow_tasks = core.get_tasks_due_today(tomorrow.clone()).unwrap();
+        // 明天的自动生成实例应该被删除了。
+        // 用 get_tasks_for_date 精确查询明天那天的任务：get_tasks_due_today 现在会
+        // 把传入日期之前未完成的每日实例一并返回（用于合并过期任务），不适合验证
+        // "明天是否还有实例"这种精确日期场景。
+        let tomorrow_tasks = core.get_tasks_for_date(tomorrow.clone()).unwrap();
         let tomorrow_found: Vec<_> = tomorrow_tasks.iter().filter(|t| t.task.name == "背单词").collect();
         assert!(tomorrow_found.is_empty());
 
@@ -2618,41 +2586,6 @@ mod tests {
         // 查范围
         let comps = core.get_daily_completions(task.id.clone(), d1.clone(), d3.clone()).unwrap();
         assert_eq!(comps.len(), 3);
-    }
-
-    #[test]
-    fn test_get_overdue_daily_tasks() {
-        let core = make_in_memory();
-        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
-        let yesterday = chrono::Local::now().checked_sub_days(chrono::Days::new(1)).unwrap().format("%Y-%m-%d").to_string();
-        let two_days_ago = chrono::Local::now().checked_sub_days(chrono::Days::new(2)).unwrap().format("%Y-%m-%d").to_string();
-
-        // 新模型：过期任务是 status='todo'、reminder 日期 < 今天的每日任务实例
-        // 创建 2 天前的过期实例
-        let overdue1 = core.create_task("冥想".to_string(), None, "low".to_string(), None, None, None, Some("daily".to_string()), None, None).unwrap();
-        // 迁移会把 reminder 设为今天，手动改为 2 天前
-        {
-            let db = core.db.lock().unwrap();
-            db.execute("UPDATE tasks SET reminder = ?1 WHERE id = ?2", params![two_days_ago, overdue1.id]).unwrap();
-        }
-
-        // 创建昨天的过期实例
-        let overdue2 = core.create_task("跑步".to_string(), None, "medium".to_string(), None, None, None, Some("daily".to_string()), None, None).unwrap();
-        {
-            let db = core.db.lock().unwrap();
-            db.execute("UPDATE tasks SET reminder = ?1 WHERE id = ?2", params![yesterday, overdue2.id]).unwrap();
-        }
-
-        // 创建今天的实例（不过期）
-        let today_task = core.create_task("今天的事".to_string(), None, "medium".to_string(), None, None, None, Some("daily".to_string()), None, None).unwrap();
-        // reminder 已被迁移设为今天
-
-        // 查 today 之前的过期任务
-        let overdue = core.get_overdue_daily_tasks(today.clone()).unwrap();
-        assert_eq!(overdue.len(), 2);
-        let overdue_dates: Vec<&str> = overdue.iter().map(|o| o.overdue_date.as_str()).collect();
-        assert!(overdue_dates.contains(&two_days_ago.as_str()));
-        assert!(overdue_dates.contains(&yesterday.as_str()));
     }
 
     #[test]

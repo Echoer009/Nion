@@ -66,7 +66,6 @@ import com.echonion.nion.ui.task.FlatTaskRow
 import com.echonion.nion.ui.task.TaskItem
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
-import uniffi.nion_core.OverdueDailyTask
 
 /**
  * 共享任务列表 —— LazyColumn + 拖拽排序。
@@ -75,10 +74,8 @@ import uniffi.nion_core.OverdueDailyTask
  *
  * @param todoItems 待办任务的扁平列表，display order
  * @param doneItems 已完成任务的扁平列表，display order
- * @param overdueTasks 过期每日任务列表，仅需展示时传入非空
  * @param onToggleDone 点击勾选框切换任务完成状态时触发
  * @param onTaskClick 点击任务行（非选择模式）时触发
- * @param onToggleOverdueDailyDone 完成过期每日任务时触发，传入 (taskId, date, done)
  * @param onToggleSelection 切换单任务选中状态时触发
  * @param reorderCallback 拖拽释放后决定层级和排序回调，传入 (draggedId, newParentId, siblingIds)
  * @param isSelectionMode 是否处于多选模式
@@ -94,10 +91,8 @@ import uniffi.nion_core.OverdueDailyTask
 fun SharedTaskList(
     todoItems: List<FlatTaskItem>,
     doneItems: List<FlatTaskItem>,
-    overdueTasks: List<OverdueDailyTask> = emptyList(),
     onToggleDone: (TaskItem) -> Unit = {},
     onTaskClick: (TaskItem) -> Unit = {},
-    onToggleOverdueDailyDone: (taskId: String, date: String, done: Boolean) -> Unit = { _, _, _ -> },
     onToggleSelection: (String) -> Unit = {},
     reorderCallback: (draggedId: String, newParentId: String?, siblingIds: List<String>) -> Unit = { _, _, _ -> },
     isSelectionMode: Boolean = false,
@@ -113,6 +108,16 @@ fun SharedTaskList(
     onToggleCollapse: ((String) -> Unit)? = null,
     /** 是否为笔记型清单视图：true 时 section header 显示"笔记"，隐藏"已完成"区，FlatTaskRow 显示笔记图标 */
     isNotebook: Boolean = false,
+    /** 正在播放完成动画的任务 ID 集合（由上层 TaskScreen 维护）。
+     *  这些任务 visualDone=true（UI 呈现已完成），但 model.isDone 仍为 false，
+     *  动画结束后上层才调用真正的 toggleDone 让任务移入已完成区 */
+    playCompletionAnimIds: Set<String> = emptySet(),
+    /** 需要显示光芒射线爆发的任务 ID 集合（每天第一个/最后一个，由上层判断规则后传入） */
+    burstTaskIds: Set<String> = emptySet(),
+    /** 盛大爆发的任务 ID 集合（"今天"清单清空全部待办时射线翻倍 + 持续更久） */
+    grandBurstTaskIds: Set<String> = emptySet(),
+    /** 单个任务的完成动画全部播放完毕的回调，上层在此调用真正的 toggleDone 写入完成状态 */
+    onCompletionAnimEnd: (TaskItem) -> Unit = {},
 ) {
     val haptic = LocalHapticFeedback.current
 
@@ -156,9 +161,8 @@ fun SharedTaskList(
 
     /* 动态计算 reorderable items 之前的 header item 数量，
      * 用于将 LazyColumn 绝对索引转换为 reorderableItems 相对索引。
-     * 结构：top_spacer(1) + [overdue_header + overdue items] + [todo_header] */
+     * 结构：top_spacer(1) + [todo_header] */
     val headerCount = 1 +
-        (if (overdueTasks.isNotEmpty()) 1 + overdueTasks.size else 0) +
         if (reorderableItems.isNotEmpty()) 1 else 0
 
     val effectiveLastMap by remember {
@@ -239,27 +243,6 @@ fun SharedTaskList(
         verticalArrangement = Arrangement.spacedBy(0.dp),
     ) {
         item(key = "top_spacer", contentType = "spacer") { Spacer(modifier = Modifier.height(8.dp)) }
-
-        // ==================== 过期每日任务分区 ====================
-        if (overdueTasks.isNotEmpty()) {
-            item(key = "overdue_header", contentType = "header") {
-                Box(modifier = Modifier.animateItem(
-                    placementSpec = spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow),
-                )) {
-                    SectionHeader("过期", overdueTasks.size, isError = true)
-                }
-            }
-            items(
-                items = overdueTasks,
-                key = { "overdue_${it.task.id}_${it.overdueDate}" },
-                contentType = { "overdue_task" },
-            ) { overdue ->
-                OverdueDailyTaskRow(
-                    overdue = overdue,
-                    onComplete = { onToggleOverdueDailyDone(overdue.task.id, overdue.overdueDate, false) },
-                )
-            }
-        }
 
         if (reorderableItems.isNotEmpty()) {
             item(key = "todo_header", contentType = "header") {
@@ -455,6 +438,13 @@ fun SharedTaskList(
                                 onToggleCollapse = onToggleCollapse,
                                 sharedElementModifier = taskSharedModifier(flatItem.task.id),
                                 isNotebook = isNotebook,
+                                // 完成动画参数透传：根据 task.id 是否在各集合中决定该任务的动画行为。
+                                // visualDone 覆盖：动画中的任务 UI 呈现已完成（但 model.isDone 还是 false）
+                                playCompletionAnim = flatItem.task.id in playCompletionAnimIds,
+                                visualDone = if (flatItem.task.id in playCompletionAnimIds) true else null,
+                                showBurst = flatItem.task.id in burstTaskIds,
+                                isGrand = flatItem.task.id in grandBurstTaskIds,
+                                onCompletionAnimEnd = { onCompletionAnimEnd(flatItem.task) },
                             )
                         }
                     }
@@ -512,6 +502,12 @@ fun SharedTaskList(
                         isGroupSelected = isSelected,
                         sharedElementModifier = taskSharedModifier(flatItem.task.id),
                         isNotebook = isNotebook,
+                        // done 区通常无完成动画（动画结束后任务才进 done 区），但保持透传逻辑一致
+                        playCompletionAnim = flatItem.task.id in playCompletionAnimIds,
+                        visualDone = if (flatItem.task.id in playCompletionAnimIds) true else null,
+                        showBurst = flatItem.task.id in burstTaskIds,
+                        isGrand = flatItem.task.id in grandBurstTaskIds,
+                        onCompletionAnimEnd = { onCompletionAnimEnd(flatItem.task) },
                     )
                 }
             }
@@ -942,73 +938,6 @@ fun SectionHeader(title: String, count: Int, isError: Boolean = false) {
                 style = MaterialTheme.typography.labelSmall,
                 color = onContainerColor,
                 fontWeight = FontWeight.SemiBold,
-            )
-        }
-    }
-}
-
-/**
- * 过期每日任务行 —— 显示任务名 + 过期日期 + 完成按钮。
- * 用于"今天"视图顶部的过期分区。
- *
- * @param overdue 过期的每日任务数据
- * @param onComplete 点击完成按钮时触发
- */
-@Composable
-fun OverdueDailyTaskRow(
-    overdue: OverdueDailyTask,
-    onComplete: () -> Unit,
-) {
-    // 将 "2026-05-24" 格式化为 "5月24日"
-    val formattedDate = runCatching {
-        val date = java.time.LocalDate.parse(overdue.overdueDate)
-        "${date.monthValue}月${date.dayOfMonth}日"
-    }.getOrElse { overdue.overdueDate }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(vertical = 4.dp)
-            .background(
-                MaterialTheme.colorScheme.errorContainer.copy(alpha = NionAlpha.BG_SUBTLE),
-                RoundedCornerShape(12.dp),
-            )
-            .padding(horizontal = 16.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        // 完成按钮：简洁圆形，不带外圈边框，避免大环套小环
-        Box(
-            modifier = Modifier
-                .size(24.dp)
-                .clip(CircleShape)
-                .clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onComplete,
-                ),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(
-                Icons.Default.RadioButtonUnchecked,
-                contentDescription = "完成",
-                tint = MaterialTheme.colorScheme.error,
-                modifier = Modifier.size(24.dp),
-            )
-        }
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = overdue.task.name,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = FontWeight.Medium,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-            Text(
-                text = formattedDate,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.error,
             )
         }
     }
