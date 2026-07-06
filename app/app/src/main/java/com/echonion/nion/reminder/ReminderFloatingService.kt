@@ -377,14 +377,19 @@ class ReminderFloatingService : Service() {
     }
 
     /**
-     * 处理「知道了」主按钮 —— 终止循环 + 关闭悬浮窗，不跳转 App。
+     * 处理「知道了」主按钮 —— 标记任务完成 + 终止循环 + 关闭悬浮窗，不跳转 App。
+     *
+     * 完成操作异步执行（区分每日/普通任务），不阻塞悬浮窗关闭动画。
      */
     private fun handleAcknowledge() {
+        // 标记任务完成：每日任务走 completeDailyTaskInstance 续期明天实例，
+        // 普通任务 status 改 "done"。异步执行，失败仅记日志不影响关闭流程。
+        ReminderCompleteHelper.completeTaskFromReminder(applicationContext as NionApp, taskId)
         // 终止提醒循环
         ReminderStore.resetTriggerCount(this, taskId)
         ReminderScheduler.cancelReminder(this, taskId)
         NotificationHelper.dismissNotification(this, taskId)
-        Log.d(TAG, "知道了: taskId=$taskId")
+        Log.d(TAG, "知道了(已完成任务): taskId=$taskId")
         // 播放收回动画，动画结束后自动 stopSelf()
         removeFloatingWindow(animated = true)
     }

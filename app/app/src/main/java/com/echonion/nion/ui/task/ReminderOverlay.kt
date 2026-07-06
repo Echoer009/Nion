@@ -1,7 +1,6 @@
 package com.echonion.nion.ui.task
 
 import com.echonion.nion.ui.theme.NionAlpha
-import android.util.Log
 import android.app.Application
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -58,17 +57,15 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.echonion.nion.NionApp
-import com.echonion.nion.core
 import com.echonion.nion.reminder.NotificationHelper
+import com.echonion.nion.reminder.ReminderCompleteHelper
 import com.echonion.nion.reminder.ReminderEvent
 import com.echonion.nion.reminder.ReminderMessageGenerator
 import com.echonion.nion.reminder.ReminderScheduler
 import com.echonion.nion.reminder.ReminderStore
 import com.echonion.nion.ui.companion.MarkdownText
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /**
  * 全局提醒悬浮卡片 —— 监听 NionApp 的提醒事件，在任意页面显示底部悬浮通知卡片。
@@ -362,10 +359,13 @@ fun ReminderOverlay(
                             horizontalArrangement = Arrangement.spacedBy(10.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            // 「知道了」主按钮：实心填充，使用强调色，点击终止循环并关闭
+                            // 「知道了」主按钮：实心填充，使用强调色，点击标记完成 + 终止循环并关闭
                             val ackLabel = labels.first.ifBlank { "知道了" }
                             Button(
                                 onClick = {
+                                    // 标记任务完成：每日任务走 completeDailyTaskInstance 续期明天实例，
+                                    // 普通任务 status 改 "done"。异步执行，失败仅记日志。
+                                    ReminderCompleteHelper.completeTaskFromReminder(app, event.taskId)
                                     // 终止提醒循环
                                     ReminderStore.resetTriggerCount(app, event.taskId)
                                     ReminderScheduler.cancelReminder(app, event.taskId)
@@ -416,23 +416,6 @@ private fun dismissEvent(
 ) {
     NotificationHelper.dismissNotification(app, event.taskId)
     onClear()
-}
-
-/**
- * 标记任务完成。
- * 在 IO 线程调用 Rust core 更新任务状态为 "done"。
- */
-private fun completeTask(app: Application, taskId: String) {
-    kotlinx.coroutines.MainScope().launch {
-        try {
-            withContext(Dispatchers.IO) {
-                app.core().updateTask(taskId, null, null, null, "done", null, null, null, null, null)
-            }
-        } catch (e: Exception) {
-            // 完成任务失败时记录日志，不影响用户体验
-            Log.w("ReminderOverlay", "通过通知完成任务失败: taskId=$taskId", e)
-        }
-    }
 }
 
 /**

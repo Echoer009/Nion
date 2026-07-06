@@ -113,9 +113,10 @@ object NotificationHelper {
      * 显示任务提醒通知（带 Action 按钮）。
      *
      * 根据 triggerCount 调整按钮文案，实现渐进式递进效果：
-     * - triggerCount 1-2：开始做了 / 等5分钟 / 今天算了
-     * - triggerCount 3：马上开始 / 最后5分钟 / 今天算了
-     * - triggerCount 4：现在开始 / 真的不做了（无第三个按钮）
+     * - 按钮1 固定为「知道了」：点击标记任务完成（区分每日/普通任务）+ 终止提醒循环
+     * - triggerCount 1-2：知道了 / 等5分钟
+     * - triggerCount 3：知道了 / 最后5分钟
+     * - triggerCount 4：知道了 / 真的不做了
      * - triggerCount 5：知道了（仅一个按钮）
      *
      * @param context 上下文
@@ -166,20 +167,19 @@ object NotificationHelper {
             .setAutoCancel(true)
             .setContentIntent(contentPendingIntent)
 
-        // 按钮1：「开始做了」（或「马上开始」「现在开始」）
+        // 按钮1：「知道了」—— 标记任务完成（区分每日/普通任务）+ 终止提醒循环 + 取消通知
         if (labels.first.isNotEmpty()) {
-            val startIntent = Intent(context, ReminderActionReceiver::class.java).apply {
-                action = ReminderActionReceiver.ACTION_START
+            val completeIntent = Intent(context, ReminderActionReceiver::class.java).apply {
+                action = ReminderActionReceiver.ACTION_COMPLETE
                 putExtra(ReminderActionReceiver.EXTRA_TASK_ID, taskId)
-                putExtra(ReminderActionReceiver.EXTRA_TASK_TITLE, taskTitle)
             }
-            val startPendingIntent = PendingIntent.getBroadcast(
+            val completePendingIntent = PendingIntent.getBroadcast(
                 context,
                 notificationId + 1,
-                startIntent,
+                completeIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
-            builder.addAction(0, labels.first, startPendingIntent)
+            builder.addAction(0, labels.first, completePendingIntent)
         }
 
         // 按钮2：「等5分钟」（或「最后5分钟」「真的不做了」）
