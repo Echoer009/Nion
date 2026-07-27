@@ -1017,7 +1017,7 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_complete_daily_task() != 44576.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
-    if (lib.uniffi_nion_core_checksum_method_nioncore_complete_daily_task_instance() != 22598.toShort()) {
+    if (lib.uniffi_nion_core_checksum_method_nioncore_complete_daily_task_instance() != 30487.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_create_checklist() != 24825.toShort()) {
@@ -1588,6 +1588,9 @@ public interface NionCoreInterface {
      * 3. 检查下一天是否已存在同标题、同清单、同分组的每日任务实例（防重复）
      * 4. 不存在则创建新实例，携带相同的 recurrence_rule、recurrence_reminder_time 等属性
      *
+     * 注意：步骤 1（标记完成）优先执行。若 reminder 为 NULL 或日期格式异常，
+     * 任务仍会被标记完成，只是不创建明天的实例（返回 new_task = None），不再报错。
+     *
      * 返回 DailyInstanceResult（完成的任务 + 可选的新建任务）
      */
     fun `completeDailyTaskInstance`(`taskId`: kotlin.String): DailyInstanceResult
@@ -2034,6 +2037,9 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
      * 2. 根据 task_date 计算下一天（task_date + 1 天）
      * 3. 检查下一天是否已存在同标题、同清单、同分组的每日任务实例（防重复）
      * 4. 不存在则创建新实例，携带相同的 recurrence_rule、recurrence_reminder_time 等属性
+     *
+     * 注意：步骤 1（标记完成）优先执行。若 reminder 为 NULL 或日期格式异常，
+     * 任务仍会被标记完成，只是不创建明天的实例（返回 new_task = None），不再报错。
      *
      * 返回 DailyInstanceResult（完成的任务 + 可选的新建任务）
      */

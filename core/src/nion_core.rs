@@ -1323,6 +1323,9 @@ impl NionCore {
     /// 3. 检查下一天是否已存在同标题、同清单、同分组的每日任务实例（防重复）
     /// 4. 不存在则创建新实例，携带相同的 recurrence_rule、recurrence_reminder_time 等属性
     ///
+    /// 注意：步骤 1（标记完成）优先执行。若 reminder 为 NULL 或日期格式异常，
+    /// 任务仍会被标记完成，只是不创建明天的实例（返回 new_task = None），不再报错。
+    ///
     /// 返回 DailyInstanceResult（完成的任务 + 可选的新建任务）
     pub fn complete_daily_task_instance(
         &self,
@@ -1332,19 +1335,11 @@ impl NionCore {
             msg: e.to_string(),
         })?;
 
-        // 1. 查出原任务，提取日期部分
+        // 1. 查出原任务
         let original = query_task(&db, &task_id)?;
-        let task_date_str = original.reminder.as_deref()
-            .map(|r| &r[..10])
-            .ok_or_else(|| NionError::ValidationError {
-                msg: format!("每日任务 {} 没有 reminder 日期，无法计算下一天", task_id),
-            })?;
-        let task_date = chrono::NaiveDate::parse_from_str(task_date_str, "%Y-%m-%d")
-            .map_err(|e| NionError::ValidationError {
-                msg: format!("无法解析日期 '{}': {}", task_date_str, e),
-            })?;
 
-        // 2. 标记完成
+        // 2. 先标记完成 —— 保证无论后续日期计算是否成功，任务状态一定被正确标记为 done。
+        // 这修复了 reminder 为 NULL 或日期格式异常时任务不被标记完成的 bug。
         let now = chrono::Utc::now().to_rfc3339();
         db.execute(
             "UPDATE tasks SET status = 'done', completed_at = ?1, updated_at = ?1 WHERE id = ?2",
@@ -1352,11 +1347,34 @@ impl NionCore {
         ).map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
         let completed_task = query_task(&db, &task_id)?;
 
-        // 3. 计算下一天
+        // 3. 尝试提取 reminder 日期部分 —— 失败时不再报错，而是返回已完成结果（无明天实例）。
+        // 任务已经标记完成，只是无法创建明天的循环实例。
+        let task_date_str = match original.reminder.as_deref().map(|r| &r[..10]) {
+            Some(s) => s,
+            None => {
+                return Ok(DailyInstanceResult {
+                    completed_task,
+                    new_task: None,
+                });
+            }
+        };
+
+        // 4. 解析日期 —— 失败时同样返回已完成结果（无明天实例）
+        let task_date = match chrono::NaiveDate::parse_from_str(task_date_str, "%Y-%m-%d") {
+            Ok(d) => d,
+            Err(_) => {
+                return Ok(DailyInstanceResult {
+                    completed_task,
+                    new_task: None,
+                });
+            }
+        };
+
+        // 5. 计算下一天
         let next_date = task_date + chrono::Duration::days(1);
         let next_date_str = next_date.format("%Y-%m-%d").to_string();
 
-        // 4. 构建下一天的 reminder：保持原时间部分（如果有）
+        // 6. 构建下一天的 reminder：保持原时间部分（如果有）
         let next_reminder = if let Some(ref rem) = original.reminder {
             if rem.len() > 10 {
                 // 原 reminder 有时间部分（如 "2026-05-30T09:00"），替换日期
@@ -1370,7 +1388,7 @@ impl NionCore {
             Some(next_date_str.clone())
         };
 
-        // 5. 检查是否已存在同名、同清单、同分组、同 reminder 日期的每日任务
+        // 7. 检查是否已存在同名、同清单、同分组、同 reminder 日期的每日任务
         let next_date_prefix = next_date_str.clone();
         let existing: Option<String> = db.query_row(
             "SELECT id FROM tasks WHERE name = ?1 \
@@ -1389,7 +1407,7 @@ impl NionCore {
             |row| row.get(0),
         ).ok();
 
-        // 6. 不存在则创建，继承原任务的 sort_order 以保持排序位置不变
+        // 8. 不存在则创建，继承原任务的 sort_order 以保持排序位置不变
         let new_task = if existing.is_none() {
             // 查询原任务的 sort_order，新实例继承同一排序位置
             let original_sort_order: i64 = db.query_row(

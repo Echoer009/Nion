@@ -3,6 +3,8 @@ package com.echonion.nion.reminder
 import android.app.Application
 import android.util.Log
 import com.echonion.nion.NionApp
+import com.echonion.nion.notifyDataChanged
+import com.echonion.nion.ui.companion.tools.DataType
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.launch
@@ -71,18 +73,29 @@ object ReminderCompleteHelper {
             val core = (app as NionApp).core
             val task = core.getTask(taskId)
             if (task.recurrenceRule == RECURRENCE_DAILY) {
-                // 每日任务：完成当前实例，core 会自动创建明天的实例
-                val result = core.completeDailyTaskInstance(taskId)
-                // 为自动生成的明天实例注册每日提醒闹钟，保证每日提醒链不断裂
-                result.newTask?.let { newTask ->
-                    scheduleReminderForTask(app, newTask)
-                    Log.d(TAG, "每日任务已完成并续期: taskId=$taskId, newTaskId=${newTask.id}")
+                // 每日任务：完成当前实例，core 会自动创建明天的实例。
+                // 双保险：即使 completeDailyTaskInstance 因异常失败，也降级为直接标记 done，
+                // 确保用户点「知道了」后任务一定被完成（Rust 侧已保证先标记完成，这里是第二道防线）。
+                try {
+                    val result = core.completeDailyTaskInstance(taskId)
+                    // 为自动生成的明天实例注册每日提醒闹钟，保证每日提醒链不断裂
+                    result.newTask?.let { newTask ->
+                        scheduleReminderForTask(app, newTask)
+                        Log.d(TAG, "每日任务已完成并续期: taskId=$taskId, newTaskId=${newTask.id}")
+                    }
+                } catch (e: Exception) {
+                    // completeDailyTaskInstance 失败时降级为直接标记 status=done
+                    Log.w(TAG, "completeDailyTaskInstance 失败，降级为直接标记完成: taskId=$taskId", e)
+                    core.updateTask(taskId, null, null, null, STATUS_DONE, null, null, null, null, null)
                 }
             } else {
                 // 普通任务：updateTask 第 5 个参数为 status，传入 "done"
                 core.updateTask(taskId, null, null, null, STATUS_DONE, null, null, null, null, null)
                 Log.d(TAG, "普通任务已完成: taskId=$taskId")
             }
+            // 通知 UI 刷新任务列表 —— 修复完成后界面不更新导致用户以为「知道了」没生效的问题。
+            // TaskViewModel 监听 dataEvents，收到 TASK_DATA 事件后会重新加载任务列表。
+            (app as NionApp).notifyDataChanged(setOf(DataType.TASK_DATA))
         }
     }
 

@@ -95,6 +95,8 @@ fun checklistToJson(checklist: ChecklistData): JSONObject = JSONObject().apply {
     put("id", checklist.id)
     put("name", checklist.name)
     put("created_at", checklist.createdAt)
+    // 清单类型：task=任务型，notebook=笔记型，回传给 LLM 以便其感知清单类型
+    put("checklist_type", checklist.checklistType)
 }
 
 /**
@@ -659,7 +661,8 @@ object CreateTool : Tool {
             "当任务与时间相关时，必须根据任务类型填写 reminder 参数：" +
             "每日重复任务用 HH:MM 格式如 08:00，" +
             "一次性任务用 YYYY-MM-DDTHH:MM 格式如 2026-06-15T09:00。" +
-            "不要只写标题不设时间。"
+            "不要只写标题不设时间。" +
+            "创建清单时可传 checklist_type=\"notebook\" 来新建笔记型清单（默认 task）。"
 
     /**
      * 参数 Schema。
@@ -674,6 +677,11 @@ object CreateTool : Tool {
                 "enum": ["task", "checklist", "group", "note"]
             },
             "name": { "type": "string" },
+            "checklist_type": {
+                "type": "string",
+                "enum": ["task", "notebook"],
+                "description": "清单类型，仅 entity_type=checklist 时有效。task=任务型清单(默认)，notebook=笔记型清单"
+            },
             "description": { "type": "string" },
             "priority": {
                 "type": "string",
@@ -897,12 +905,20 @@ object CreateTool : Tool {
         }.toString()
     }
 
-    /** 创建清单 */
+    /**
+     * 创建清单。
+     * checklist_type="notebook" 时创建笔记型清单，否则默认任务型。
+     */
     private fun executeCreateChecklist(params: JSONObject, core: NionCore): String {
         val name = params.optString("name", "").takeIf { it.isNotEmpty() }
             ?: return """{"error":"创建清单时必须指定 name"}"""
-
-        val checklist = core.createChecklist(name)
+        // 读取可选的清单类型，未指定时默认 task（任务型清单）
+        val checklistType = params.optString("checklist_type", "task")
+        val checklist = if (checklistType == "notebook") {
+            core.createChecklistWithType(name, "notebook")
+        } else {
+            core.createChecklist(name)
+        }
         return JSONObject().apply {
             put("success", true)
             put("checklist", checklistToJson(checklist))
@@ -994,7 +1010,13 @@ object CreateTool : Tool {
                     "checklist" -> {
                         val name = itemParams.optString("name", "").takeIf { it.isNotEmpty() }
                             ?: throw IllegalArgumentException("批量创建清单时每项必须包含 name，第 ${i + 1} 项缺失")
-                        val checklist = core.createChecklist(name)
+                        // 批量创建同样支持清单类型，未指定时默认 task（任务型清单）
+                        val itemType = itemParams.optString("checklist_type", "task")
+                        val checklist = if (itemType == "notebook") {
+                            core.createChecklistWithType(name, "notebook")
+                        } else {
+                            core.createChecklist(name)
+                        }
                         results.put(JSONObject().apply {
                             put("index", i)
                             put("success", true)

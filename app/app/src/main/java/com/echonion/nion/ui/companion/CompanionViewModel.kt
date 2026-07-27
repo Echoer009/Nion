@@ -2,6 +2,7 @@ package com.echonion.nion.ui.companion
 
 import android.app.Application
 import android.util.Log
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -95,6 +96,38 @@ class CompanionViewModel(
     /** 聊天消息列表，UI 通过 LazyColumn 渲染（仅包含用户可见的文本消息） */
     var messages by mutableStateOf<List<ChatMessage>>(emptyList())
         private set
+
+    /**
+     * 当前对话已隐藏的最早轮数（每对话独立持久化到 settings 表）。
+     *
+     * 一轮 = 一个 user 消息 + 其引发的助手回复（含工具过程）。被隐藏的轮次不进入
+     * AI 上下文（不发往 API），但 UI 仍显示（以变灰样式呈现），数据不丢失，可用
+     * `/显示` 命令恢复。0 = 不隐藏任何轮次（默认）。
+     *
+     * 由 `/隐藏` `/显示` 斜杠命令修改，setter 仅限类内部。
+     */
+    var hiddenTurns by mutableStateOf(0)
+        private set
+
+    /**
+     * UI 变灰边界（派生状态）：messages 列表中 index 小于此值的气泡将变灰呈现。
+     *
+     * 基于 [hiddenTurns] 与当前 messages 的 user 消息分布派生，与 [applyContextWindow]
+     * 的 API 上下文切片逻辑保持一致（都以 user 锚点切），确保"变灰的"恰好等于"不发给 AI 的"。
+     * 0 表示无变灰。
+     */
+    val grayedOutBeforeIndex: Int by derivedStateOf {
+        if (hiddenTurns <= 0) return@derivedStateOf 0
+        // 以 user 消息（排除工具状态行 isToolMessage）为锚点统计轮数
+        val userIdx = messages.indices.filter { messages[it].isFromUser && !messages[it].isToolMessage }
+        if (userIdx.size <= hiddenTurns) {
+            // 极端：隐藏数 >= 总轮数（正常被 coerceAtMost 限制不会到此），全部变灰
+            messages.size
+        } else {
+            // 倒数第 (total - hidden) 个 user 消息即为可见区起点，之前的变灰
+            userIdx[hiddenTurns]
+        }
+    }
 
     /** 是否正在等待 AI 回复或执行工具，用于显示加载指示器 */
     var isLoading by mutableStateOf(false)
@@ -884,6 +917,8 @@ class CompanionViewModel(
         try {
             if (chatData.convId != null) {
                 currentConversationId = chatData.convId
+                // 恢复该对话的上下文隐藏配置（每对话独立）
+                hiddenTurns = loadHiddenTurns(chatData.convId)
                 messages = parseMessagesJson(chatData.convMessages ?: "[]")
                 // 恢复 API 层对话上下文（conversationHistory 是普通列表，非 Compose 状态）
                 conversationHistory.clear()
@@ -895,6 +930,8 @@ class CompanionViewModel(
                     }
                 }
             } else if (!chatData.chatHistory.isNullOrEmpty()) {
+                // 旧版 chat_history 兼容路径：无对话级配置，重置隐藏数
+                hiddenTurns = 0
                 messages = parseMessagesJson(chatData.chatHistory)
             }
         } catch (e: Exception) {
@@ -979,6 +1016,8 @@ class CompanionViewModel(
         }
         // 清空状态，开始新对话
         currentConversationId = null
+        // 新对话无隐藏配置
+        hiddenTurns = 0
         messages = emptyList()
         conversationHistory.clear()
         viewModelScope.launch(Dispatchers.IO) { performSave() }
@@ -1004,6 +1043,8 @@ class CompanionViewModel(
                 val conv = withContext(Dispatchers.IO) { core.getConversation(id) }
                 // mutableStateOf 写入在主线程
                 currentConversationId = conv.id
+                // 恢复该对话的上下文隐藏配置（每对话独立）
+                hiddenTurns = loadHiddenTurns(conv.id)
                 messages = parseMessagesJson(conv.messages)
                 // 恢复 API 层对话上下文（conversationHistory 是普通列表，非 Compose 状态）
                 conversationHistory.clear()
@@ -1520,6 +1561,20 @@ class CompanionViewModel(
         val text = inputText.trim()
         val hasImages = pendingImageUris.isNotEmpty()
         if ((text.isEmpty() && !hasImages) || isLoading) return
+
+        // ── 斜杠命令拦截 ──
+        // 以 "/" 开头且命中已知命令时，本地执行（隐藏/显示上下文窗口），不进入 Agent Loop。
+        // 命令处理不需要 API 配置，故放在 provider/key/model 检查之前。
+        // 仅纯文本（无图片）才判定为命令；带图片的 "/" 输入按普通消息发送。
+        if (!hasImages && text.startsWith("/")) {
+            val cmd = SlashCommandHandler.parse(text)
+            if (cmd !is SlashCommand.NotACommand) {
+                inputText = ""          // 清空输入框
+                executeSlashCommand(cmd)
+                return                  // 不进入 Agent Loop，零 token 消耗
+            }
+            // 未命中已知命令 → 继续走下方普通消息流程，把原文发给 AI
+        }
 
         val provider = currentProvider ?: return
         val key = apiKey ?: return
@@ -2241,8 +2296,10 @@ class CompanionViewModel(
      *
      * 结构（适配 DeepSeek Prefix Caching）：
      * 1. system 消息（系统提示词 + 用户偏好）—— 稳定前缀，可被缓存
-     * 2. conversationHistory 中的所有消息（user / assistant / tool）
-     *    - 已过去的 tool result 会被压缩为简短摘要，减少上下文占用
+     * 2. conversationHistory 中经 [applyContextWindow] 切片后的消息（user / assistant / tool）
+     *    —— 若用户通过 `/隐藏` 命令排除了最早若干轮，那些轮次不会出现在此处，
+     *       以控制上下文 token 量；切片以 user 消息为锚点，保证 tool_calls ↔ tool_result
+     *       配对完整，不会被切断。
      *
      * @return 完整的 API 消息列表，每个元素是 JSONObject
      */
@@ -2297,15 +2354,163 @@ class CompanionViewModel(
             put("content", stableContent)
         })
 
-        // 追加对话历史，移除内部标记字段 _msg_id（不影响 API 请求内容，保证缓存前缀稳定）
-        // _msg_id 仅用于 deleteMessage/rerollMessage 精确定位条目
-        for (entry in conversationHistory) {
+        // 追加对话历史（经上下文窗口切片），移除内部标记字段 _msg_id
+        // _msg_id 不影响 API 请求内容，移除后保证缓存前缀稳定，且仅用于 deleteMessage/rerollMessage 定位
+        for (entry in applyContextWindow(conversationHistory)) {
             val cleaned = JSONObject(entry.toString())
             cleaned.remove("_msg_id")
             apiMessages.add(cleaned)
         }
 
         return apiMessages
+    }
+
+    /**
+     * 按当前对话的 [hiddenTurns] 对 API 对话历史切片，返回实际应发给 LLM 的子区间。
+     *
+     * 一轮 = 一个 role=="user" 条目 + 其后所有 assistant/tool 条目（直到下个 user）。
+     * 隐藏最早 [hiddenTurns] 轮 = 从倒数第 (totalTurns - hiddenTurns) 个 user 条目开始保留。
+     * 以 user 为锚点切片，保证 tool_calls ↔ tool_result 配对永不被切断（切断会导致 API 400）。
+     *
+     * 注意：本函数处理的是发给 API 的 conversationHistory；
+     * 与 UI 侧 [grayedOutBeforeIndex]（处理 messages 变灰）逻辑保持一致。
+     *
+     * @param history 完整的 conversationHistory
+     * @return 经窗口过滤后的子列表（不复制，subList 视图）
+     */
+    private fun applyContextWindow(history: List<JSONObject>): List<JSONObject> {
+        if (hiddenTurns <= 0) return history
+        // 找出所有 user 条目的索引（轮的起点）
+        val userIdx = history.indices.filter { history[it].optString("role") == "user" }
+        if (userIdx.size <= hiddenTurns) {
+            // 极端：隐藏数 >= 总轮数。至少保留最后一轮，避免发空 history 导致 API 报错
+            if (userIdx.isEmpty()) return history
+            return history.subList(userIdx.last(), history.size)
+        }
+        // 从第 hiddenTurns 个 user（0-based）开始保留，即跳过最早 hiddenTurns 轮
+        val start = userIdx[hiddenTurns]
+        return history.subList(start, history.size)
+    }
+
+    /**
+     * 执行斜杠命令（`/隐藏` `/显示`）。纯本地操作，不进入 Agent Loop、不调用 API。
+     *
+     * 结果以工具状态消息（[ChatMessage.isToolMessage] = true）形式回显在聊天列表里，
+     * 复用 [ToolMessageRow] 的简洁样式；这类回显消息只进 UI（不进 conversationHistory，
+     * 不计 token）。
+     *
+     * @param cmd 已解析的命令（调用方已排除 [SlashCommand.NotACommand]）
+     */
+    private fun executeSlashCommand(cmd: SlashCommand) {
+        when (cmd) {
+            is SlashCommand.Hide -> when {
+                // all：一键隐藏到仅剩最近 1 轮（避免发空 history 让 API 报错）
+                cmd.all -> {
+                    val total = totalConversationTurns()
+                    val maxHide = (total - 1).coerceAtLeast(0)
+                    hiddenTurns = maxHide
+                    persistHiddenTurns()
+                    appendCommandStatus(
+                        if (total == 0) "当前还没有对话内容"
+                        else "已隐藏全部较早对话，仅保留最近 1 轮（共 $total 轮）"
+                    )
+                }
+                // 无参数：仅回显当前状态
+                cmd.n == null -> appendCommandStatus(currentContextStatus())
+                // 数字：累加隐藏，但至少保留 1 轮
+                else -> {
+                    val total = totalConversationTurns()
+                    val maxHide = (total - 1).coerceAtLeast(0)
+                    hiddenTurns = (hiddenTurns + cmd.n).coerceAtMost(maxHide)
+                    persistHiddenTurns()
+                    val remain = (total - hiddenTurns).coerceAtLeast(0)
+                    appendCommandStatus(
+                        if (total == 0) "当前还没有对话内容"
+                        else "已隐藏最早 $hiddenTurns 轮，还剩 $remain 轮会发给 $companionName（共 $total 轮）"
+                    )
+                }
+            }
+            is SlashCommand.Show -> when {
+                // all：一键恢复全部已隐藏对话
+                cmd.all -> {
+                    hiddenTurns = 0
+                    persistHiddenTurns()
+                    val total = totalConversationTurns()
+                    appendCommandStatus("已恢复全部对话（共 $total 轮）")
+                }
+                // 无参数：仅回显当前状态
+                cmd.n == null -> appendCommandStatus(currentContextStatus())
+                // 数字：累减放出，下限 0（0 即完全解开）
+                else -> {
+                    hiddenTurns = (hiddenTurns - cmd.n).coerceAtLeast(0)
+                    persistHiddenTurns()
+                    val total = totalConversationTurns()
+                    appendCommandStatus(
+                        if (hiddenTurns == 0) "已恢复全部对话（共 $total 轮）"
+                        else "已恢复，当前仍隐藏 $hiddenTurns 轮（共 $total 轮）"
+                    )
+                }
+            }
+            SlashCommand.NotACommand -> {
+                // 不会到达此处（调用方已过滤），兜底忽略
+            }
+        }
+    }
+
+    /** 统计 conversationHistory 中的总轮数（以 role=="user" 条目计） */
+    private fun totalConversationTurns(): Int =
+        conversationHistory.count { it.optString("role") == "user" }
+
+    /** 生成当前上下文隐藏状态的描述文本，用于无参数命令（/隐藏 /显示）回显 */
+    private fun currentContextStatus(): String {
+        val total = totalConversationTurns()
+        return if (hiddenTurns == 0) "当前未隐藏任何对话（共 $total 轮）"
+        else "当前隐藏最早 $hiddenTurns 轮对话（共 $total 轮），输入 /显示 N 可恢复"
+    }
+
+    /**
+     * 把命令回显作为一条工具状态消息加入 UI 列表（不进 conversationHistory、不计 token）。
+     * 复用工具状态行样式（箭头 + 小字描述），与工具执行反馈视觉一致。
+     */
+    private fun appendCommandStatus(text: String) {
+        messages = messages + ChatMessage(
+            id = "cmd_${UUID.randomUUID()}",
+            text = text,
+            isFromUser = false,
+            timestamp = LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm")),
+            isToolMessage = true,
+            toolDone = true,
+        )
+    }
+
+    /**
+     * 从 settings 表读取指定对话的隐藏轮数（suspend，内部切 IO 线程）。
+     * @param convId 对话 ID；null 或空则返回 0
+     */
+    private suspend fun loadHiddenTurns(convId: String?): Int {
+        if (convId.isNullOrEmpty()) return 0
+        return withContext(Dispatchers.IO) {
+            try {
+                core.getSetting("ctx_hidden:$convId")?.toIntOrNull() ?: 0
+            } catch (_: Exception) { 0 }
+        }
+    }
+
+    /**
+     * 持久化当前对话的隐藏轮数到 settings 表（每对话独立 key）。
+     * 在 IO 协程异步写入；值为 0 时写入 "0" 以覆盖旧值（等效于"解开"）。
+     * 无 [currentConversationId] 时跳过（新对话尚未建立，等首次发送建立后再持久化）。
+     */
+    private fun persistHiddenTurns() {
+        val id = currentConversationId ?: return
+        val value = hiddenTurns.toString()
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                core.setSetting("ctx_hidden:$id", value)
+            } catch (e: Exception) {
+                Log.e(TAG, "persistHiddenTurns 失败", e)
+            }
+        }
     }
 
 

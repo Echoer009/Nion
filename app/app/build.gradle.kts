@@ -12,8 +12,8 @@ android {
         applicationId = "com.echonion.nion"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20
-        versionName = "0.8.3"
+        versionCode = 21
+        versionName = "0.8.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -90,11 +90,6 @@ detekt {
     )
 }
 
-// 解决 Markwon 引入的 org.jetbrains:annotations-java5 与 annotations 重复类冲突
-configurations.all {
-    exclude(group = "org.jetbrains", module = "annotations-java5")
-}
-
 dependencies {
     // Compose BOM
     val composeBom = platform("androidx.compose:compose-bom:2026.05.00")
@@ -123,14 +118,6 @@ dependencies {
 
     // tyme4kt —— 农历/公历节日、二十四节气查询，用于 LLM 上下文时间后缀的日期与节日标注
     implementation("cn.6tail:tyme4kt:1.5.0")
-
-    // Markwon —— Markdown 渲染引擎，用于笔记型清单的实时 Markdown 编辑和预览
-    implementation("io.noties.markwon:core:4.6.2")
-    implementation("io.noties.markwon:editor:4.6.2") // 实时编辑高亮
-    implementation("io.noties.markwon:ext-tables:4.6.2") // 表格语法
-    implementation("io.noties.markwon:ext-tasklist:4.6.2") // 任务列表语法
-    implementation("io.noties.markwon:syntax-highlight:4.6.2") // 代码块语法高亮
-    implementation("io.noties.markwon:linkify:4.6.2") // 自动链接识别
 
     // WorkManager —— 后台提醒任务调度（渐进式循环、LLM 文案生成）
     implementation("androidx.work:work-runtime-ktx:2.10.0")

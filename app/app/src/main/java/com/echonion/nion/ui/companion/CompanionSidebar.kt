@@ -50,6 +50,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.border
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
@@ -104,8 +105,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -114,7 +118,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -2013,13 +2019,19 @@ private fun ChatHeader(
  * 聊天输入框 —— 无焦点时灰色边框，有焦点时主题色边框 + 底色。
  * 包含多行文本输入框、图片选择按钮和发送按钮。
  *
+ * 斜杠命令补全：当 [commandSuggestions] 非空时，命令列表直接嵌入输入框内部顶部，
+ * 输入框整体增高（命令作为输入框的一部分，无独立卡片、无阴影），与输入框浑然一体。
+ *
  * @param inputText 当前输入文本
  * @param onInputTextChanged 输入内容变更回调
  * @param onSendClick 点击发送按钮时触发
  * @param isLoading 是否正在加载（加载时禁用输入和发送）
- * @param pendingImageUri 待发送的图片 URI（用户已选但未发送），null 表示无图片
+ * @param pendingImageUris 待发送的图片 URI 列表
  * @param onPickImage 用户点击图片选择按钮时触发
  * @param onRemoveImage 用户移除已选图片时触发
+ * @param commandSuggestions 匹配到的斜杠命令列表；空则不显示补全区
+ * @param onPickCommand 用户点击某条补全命令时触发，回调传入触发词（如 "/隐藏"）
+ * @param focusRequester 输入框焦点控制器，用于补全后把焦点与光标收回输入框末尾
  */
 @Composable
 private fun ChatInputBar(
@@ -2030,11 +2042,28 @@ private fun ChatInputBar(
     pendingImageUris: List<Uri> = emptyList(),
     onPickImage: () -> Unit = {},
     onRemoveImage: (Uri) -> Unit = {},
+    commandSuggestions: List<SlashCommandHandler.CommandSuggestion> = emptyList(),
+    onPickCommand: (String) -> Unit = {},
+    focusRequester: FocusRequester = FocusRequester(),
 ) {
     val focusState = remember { mutableStateOf(false) }
     val isFocused = focusState.value
     val hasImages = pendingImageUris.isNotEmpty()
     val canSend = (inputText.isNotBlank() || hasImages) && !isLoading
+    val hasCommands = commandSuggestions.isNotEmpty()
+    // 内部维护 TextFieldValue 以精确控制光标位置
+    // （用 .value 方式，与现有代码风格一致，无需 by 委托的额外 import）
+    val fieldValueState = remember { mutableStateOf(TextFieldValue(inputText)) }
+    // 外部 inputText 变化（命令补全点击 / 发送后清空）时同步到 fieldValueState，
+    // 并把光标置于文本末尾——确保补全后光标出现在命令之后，方便用户接着输入数字参数
+    LaunchedEffect(inputText) {
+        if (fieldValueState.value.text != inputText) {
+            fieldValueState.value = TextFieldValue(
+                text = inputText,
+                selection = TextRange(inputText.length),
+            )
+        }
+    }
     // Box 包裹输入框 + 悬浮缩略图行，缩略图不占布局空间
     Box {
         // 悬浮缩略图行：绝对定位在输入框上方，横向可滚动，不占布局空间
@@ -2120,6 +2149,50 @@ private fun ChatInputBar(
             ),
             modifier = Modifier.fillMaxWidth(),
         ) {
+            Column {
+                // 斜杠命令补全：嵌入输入框内部顶部，输入框整体增高（无独立阴影/卡片）
+                if (hasCommands) {
+                    for (s in commandSuggestions) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { onPickCommand(s.trigger) }
+                                .padding(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            // 命令触发词：主色加粗，最醒目
+                            Text(
+                                s.trigger,
+                                style = MaterialTheme.typography.labelLarge,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            // 别名（英文）：小字灰色，提示也可用英文输入
+                            if (s.aliases.isNotEmpty()) {
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    s.aliases.joinToString(" "),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
+                                )
+                            }
+                            Spacer(Modifier.weight(1f))
+                            // 用途说明（含示例）
+                            Text(
+                                s.description,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
+                            )
+                        }
+                    }
+                    // 补全区与输入行之间的细分隔线，视觉区隔但保持一体感
+                    HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 12.dp),
+                        thickness = 1.dp,
+                        color = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                    )
+                }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2142,11 +2215,17 @@ private fun ChatInputBar(
                     )
                 }
                 BasicTextField(
-                    value = inputText,
-                    onValueChange = onInputTextChanged,
+                    value = fieldValueState.value,
+                    onValueChange = {
+                        // 同步内部 TextFieldValue（保留光标/选区信息）+ 通知外部文本变化
+                        fieldValueState.value = it
+                        onInputTextChanged(it.text)
+                    },
                     modifier = Modifier
                         .weight(1f)
                         .padding(vertical = 10.dp)
+                        // focusRequester 让补全命令点击后能请求焦点，光标由 LaunchedEffect 置末尾
+                        .focusRequester(focusRequester)
                         .onFocusChanged { focusState.value = it.isFocused },
                     textStyle = MaterialTheme.typography.bodyLarge.copy(
                         color = MaterialTheme.colorScheme.onSurface,
@@ -2180,6 +2259,7 @@ private fun ChatInputBar(
                     )
                 }
             }
+            } // Column 闭合（命令补全区 + 输入行）
         }
     }
 }
@@ -2354,9 +2434,11 @@ private fun ChatContent(
                     }
                 }
             }
-            items(messages, key = { it.id }) { message ->
+            itemsIndexed(messages, key = { _, msg -> msg.id }) { index, message ->
                 // 当前消息是否被长按选中
                 val isSelected = selectedMessageId == message.id
+                // 是否处于"已隐藏轮次"区间（早于上下文窗口起点）→ 变灰呈现，提示用户这部分 AI 已看不到
+                val isGrayedOut = index < viewModel.grayedOutBeforeIndex
                 // 仅首次出现的消息播放入场动画：表格 overlay 收回时 AnimatedContent 重建列表，
                 // 若所有消息重新播放 scaleIn/fadeIn 会干扰 sharedElement 表格的 bounds，导致
                 // morph 退出时表格"覆盖"在列表上。已记录过的消息直接以最终状态显示，保证
@@ -2374,6 +2456,8 @@ private fun ChatContent(
                         message,
                         stickers = viewModel.stickers,
                         isSelected = isSelected,
+                        // 传入变灰标记：早于上下文窗口起点的消息整体降透明度
+                        isGrayedOut = isGrayedOut,
                         // 长按回调：记录选中消息 ID
                         onLongClick = { selectedMessageId = message.id },
                         // 复制回调：将消息文本写入剪贴板，然后收起操作栏
@@ -2451,7 +2535,12 @@ private fun ChatContent(
             }
         }
 
-        // 输入框容器
+        // 斜杠命令补全：输入以 "/" 开头时匹配命令；命令列表直接传入 ChatInputBar，
+        // 在输入框内部顶部展开（输入框增高，无独立卡片）
+        val matchedCmds = remember(inputText) { SlashCommandHandler.matchSuggestions(inputText) }
+        // 输入框焦点控制器：补全命令后请求焦点，配合 ChatInputBar 内部把光标置末尾
+        val inputFocusRequester = remember { FocusRequester() }
+        // 输入框容器（命令补全区嵌入其内部）
         ChatInputBar(
             inputText = inputText,
             onInputTextChanged = { viewModel.inputText = it },
@@ -2464,6 +2553,14 @@ private fun ChatContent(
                 )
             },
             onRemoveImage = { uri -> viewModel.removePendingImage(uri) },
+            commandSuggestions = matchedCmds,
+            onPickCommand = { trigger ->
+                // 补全：填入触发词 + 尾随空格，等待用户输入数字
+                viewModel.inputText = "$trigger "
+                // 请求焦点，光标会由 ChatInputBar 的 LaunchedEffect 自动置于末尾
+                inputFocusRequester.requestFocus()
+            },
+            focusRequester = inputFocusRequester,
         )
                 }  // Column 结束（列表分支内的聊天界面 Column）
                 }  // if (tableTarget == null) 列表分支结束
@@ -2656,6 +2753,8 @@ private fun MessageBubble(
     message: ChatMessage,
     stickers: List<StickerData> = emptyList(),
     isSelected: Boolean = false,
+    // 是否处于"已隐藏轮次"区间：true 时气泡整体降透明度，提示用户这部分内容 AI 已看不到
+    isGrayedOut: Boolean = false,
     onLongClick: () -> Unit = {},
     onCopy: () -> Unit = {},
     onRetry: () -> Unit = {},
@@ -2667,12 +2766,16 @@ private fun MessageBubble(
     onTableClick: (tableIndex: Int) -> Unit = {},
 ) {
     val isUser = message.isFromUser
-    // 工具消息：简洁状态行，不渲染气泡，不支持长按操作
+    // 变灰透明度：已隐藏区间的消息降至 0.4f，视觉上明显区别于活跃上下文
+    val contentAlpha = if (isGrayedOut) 0.4f else 1f
+    // 工具消息：简洁状态行，不渲染气泡，不支持长按操作。变灰时同样降透明度。
     if (message.isToolMessage) {
-        ToolMessageRow(message, onClickTool = {
-            // Phone Agent 功能暂未成熟，注释禁用悬浮窗启动
-            // NionApp.instance?.let { PhoneAgentFloatingService.start(it) }
-        })
+        Box(modifier = Modifier.alpha(contentAlpha)) {
+            ToolMessageRow(message, onClickTool = {
+                // Phone Agent 功能暂未成熟，注释禁用悬浮窗启动
+                // NionApp.instance?.let { PhoneAgentFloatingService.start(it) }
+            })
+        }
         return
     }
 
@@ -2705,8 +2808,10 @@ private fun MessageBubble(
     ) {
         // 气泡容器：单一 Box + clip 保证圆角裁剪
         // animateContentSize 让气泡在操作栏出现/消失时弹簧变形
+        // alpha(contentAlpha) 让"已隐藏轮次"的消息整体变灰，与活跃上下文区分
         Box(
             modifier = Modifier
+                .alpha(contentAlpha)
                 .clip(bubbleShape)
                 .background(bubbleColor)
                 .animateContentSize(
