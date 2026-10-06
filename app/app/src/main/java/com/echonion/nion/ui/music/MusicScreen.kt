@@ -1026,16 +1026,13 @@ private fun MusicToolbar(
 @Composable
 private fun SelectorCell(
     option: SelectorOption,
-    // 标签文字透明度：展开时小淡入避免文字闪现（图标不淡出，保持推动观感）
+    // 标签文字透明度：展开时小淡入、收起时快速淡出（图标不参与淡入淡出）
     textAlpha: Float = 1f,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
-    val tint = if (selected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    // 图标与收起态完全一致（24dp + onSurfaceVariant）：不随选中态变色变大小，
+    // 避免"点开后碟片和原来长得不一样"；选中信号只由文字（主色+半粗）表达
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
@@ -1044,12 +1041,22 @@ private fun SelectorCell(
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
     ) {
-        Icon(option.icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+        Icon(
+            option.icon,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(24.dp),
+        )
         Spacer(modifier = Modifier.width(6.dp))
         Text(
             option.label,
             style = MaterialTheme.typography.labelLarge,
-            color = tint.copy(alpha = textAlpha),
+            fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
+            color = (if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            }).copy(alpha = textAlpha),
         )
     }
 }
@@ -1091,7 +1098,7 @@ private fun SearchFieldRectangle(vm: MusicViewModel, modifier: Modifier = Modifi
                 LucideIcons.Search,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(20.dp),
             )
             Spacer(modifier = Modifier.width(8.dp))
             Box(
