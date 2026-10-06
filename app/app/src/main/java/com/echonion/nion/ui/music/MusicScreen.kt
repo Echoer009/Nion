@@ -34,6 +34,13 @@ import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.FloatingActionButtonDefaults
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
@@ -78,7 +85,7 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FilterChip
+import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -466,8 +473,20 @@ private fun LocalLibraryContent(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        // ===== 搜索框（与云端同一组件：本地由 VM 分发为内存过滤）=====
-        MusicSearchField(vm)
+        // ===== 顶栏：标题 + 视图/排序图标选择器 + 搜索开关（与云端同一组件）=====
+        var searchOpen by remember { mutableStateOf(false) }
+        MusicToolbar(
+            vm = vm,
+            title = "本地曲目",
+            showPlaylists = showPlaylists,
+            onSelectView = { showPlaylists = it },
+            searchOpen = searchOpen,
+            onToggleSearch = {
+                // 笔记页同款：收起时清空查询词（视图自动回落专辑列表）
+                searchOpen = !searchOpen
+                if (!searchOpen) vm.searchQuery = ""
+            },
+        )
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -476,38 +495,45 @@ private fun LocalLibraryContent(
             ErrorRetryBar(error = error) { vm.loadLocalTracks(force = true) }
         }
 
-        // ===== 视图切换：专辑|歌单（两音源共用同一组件；搜索激活时隐藏）=====
-        if (vm.searchQuery.isBlank()) {
-            LibraryViewChips(showPlaylists = showPlaylists, onSelect = { showPlaylists = it })
-            Spacer(modifier = Modifier.height(8.dp))
-        }
 
-        if (showPlaylists && vm.searchQuery.isBlank()) {
-            // ===== 歌单视图：与云端共用同一套组件（列表/详情/morph/新建对话框）=====
-            vm.playlistError?.let { error ->
-                ErrorRetryBar(error = error) { vm.loadPlaylists(force = true) }
-            }
-            PlaylistPanel(
-                vm = vm,
-                trackCoverModifier = trackCoverModifier,
-                onPlayFromList = onPlayFromList,
-            )
-        } else {
-            // ===== 排序切换（本地特有：默认名称序 / 最新添加）=====
-            // 仅在专辑列表视图且未搜索时显示，避免与搜索结果/详情争抢纵向空间
-            if (vm.currentAlbum == null && vm.searchQuery.isBlank()) {
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    LocalAlbumSort.values().forEach { sort ->
-                        FilterChip(
-                            selected = vm.localAlbumSort == sort,
-                            onClick = { vm.localAlbumSort = sort },
-                            label = { Text(sort.label) },
-                        )
-                    }
+        // ===== 专辑视图 ↔ 歌单视图：横向滑动 + 淡入淡出切换动画 =====
+        // 搜索激活时 targetState 强制回落 false（搜索结果在专辑分支内展示），
+        // 由 AnimatedContent 驱动两个方向的滑动过渡，与专辑↔详情 morph 风格一致
+        AnimatedContent(
+            targetState = showPlaylists && vm.searchQuery.isBlank(),
+            transitionSpec = {
+                if (targetState) {
+                    // 进入歌单视图：歌单从右滑入，专辑向左滑出
+                    (
+                        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } +
+                            fadeIn(tween(300))
+                    ) togetherWith (
+                        slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeOut(tween(200))
+                    )
+                } else {
+                    // 回到专辑视图：专辑从左滑入，歌单向右滑出
+                    (
+                        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeIn(tween(300))
+                    ) togetherWith (
+                        slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } +
+                            fadeOut(tween(200))
+                    )
                 }
-                Spacer(modifier = Modifier.height(8.dp))
-            }
-
+            },
+            label = "libraryView",
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        ) { showPlaylistView ->
+            if (showPlaylistView) {
+                // ===== 歌单视图：列表/详情 morph + 右下角新建 FAB（与云端共用）=====
+                PlaylistViewWithFab(
+                    vm = vm,
+                    trackCoverModifier = trackCoverModifier,
+                    onPlayFromList = onPlayFromList,
+                )
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
         // ===== 主体：专辑列表 ↔ 专辑详情 morph（与云端同一套结构与动画）=====
         // 本地专辑 id 自带 "local-" 前缀，拼出的 sharedElement key
         // （"music_album_local-<albumId>"）天然与服务器专辑 key 错开不冲突
@@ -573,7 +599,9 @@ private fun LocalLibraryContent(
                 }
             }
         }
-        } // else（专辑视图分支）结束
+                } // 专辑视图内层 Column 结束
+            } // if(showPlaylistView)/else 结束
+        } // AnimatedContent(专辑↔歌单视图切换) 结束
     }
 }
 
@@ -628,8 +656,20 @@ private fun ServerMusicContent(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        // ===== 搜索框（与本地音源共用同一组件）=====
-        MusicSearchField(vm)
+        // ===== 顶栏：标题 + 视图选择器 + 搜索开关（与本地音源同一组件）=====
+        var searchOpen by remember { mutableStateOf(false) }
+        MusicToolbar(
+            vm = vm,
+            title = if (vm.source == MusicSource.BRAINGIRL) "类脑娘服务器" else "自己的服务器",
+            showPlaylists = showPlaylists,
+            onSelectView = { showPlaylists = it },
+            searchOpen = searchOpen,
+            onToggleSearch = {
+                // 笔记页同款：收起时清空查询词（视图自动回落专辑列表）
+                searchOpen = !searchOpen
+                if (!searchOpen) vm.searchQuery = ""
+            },
+        )
 
         Spacer(modifier = Modifier.height(8.dp))
 
@@ -638,23 +678,42 @@ private fun ServerMusicContent(
             ErrorRetryBar(error = error) { vm.loadAlbums(force = true) }
         }
 
-        // ===== 视图切换：专辑|歌单（与本地音源共用同一组件；搜索激活时隐藏）=====
-        if (vm.searchQuery.isBlank()) {
-            LibraryViewChips(showPlaylists = showPlaylists, onSelect = { showPlaylists = it })
-            Spacer(modifier = Modifier.height(8.dp))
-        }
 
-        if (showPlaylists && vm.searchQuery.isBlank()) {
-            // ===== 歌单视图：与本地音源共用同一套组件（列表/详情/morph/新建对话框）=====
-            vm.playlistError?.let { error ->
-                ErrorRetryBar(error = error) { vm.loadPlaylists(force = true) }
-            }
-            PlaylistPanel(
-                vm = vm,
-                trackCoverModifier = trackCoverModifier,
-                onPlayFromList = onPlayFromList,
-            )
-        } else {
+        // ===== 专辑视图 ↔ 歌单视图：横向滑动 + 淡入淡出切换动画（与本地音源同款）=====
+        AnimatedContent(
+            targetState = showPlaylists && vm.searchQuery.isBlank(),
+            transitionSpec = {
+                if (targetState) {
+                    (
+                        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } +
+                            fadeIn(tween(300))
+                    ) togetherWith (
+                        slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeOut(tween(200))
+                    )
+                } else {
+                    (
+                        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeIn(tween(300))
+                    ) togetherWith (
+                        slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } +
+                            fadeOut(tween(200))
+                    )
+                }
+            },
+            label = "libraryViewServer",
+            modifier = Modifier.weight(1f).fillMaxWidth(),
+        ) { showPlaylistView ->
+            if (showPlaylistView) {
+                // ===== 歌单视图：列表/详情 morph + 右下角新建 FAB（与本地音源共用）=====
+                PlaylistViewWithFab(
+                    vm = vm,
+                    trackCoverModifier = trackCoverModifier,
+                    onPlayFromList = onPlayFromList,
+                )
+            } else {
+                Column(modifier = Modifier.fillMaxSize()) {
+
 
         // ===== 主体：专辑列表 ↔ 专辑详情 morph（照 TaskScreen 任务卡↔详情浮层范式）=====
         // 局部 SharedTransitionLayout + AnimatedContent(vm.currentAlbum)：
@@ -715,38 +774,280 @@ private fun ServerMusicContent(
                 }
             }
         }
-        } // else（专辑视图分支）结束
+                } // 专辑视图内层 Column 结束
+            } // if(showPlaylistView)/else 结束
+        } // AnimatedContent(专辑↔歌单视图切换) 结束
     }
 }
 
 /**
- * 曲库搜索框 —— 本地与服务器音源共用（外观完全一致）。
- * 输入写入 [MusicViewModel.searchQuery]，VM 内按音源分发：
- * 服务器 debounce 后走 search3，本地 debounce 后走内存过滤。
+ * 曲库顶栏 —— 标题 + 排序/视图图标选择器 + 搜索开关（本地与服务器音源共用）。
+ * 控件全部图标化且只占一行：排序与视图切换用 [ExpandableIconSelector]
+ * （点按原地 share-element 展开成选项条），搜索照抄笔记页交互
+ * （图标开关 + 展开滑出输入框 + 激活时图标染主色）。
  *
- * @param vm 共享的音乐 ViewModel
+ * @param vm 共享的音乐 ViewModel（读音源/排序状态，写搜索词）
+ * @param title 左侧标题（音源名：本地曲目 / 类脑娘服务器 / 自己的服务器）
+ * @param showPlaylists 当前是否处于歌单视图
+ * @param onSelectView 视图切换回调（专辑 ↔ 歌单）
+ * @param searchOpen 搜索框是否展开
+ * @param onToggleSearch 搜索开关回调（收起时由调用方清空查询词）
  */
 @Composable
-private fun MusicSearchField(vm: MusicViewModel) {
-    OutlinedTextField(
-        value = vm.searchQuery,
-        onValueChange = {
-            vm.searchQuery = it
-        },
-        modifier = Modifier.fillMaxWidth(),
-        placeholder = { Text("搜索歌曲 / 专辑 / 艺术家") },
-        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-        // 输入非空时显示一键清空按钮
-        trailingIcon = {
-            if (vm.searchQuery.isNotBlank()) {
-                IconButton(onClick = { vm.searchQuery = "" }) {
-                    Icon(Icons.Default.Close, contentDescription = "清空搜索")
+private fun MusicToolbar(
+    vm: MusicViewModel,
+    title: String,
+    showPlaylists: Boolean,
+    onSelectView: (Boolean) -> Unit,
+    searchOpen: Boolean,
+    onToggleSearch: () -> Unit,
+) {
+    Column {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold,
+                modifier = Modifier.weight(1f),
+            )
+            // 排序选择器：仅本地音源 + 专辑视图 + 未搜索时出现（云端排序由服务端定）
+            if (vm.source == MusicSource.LOCAL && !showPlaylists && vm.searchQuery.isBlank()) {
+                ExpandableIconSelector(
+                    sharedKey = "music_sort_selector",
+                    selectedKey = if (vm.localAlbumSort == LocalAlbumSort.TITLE) "title" else "newest",
+                    options = listOf(
+                        SelectorOption("title", Icons.Default.SortByAlpha, "名称"),
+                        SelectorOption("newest", Icons.Default.Schedule, "最新"),
+                    ),
+                    onSelect = { key ->
+                        vm.localAlbumSort = if (key == "title") LocalAlbumSort.TITLE else LocalAlbumSort.NEWEST
+                    },
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            // 视图选择器：专辑 | 歌单（搜索激活时隐藏，搜索结果在专辑视图内展示）
+            if (vm.searchQuery.isBlank()) {
+                ExpandableIconSelector(
+                    sharedKey = "music_view_selector",
+                    selectedKey = if (showPlaylists) "playlist" else "album",
+                    options = listOf(
+                        SelectorOption("album", Icons.Default.Album, "专辑"),
+                        SelectorOption("playlist", Icons.Default.QueueMusic, "歌单"),
+                    ),
+                    onSelect = { key -> onSelectView(key == "playlist") },
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+            }
+            // 搜索开关：笔记页同款 —— 激活时图标染主色
+            IconButton(onClick = onToggleSearch) {
+                Icon(
+                    Icons.Default.Search,
+                    contentDescription = "搜索音乐",
+                    tint = if (searchOpen) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.onSurface
+                    },
+                )
+            }
+        }
+        // 搜索框：笔记页同款 —— expandVertically 从顶栏下方滑出，收起即清空
+        AnimatedVisibility(
+            visible = searchOpen,
+            enter = expandVertically() + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            OutlinedTextField(
+                value = vm.searchQuery,
+                onValueChange = { vm.searchQuery = it },
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("搜索歌曲 / 专辑 / 艺术家") },
+                singleLine = true,
+                shape = RoundedCornerShape(14.dp),
+            )
+        }
+    }
+}
+
+/**
+ * 展开式图标选择器的一个选项。
+ *
+ * @property key 稳定标识（用于回调与选中判断）
+ * @property icon 图标
+ * @property label 两字短标签（等宽格子内居中对齐）
+ */
+private data class SelectorOption(
+    val key: String,
+    val icon: ImageVector,
+    val label: String,
+)
+
+/**
+ * 展开式图标选择器 —— 收起态是单个图标按钮（显示当前选中项），
+ * 点按后以 sharedElement 容器 morph 原地展开成等宽选项条（图标+两字标签，
+ * 当前项染主色）；点选某项后收回 morph 回单图标并回调。未来加选项只需
+ * 在 options 里加一项，顶栏占位不变。
+ *
+ * @param sharedKey sharedElement 键（收起/展开两态互为同一元素）
+ * @param selectedKey 当前选中项 key
+ * @param options 全部选项
+ * @param onSelect 点选某项时的回调（收起动画由组件自理）
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun ExpandableIconSelector(
+    sharedKey: String,
+    selectedKey: String,
+    options: List<SelectorOption>,
+    onSelect: (String) -> Unit,
+) {
+    // 展开/收起状态：局部持有，点选即收
+    var expanded by remember { mutableStateOf(false) }
+    val selected = options.first { it.key == selectedKey }
+
+    SharedTransitionLayout {
+        AnimatedContent(
+            targetState = expanded,
+            transitionSpec = {
+                // 容器（sharedElement）bounds morph 由 sharedElement 机制驱动，
+                // 这里只补内容淡入淡出与尺寸动画
+                fadeIn(tween(200)) togetherWith fadeOut(tween(150)) using SizeTransform(clip = false)
+            },
+            label = sharedKey,
+        ) { isOpen ->
+            if (!isOpen) {
+                // 收起态：当前项的单图标圆形按钮
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .sharedElement(
+                            rememberSharedContentState(sharedKey),
+                            this@AnimatedContent,
+                        )
+                        .size(40.dp)
+                        .clip(CircleShape)
+                        .clickable { expanded = true },
+                ) {
+                    Icon(
+                        selected.icon,
+                        contentDescription = selected.label,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            } else {
+                // 展开态：等宽格子选项条（浅色圆角容器），当前项染主色
+                Row(
+                    modifier = Modifier
+                        .sharedElement(
+                            rememberSharedContentState(sharedKey),
+                            this@AnimatedContent,
+                        )
+                        .clip(RoundedCornerShape(20.dp))
+                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
+                        .padding(horizontal = 4.dp, vertical = 2.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    options.forEach { opt ->
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .width(52.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .clickable {
+                                    expanded = false
+                                    onSelect(opt.key)
+                                }
+                                .padding(vertical = 6.dp),
+                        ) {
+                            Icon(
+                                opt.icon,
+                                contentDescription = null,
+                                tint = if (opt.key == selectedKey) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                            Text(
+                                opt.label,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (opt.key == selectedKey) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                },
+                            )
+                        }
+                    }
                 }
             }
-        },
-        singleLine = true,
-        shape = RoundedCornerShape(14.dp),
-    )
+        }
+    }
+}
+
+/**
+ * 歌单视图（含新建 FAB）—— 歌单列表 ↔ 详情 morph 面板 + 右下角新建按钮。
+ * FAB 复用任务页同款样式（圆角 16 / 主色 / Add 图标，淡入淡出显隐），
+ * 仅在歌单列表态（未打开详情）显示；点击弹新建歌单对话框。
+ * 本地与服务器音源共用。
+ */
+@Composable
+private fun PlaylistViewWithFab(
+    vm: MusicViewModel,
+    // 曲目行小封面 sharedElement 工厂（点歌时飞成播放页大封面）
+    trackCoverModifier: @Composable (String) -> Modifier,
+    // 从列表点歌回调：展开播放页并配对封面 morph
+    onPlayFromList: (String) -> Unit,
+) {
+    // 新建歌单对话框开关（与 FAB 同生命周期）
+    var showCreateDialog by remember { mutableStateOf(false) }
+    if (showCreateDialog) {
+        CreatePlaylistDialog(
+            onDismiss = { showCreateDialog = false },
+            onConfirm = { name, comment ->
+                showCreateDialog = false
+                vm.createPlaylist(name, comment)
+            },
+        )
+    }
+    Box(modifier = Modifier.fillMaxSize()) {
+        Column(modifier = Modifier.fillMaxSize()) {
+            // 歌单加载/操作错误条（点击强制重载）
+            vm.playlistError?.let { error ->
+                ErrorRetryBar(error = error) { vm.loadPlaylists(force = true) }
+            }
+            PlaylistPanel(
+                vm = vm,
+                trackCoverModifier = trackCoverModifier,
+                onPlayFromList = onPlayFromList,
+            )
+        }
+        // 新建歌单 FAB：任务页同款（仅歌单列表态显示，详情态淡出）
+        AnimatedVisibility(
+            visible = vm.currentPlaylist == null,
+            enter = fadeIn(tween(250, easing = FastOutSlowInEasing)),
+            exit = fadeOut(tween(180, easing = FastOutSlowInEasing)),
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 8.dp, bottom = 8.dp),
+        ) {
+            FloatingActionButton(
+                onClick = { showCreateDialog = true },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                elevation = FloatingActionButtonDefaults.elevation(
+                    defaultElevation = 0.dp,
+                    hoveredElevation = 0.dp,
+                ),
+                shape = RoundedCornerShape(16.dp),
+            ) {
+                Icon(Icons.Default.Add, contentDescription = "新建歌单")
+            }
+        }
+    }
 }
 
 /**
@@ -777,10 +1078,11 @@ private fun ErrorRetryBar(error: String, onRetry: () -> Unit) {
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
             )
-            Text(
-                "点击重试",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.primary,
+            // 重试操作用 Refresh 图标（无障碍朗读由整条 clickable 语义兜底）
+            Icon(
+                Icons.Default.Refresh,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.primary,
             )
         }
     }
@@ -1019,31 +1321,6 @@ private fun SearchResultContent(
  * ============================================================ */
 
 /**
- * 曲库视图切换 Chips —— 专辑 | 歌单，本地与服务器音源共用（搜索激活时由调用方隐藏）。
- *
- * @param showPlaylists true=当前选中"歌单"视图
- * @param onSelect 点击切换回调
- */
-@Composable
-private fun LibraryViewChips(
-    showPlaylists: Boolean,
-    onSelect: (Boolean) -> Unit,
-) {
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        FilterChip(
-            selected = !showPlaylists,
-            onClick = { onSelect(false) },
-            label = { Text("专辑") },
-        )
-        FilterChip(
-            selected = showPlaylists,
-            onClick = { onSelect(true) },
-            label = { Text("歌单") },
-        )
-    }
-}
-
-/**
  * 歌单面板 —— 歌单列表 ↔ 歌单详情 morph（结构与专辑列表 ↔ 专辑详情完全一致）。
  * 本地与服务器音源共用：数据全部来自 [MusicViewModel] 的统一歌单状态，
  * 打开/新建/删除等操作由 VM 按音源分发，本组件不感知来源。
@@ -1057,18 +1334,6 @@ private fun PlaylistPanel(
     // 从列表点歌回调：展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
 ) {
-    // 新建歌单对话框的开关（提升到面板级：列表↔详情切换不丢状态）
-    var showCreateDialog by remember { mutableStateOf(false) }
-    if (showCreateDialog) {
-        CreatePlaylistDialog(
-            onDismiss = { showCreateDialog = false },
-            onConfirm = { name, comment ->
-                showCreateDialog = false
-                vm.createPlaylist(name, comment)
-            },
-        )
-    }
-
     // 局部 SharedTransitionLayout + AnimatedContent(currentPlaylist)：
     // 歌单行与详情头部通过同 key 的 sharedElement（"music_playlist_<id>"）配对，
     // 本地歌单 id 自带 "local-" 前缀，与云端歌单 key 天然错开
@@ -1101,12 +1366,11 @@ private fun PlaylistPanel(
                     onPlayFromList = onPlayFromList,
                 )
             } else {
-                // 歌单列表分支（新建入口 + 歌单行 + 删除）
+                // 歌单列表分支（歌单行 + 删除；新建入口由外层 FAB 承担）
                 PlaylistListContent(
                     vm = vm,
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedVisibilityScope = this@AnimatedContent,
-                    onCreate = { showCreateDialog = true },
                 )
             }
         }
@@ -1114,8 +1378,8 @@ private fun PlaylistPanel(
 }
 
 /**
- * 歌单列表内容 —— 新建入口行 + 歌单行（名称 + 曲数 + 说明摘要 + 删除按钮）。
- * 加载中/空态与 [AlbumListContent] 同构。
+ * 歌单列表内容 —— 歌单行（名称 + 曲数 + 说明摘要 + 删除按钮）。
+ * 加载中/空态与 [AlbumListContent] 同构（新建歌单由外层 FAB 触发）。
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -1124,7 +1388,6 @@ private fun PlaylistListContent(
     // 歌单行 morph：需这两个作用域生成 sharedElement key
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
-    onCreate: () -> Unit,
 ) {
     if (vm.isLoadingPlaylists && vm.playlists.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1136,30 +1399,6 @@ private fun PlaylistListContent(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        // 新建歌单入口：整行可点，弹名称/说明对话框
-        item(key = "playlist_create") {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable(onClick = onCreate)
-                    .padding(horizontal = 8.dp, vertical = 12.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    Icons.Default.Add,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                )
-                Spacer(modifier = Modifier.width(12.dp))
-                Text(
-                    "新建歌单",
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Medium,
-                )
-            }
-        }
         items(vm.playlists, key = { "playlist-${it.id}" }) { playlist ->
             PlaylistRow(
                 playlist = playlist,
@@ -1173,7 +1412,7 @@ private fun PlaylistListContent(
             item(key = "playlist_empty") {
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Text(
-                        "还没有歌单，点上面新建一个",
+                        "还没有歌单，点右下角 + 新建一个",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -2368,10 +2607,9 @@ private fun EmptyHint(
         )
         if (actionLabel != null) {
             Spacer(modifier = Modifier.height(16.dp))
-            OutlinedButton(onClick = onAction) {
-                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-                Spacer(modifier = Modifier.width(4.dp))
-                Text(actionLabel)
+            // 图标优先：操作按钮只保留 Refresh 图标，语义由 contentDescription 朗读
+            OutlinedIconButton(onClick = onAction) {
+                Icon(Icons.Default.Refresh, contentDescription = actionLabel)
             }
         }
     }
