@@ -44,6 +44,8 @@ import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -820,8 +822,27 @@ private fun MusicToolbar(
         AnimatedContent(
             targetState = mode,
             transitionSpec = {
-                // 容器 bounds 一致（恒定行高），morph 主要是内容交叉淡化
-                fadeIn(tween(200)) togetherWith fadeOut(tween(150)) using SizeTransform(clip = false)
+                // 带位移的 morph：展开时选项行从右缘滑入+微放大，图标行让位滑出；
+                // 收回时反向。不再是纯交叉淡化（用户要求可见的移动动画）。
+                if (targetState != MusicToolbarMode.NORMAL) {
+                    (
+                        slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 2 } +
+                            fadeIn(tween(280)) +
+                            scaleIn(initialScale = 0.92f, animationSpec = tween(280))
+                        ) togetherWith (
+                        slideOutHorizontally(tween(280, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeOut(tween(160))
+                    )
+                } else {
+                    (
+                        slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeIn(tween(280))
+                        ) togetherWith (
+                        slideOutHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 2 } +
+                            fadeOut(tween(160)) +
+                            scaleOut(targetScale = 0.92f, animationSpec = tween(280))
+                    )
+                } using SizeTransform(clip = false)
             },
             label = "musicToolbar",
             modifier = Modifier
@@ -913,17 +934,54 @@ private fun MusicToolbar(
                     }
 
                     MusicToolbarMode.SEARCH -> {
-                        // 整行 = 搜索输入框（同样在 sharedElement 容器内 morph 出现）
-                        OutlinedTextField(
-                            value = vm.searchQuery,
-                            onValueChange = { vm.searchQuery = it },
-                            placeholder = { Text("搜索歌曲 / 专辑 / 艺术家") },
-                            singleLine = true,
-                            shape = RoundedCornerShape(24.dp),
+                        // 整行 = 搜索输入框（矩形样式，BasicTextField 保证 48dp 行内不截断文字）
+                        Surface(
+                            shape = RoundedCornerShape(6.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
                             modifier = Modifier
                                 .weight(1f)
-                                .height(44.dp),
-                        )
+                                .height(40.dp),
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 12.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Search,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(18.dp),
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Box(
+                                    contentAlignment = Alignment.CenterStart,
+                                    modifier = Modifier.weight(1f),
+                                ) {
+                                    // 空文案时显示占位提示（矩形框内完整显示）
+                                    if (vm.searchQuery.isBlank()) {
+                                        Text(
+                                            "搜索歌曲 / 专辑 / 艺术家",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                    }
+                                    BasicTextField(
+                                        value = vm.searchQuery,
+                                        onValueChange = { vm.searchQuery = it },
+                                        singleLine = true,
+                                        textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                        ),
+                                        modifier = Modifier.fillMaxWidth(),
+                                    )
+                                }
+                            }
+                        }
                         CloseToolbarButton {
                             // 退出搜索即清空查询词（视图自动回落专辑列表）
                             vm.searchQuery = ""
@@ -937,8 +995,8 @@ private fun MusicToolbar(
 }
 
 /**
- * 展开态的横排选项格 —— 图标 + 两字标签并排、等高 40dp 胶囊按钮，
- * 当前项染主色。点击由调用方处理（选完收回 NORMAL）。
+ * 展开态的横排选项格 —— 图标 + 两字标签并排、等高 40dp 矩形按钮
+ * （小圆角 6dp，非胶囊），当前项染主色。点击由调用方处理（选完收回 NORMAL）。
  */
 @Composable
 private fun SelectorCell(
@@ -955,7 +1013,7 @@ private fun SelectorCell(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .height(40.dp)
-            .clip(RoundedCornerShape(20.dp))
+            .clip(RoundedCornerShape(6.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
     ) {
