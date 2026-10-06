@@ -46,6 +46,7 @@ object ToolRegistry {
         DeleteTool,
         ManageTool,
         MemoryTool,
+        MusicTool,
         WebSearchTool,
         // PhoneAgentTool,           // Phone Agent 功能暂未成熟，注释禁用
         // ScheduledPhoneTaskTool,   // 定时手机任务依赖 Phone Agent，一并禁用

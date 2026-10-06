@@ -640,6 +640,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_add_focus_time(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_add_track_to_local_playlist(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_clear_task_reminder(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_complete_daily_task(
@@ -652,6 +654,8 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_group(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_create_local_playlist(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_sticker(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_create_task(
@@ -661,6 +665,8 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_nion_core_checksum_method_nioncore_delete_conversation(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_delete_group(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_delete_local_playlist(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_delete_sticker(
     ): Short
@@ -708,6 +714,10 @@ internal object IntegrityCheckingUniffiLib {
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_link_note_to_task(
     ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_list_local_playlists(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_local_playlist_tracks(
+    ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_move_group_to_checklist(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_next_conversation_id(
@@ -715,6 +725,10 @@ internal object IntegrityCheckingUniffiLib {
     external fun uniffi_nion_core_checksum_method_nioncore_remove_attachment(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_remove_task_recurrence(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_remove_track_from_local_playlist(
+    ): Short
+    external fun uniffi_nion_core_checksum_method_nioncore_rename_local_playlist(
     ): Short
     external fun uniffi_nion_core_checksum_method_nioncore_reorder_checklists(
     ): Short
@@ -778,6 +792,8 @@ external fun uniffi_nion_core_fn_method_nioncore_add_attachment(`ptr`: Long,`tas
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_add_focus_time(`ptr`: Long,`taskId`: RustBuffer.ByValue,`seconds`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_nion_core_fn_method_nioncore_add_track_to_local_playlist(`ptr`: Long,`playlistId`: Long,`trackId`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_nion_core_fn_method_nioncore_clear_task_reminder(`ptr`: Long,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_complete_daily_task(`ptr`: Long,`taskId`: RustBuffer.ByValue,`date`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -790,6 +806,8 @@ external fun uniffi_nion_core_fn_method_nioncore_create_checklist_with_type(`ptr
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_create_group(`ptr`: Long,`name`: RustBuffer.ByValue,`checklistId`: RustBuffer.ByValue,`color`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_create_local_playlist(`ptr`: Long,`name`: RustBuffer.ByValue,`comment`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Long
 external fun uniffi_nion_core_fn_method_nioncore_create_sticker(`ptr`: Long,`tag`: RustBuffer.ByValue,`fileName`: RustBuffer.ByValue,`filePath`: RustBuffer.ByValue,`mimeType`: RustBuffer.ByValue,`fileSize`: Long,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_create_task(`ptr`: Long,`name`: RustBuffer.ByValue,`description`: RustBuffer.ByValue,`priority`: RustBuffer.ByValue,`categoryId`: RustBuffer.ByValue,`parentId`: RustBuffer.ByValue,`groupId`: RustBuffer.ByValue,`recurrenceRule`: RustBuffer.ByValue,`recurrenceReminderTime`: RustBuffer.ByValue,`reminder`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -800,6 +818,8 @@ external fun uniffi_nion_core_fn_method_nioncore_delete_conversation(`ptr`: Long
 ): Byte
 external fun uniffi_nion_core_fn_method_nioncore_delete_group(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
+external fun uniffi_nion_core_fn_method_nioncore_delete_local_playlist(`ptr`: Long,`id`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_nion_core_fn_method_nioncore_delete_sticker(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Byte
 external fun uniffi_nion_core_fn_method_nioncore_delete_task(`ptr`: Long,`id`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -846,6 +866,10 @@ external fun uniffi_nion_core_fn_method_nioncore_get_tasks_for_date(`ptr`: Long,
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_link_note_to_task(`ptr`: Long,`noteId`: RustBuffer.ByValue,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
+external fun uniffi_nion_core_fn_method_nioncore_list_local_playlists(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_local_playlist_tracks(`ptr`: Long,`playlistId`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_move_group_to_checklist(`ptr`: Long,`groupId`: RustBuffer.ByValue,`checklistId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
 external fun uniffi_nion_core_fn_method_nioncore_next_conversation_id(`ptr`: Long,uniffi_out_err: UniffiRustCallStatus, 
@@ -854,6 +878,10 @@ external fun uniffi_nion_core_fn_method_nioncore_remove_attachment(`ptr`: Long,`
 ): Unit
 external fun uniffi_nion_core_fn_method_nioncore_remove_task_recurrence(`ptr`: Long,`taskId`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): RustBuffer.ByValue
+external fun uniffi_nion_core_fn_method_nioncore_remove_track_from_local_playlist(`ptr`: Long,`playlistId`: Long,`position`: Long,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
+external fun uniffi_nion_core_fn_method_nioncore_rename_local_playlist(`ptr`: Long,`id`: Long,`name`: RustBuffer.ByValue,`comment`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
+): Unit
 external fun uniffi_nion_core_fn_method_nioncore_reorder_checklists(`ptr`: Long,`orderedIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
 ): Unit
 external fun uniffi_nion_core_fn_method_nioncore_reorder_groups(`ptr`: Long,`orderedIds`: RustBuffer.ByValue,uniffi_out_err: UniffiRustCallStatus, 
@@ -1011,6 +1039,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_add_focus_time() != 58450.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_add_track_to_local_playlist() != 43580.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_clear_task_reminder() != 7702.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1029,6 +1060,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_create_group() != 45929.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_create_local_playlist() != 52052.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_create_sticker() != 29120.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1042,6 +1076,9 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_delete_group() != 55541.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_delete_local_playlist() != 40113.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_delete_sticker() != 48449.toShort()) {
@@ -1113,6 +1150,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
     if (lib.uniffi_nion_core_checksum_method_nioncore_link_note_to_task() != 23972.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_list_local_playlists() != 48231.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_local_playlist_tracks() != 52008.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
     if (lib.uniffi_nion_core_checksum_method_nioncore_move_group_to_checklist() != 6120.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
@@ -1123,6 +1166,12 @@ private fun uniffiCheckApiChecksums(lib: IntegrityCheckingUniffiLib) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_remove_task_recurrence() != 11087.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_remove_track_from_local_playlist() != 34455.toShort()) {
+        throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
+    }
+    if (lib.uniffi_nion_core_checksum_method_nioncore_rename_local_playlist() != 49295.toShort()) {
         throw RuntimeException("UniFFI API checksum mismatch: try cleaning and rebuilding your project")
     }
     if (lib.uniffi_nion_core_checksum_method_nioncore_reorder_checklists() != 62700.toShort()) {
@@ -1568,6 +1617,13 @@ public interface NionCoreInterface {
     fun `addFocusTime`(`taskId`: kotlin.String, `seconds`: kotlin.Long)
     
     /**
+     * 向歌单末尾追加一首歌。position 取该歌单当前 MAX(position)+1（空歌单从 1 开始）。
+     * track_id 为 Android MediaStore 的 _ID（Long）。
+     * 歌单不存在时返回 NotFound。
+     */
+    fun `addTrackToLocalPlaylist`(`playlistId`: kotlin.Long, `trackId`: kotlin.Long)
+    
+    /**
      * 清除任务的一次性提醒（将 reminder 设为 NULL）
      */
     fun `clearTaskReminder`(`taskId`: kotlin.String): TaskData
@@ -1609,6 +1665,13 @@ public interface NionCoreInterface {
     fun `createGroup`(`name`: kotlin.String, `checklistId`: kotlin.String, `color`: kotlin.String?): GroupData
     
     /**
+     * 创建本地歌单，返回自增主键 id。
+     * Kotlin 侧用它拼接统一歌单模型的 id："local-<id>"。
+     * comment 为策展说明，可为空字符串。
+     */
+    fun `createLocalPlaylist`(`name`: kotlin.String, `comment`: kotlin.String): kotlin.Long
+    
+    /**
      * 添加表情包。图片文件应已复制到内部存储，此方法仅写入数据库。
      * tag 必须唯一，重复会返回 DatabaseError。
      */
@@ -1627,6 +1690,12 @@ public interface NionCoreInterface {
      * 删除分组：不删除组内任务，仅将组内任务的 group_id 置空
      */
     fun `deleteGroup`(`id`: kotlin.String): kotlin.Boolean
+    
+    /**
+     * 删除本地歌单并级联删除其全部条目（music_playlist_items）。
+     * 歌单不存在时返回 NotFound。
+     */
+    fun `deleteLocalPlaylist`(`id`: kotlin.Long)
     
     /**
      * 删除表情包，同时删除磁盘上的图片文件
@@ -1747,6 +1816,17 @@ public interface NionCoreInterface {
     fun `linkNoteToTask`(`noteId`: kotlin.String, `taskId`: kotlin.String)
     
     /**
+     * 列出所有本地歌单（按创建时间升序），含每首歌单的歌曲数（LEFT JOIN 计数）。
+     */
+    fun `listLocalPlaylists`(): List<LocalPlaylistRecord>
+    
+    /**
+     * 返回歌单的全部条目，按 position 升序。
+     * 歌单不存在或为空都返回空数组。
+     */
+    fun `localPlaylistTracks`(`playlistId`: kotlin.Long): List<LocalPlaylistItemRecord>
+    
+    /**
      * 将分组移动到另一个清单，同时更新组内任务的 category_id
      * 将整个分组移动到另一个清单。更新分组的 checklist_id，同步更新组内任务的
      * category_id，并对每个有子任务的父任务递归级联，确保子孙任务的归属也同步变更。
@@ -1767,6 +1847,19 @@ public interface NionCoreInterface {
      * 移除任务的每日循环（将 recurrence_rule 和 recurrence_reminder_time 设为 NULL）
      */
     fun `removeTaskRecurrence`(`taskId`: kotlin.String): TaskData
+    
+    /**
+     * 从歌单中移除指定 position 的条目。
+     * 删除后不 compact 后续 position（保留空洞），查询端按 position 升序即可保持相对顺序。
+     * 条目不存在时返回 NotFound。
+     */
+    fun `removeTrackFromLocalPlaylist`(`playlistId`: kotlin.Long, `position`: kotlin.Long)
+    
+    /**
+     * 重命名/更新本地歌单的名称与策展说明。
+     * 歌单不存在时返回 NotFound。
+     */
+    fun `renameLocalPlaylist`(`id`: kotlin.Long, `name`: kotlin.String, `comment`: kotlin.String)
     
     fun `reorderChecklists`(`orderedIds`: List<kotlin.String>)
     
@@ -1994,6 +2087,24 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
 
     
     /**
+     * 向歌单末尾追加一首歌。position 取该歌单当前 MAX(position)+1（空歌单从 1 开始）。
+     * track_id 为 Android MediaStore 的 _ID（Long）。
+     * 歌单不存在时返回 NotFound。
+     */
+    @Throws(NionException::class)override fun `addTrackToLocalPlaylist`(`playlistId`: kotlin.Long, `trackId`: kotlin.Long)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_add_track_to_local_playlist(
+        it,
+        FfiConverterLong.lower(`playlistId`),FfiConverterLong.lower(`trackId`),_status)
+}
+    }
+    
+    
+
+    
+    /**
      * 清除任务的一次性提醒（将 reminder 设为 NULL）
      */
     @Throws(NionException::class)override fun `clearTaskReminder`(`taskId`: kotlin.String): TaskData {
@@ -2107,6 +2218,25 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
 
     
     /**
+     * 创建本地歌单，返回自增主键 id。
+     * Kotlin 侧用它拼接统一歌单模型的 id："local-<id>"。
+     * comment 为策展说明，可为空字符串。
+     */
+    @Throws(NionException::class)override fun `createLocalPlaylist`(`name`: kotlin.String, `comment`: kotlin.String): kotlin.Long {
+            return FfiConverterLong.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_create_local_playlist(
+        it,
+        FfiConverterString.lower(`name`),FfiConverterString.lower(`comment`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * 添加表情包。图片文件应已复制到内部存储，此方法仅写入数据库。
      * tag 必须唯一，重复会返回 DatabaseError。
      */
@@ -2183,6 +2313,23 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     }
     )
     }
+    
+
+    
+    /**
+     * 删除本地歌单并级联删除其全部条目（music_playlist_items）。
+     * 歌单不存在时返回 NotFound。
+     */
+    @Throws(NionException::class)override fun `deleteLocalPlaylist`(`id`: kotlin.Long)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_delete_local_playlist(
+        it,
+        FfiConverterLong.lower(`id`),_status)
+}
+    }
+    
     
 
     
@@ -2580,6 +2727,41 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
 
     
     /**
+     * 列出所有本地歌单（按创建时间升序），含每首歌单的歌曲数（LEFT JOIN 计数）。
+     */
+    @Throws(NionException::class)override fun `listLocalPlaylists`(): List<LocalPlaylistRecord> {
+            return FfiConverterSequenceTypeLocalPlaylistRecord.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_list_local_playlists(
+        it,
+        _status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
+     * 返回歌单的全部条目，按 position 升序。
+     * 歌单不存在或为空都返回空数组。
+     */
+    @Throws(NionException::class)override fun `localPlaylistTracks`(`playlistId`: kotlin.Long): List<LocalPlaylistItemRecord> {
+            return FfiConverterSequenceTypeLocalPlaylistItemRecord.lift(
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_local_playlist_tracks(
+        it,
+        FfiConverterLong.lower(`playlistId`),_status)
+}
+    }
+    )
+    }
+    
+
+    
+    /**
      * 将分组移动到另一个清单，同时更新组内任务的 category_id
      * 将整个分组移动到另一个清单。更新分组的 checklist_id，同步更新组内任务的
      * category_id，并对每个有子任务的父任务递归级联，确保子孙任务的归属也同步变更。
@@ -2645,6 +2827,41 @@ open class NionCore: Disposable, AutoCloseable, NionCoreInterface
     }
     )
     }
+    
+
+    
+    /**
+     * 从歌单中移除指定 position 的条目。
+     * 删除后不 compact 后续 position（保留空洞），查询端按 position 升序即可保持相对顺序。
+     * 条目不存在时返回 NotFound。
+     */
+    @Throws(NionException::class)override fun `removeTrackFromLocalPlaylist`(`playlistId`: kotlin.Long, `position`: kotlin.Long)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_remove_track_from_local_playlist(
+        it,
+        FfiConverterLong.lower(`playlistId`),FfiConverterLong.lower(`position`),_status)
+}
+    }
+    
+    
+
+    
+    /**
+     * 重命名/更新本地歌单的名称与策展说明。
+     * 歌单不存在时返回 NotFound。
+     */
+    @Throws(NionException::class)override fun `renameLocalPlaylist`(`id`: kotlin.Long, `name`: kotlin.String, `comment`: kotlin.String)
+        = 
+    callWithHandle {
+    uniffiRustCallWithError(NionException) { _status ->
+    UniffiLib.uniffi_nion_core_fn_method_nioncore_rename_local_playlist(
+        it,
+        FfiConverterLong.lower(`id`),FfiConverterString.lower(`name`),FfiConverterString.lower(`comment`),_status)
+}
+    }
+    
     
 
     
@@ -3541,6 +3758,115 @@ public object FfiConverterTypeGroupData: FfiConverterRustBuffer<GroupData> {
 
 
 /**
+ * 本地歌单条目 —— music_playlist_items 表的一行
+ * track_id 为 Android MediaStore 的 _ID（Long）
+ */
+data class LocalPlaylistItemRecord (
+    /**
+     * 歌单内的序号（从 1 开始，按加入顺序递增）
+     */
+    var `position`: kotlin.Long
+    , 
+    var `trackId`: kotlin.Long
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLocalPlaylistItemRecord: FfiConverterRustBuffer<LocalPlaylistItemRecord> {
+    override fun read(buf: ByteBuffer): LocalPlaylistItemRecord {
+        return LocalPlaylistItemRecord(
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: LocalPlaylistItemRecord) = (
+            FfiConverterLong.allocationSize(value.`position`) +
+            FfiConverterLong.allocationSize(value.`trackId`)
+    )
+
+    override fun write(value: LocalPlaylistItemRecord, buf: ByteBuffer) {
+            FfiConverterLong.write(value.`position`, buf)
+            FfiConverterLong.write(value.`trackId`, buf)
+    }
+}
+
+
+
+/**
+ * 本地歌单摘要 —— music_playlists 表的对外视图
+ * id 为 Nion 内部自增主键（Kotlin 侧拼接 "local-<id>" 作为统一歌单模型的 id）
+ * comment 为策展说明（与 Navidrome updatePlaylist 的 comment 参数语义一致）
+ */
+data class LocalPlaylistRecord (
+    var `id`: kotlin.Long
+    , 
+    var `name`: kotlin.String
+    , 
+    var `comment`: kotlin.String
+    , 
+    /**
+     * 创建时间（Unix 秒）
+     */
+    var `createdAt`: kotlin.Long
+    , 
+    /**
+     * 歌单内歌曲数（LEFT JOIN 计数，空歌单为 0）
+     */
+    var `songCount`: kotlin.Long
+    
+){
+    
+
+    
+
+    
+    companion object
+}
+
+/**
+ * @suppress
+ */
+public object FfiConverterTypeLocalPlaylistRecord: FfiConverterRustBuffer<LocalPlaylistRecord> {
+    override fun read(buf: ByteBuffer): LocalPlaylistRecord {
+        return LocalPlaylistRecord(
+            FfiConverterLong.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterString.read(buf),
+            FfiConverterLong.read(buf),
+            FfiConverterLong.read(buf),
+        )
+    }
+
+    override fun allocationSize(value: LocalPlaylistRecord) = (
+            FfiConverterLong.allocationSize(value.`id`) +
+            FfiConverterString.allocationSize(value.`name`) +
+            FfiConverterString.allocationSize(value.`comment`) +
+            FfiConverterLong.allocationSize(value.`createdAt`) +
+            FfiConverterLong.allocationSize(value.`songCount`)
+    )
+
+    override fun write(value: LocalPlaylistRecord, buf: ByteBuffer) {
+            FfiConverterLong.write(value.`id`, buf)
+            FfiConverterString.write(value.`name`, buf)
+            FfiConverterString.write(value.`comment`, buf)
+            FfiConverterLong.write(value.`createdAt`, buf)
+            FfiConverterLong.write(value.`songCount`, buf)
+    }
+}
+
+
+
+/**
  * 表情包 —— 用户上传的表情图片，AI 可在回复中用 <标签名> 引用
  */
 data class StickerData (
@@ -4235,6 +4561,62 @@ public object FfiConverterSequenceTypeGroupData: FfiConverterRustBuffer<List<Gro
         buf.putInt(value.size)
         value.iterator().forEach {
             FfiConverterTypeGroupData.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeLocalPlaylistItemRecord: FfiConverterRustBuffer<List<LocalPlaylistItemRecord>> {
+    override fun read(buf: ByteBuffer): List<LocalPlaylistItemRecord> {
+        val len = buf.getInt()
+        return List<LocalPlaylistItemRecord>(len) {
+            FfiConverterTypeLocalPlaylistItemRecord.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<LocalPlaylistItemRecord>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeLocalPlaylistItemRecord.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<LocalPlaylistItemRecord>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeLocalPlaylistItemRecord.write(it, buf)
+        }
+    }
+}
+
+
+
+
+/**
+ * @suppress
+ */
+public object FfiConverterSequenceTypeLocalPlaylistRecord: FfiConverterRustBuffer<List<LocalPlaylistRecord>> {
+    override fun read(buf: ByteBuffer): List<LocalPlaylistRecord> {
+        val len = buf.getInt()
+        return List<LocalPlaylistRecord>(len) {
+            FfiConverterTypeLocalPlaylistRecord.read(buf)
+        }
+    }
+
+    override fun allocationSize(value: List<LocalPlaylistRecord>): ULong {
+        val sizeForLength = 4UL
+        val sizeForItems = value.map { FfiConverterTypeLocalPlaylistRecord.allocationSize(it) }.sum()
+        return sizeForLength + sizeForItems
+    }
+
+    override fun write(value: List<LocalPlaylistRecord>, buf: ByteBuffer) {
+        buf.putInt(value.size)
+        value.iterator().forEach {
+            FfiConverterTypeLocalPlaylistRecord.write(it, buf)
         }
     }
 }

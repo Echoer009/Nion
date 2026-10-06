@@ -182,6 +182,113 @@ class SubsonicClient(
     fun streamUrl(songId: String): String =
         buildUrl("stream.view", "id" to songId)
 
+    /**
+     * 获取当前用户可见的全部歌单（getPlaylists，Subsonic API 1.0+，Navidrome 全版本支持）。
+     * 返回内容包括自己创建的与其他用户公开的歌单（owner 字段区分归属）。
+     *
+     * @return 歌单列表（不含内含曲目明细，只有 songCount/duration 等汇总信息）
+     */
+    suspend fun getPlaylists(): List<SubsonicPlaylist> = withContext(Dispatchers.IO) {
+        val body = execute("getPlaylists.view")
+        // 结构：playlists.playlist[]；服务器上没有歌单时 playlist 数组可能缺省，回退空列表
+        val arr = body.optJSONObject("playlists")?.optJSONArray("playlist")
+            ?: return@withContext emptyList()
+        (0 until arr.length()).map { parsePlaylist(arr.getJSONObject(it)) }
+    }
+
+    /**
+     * 创建歌单（createPlaylist，Subsonic API 1.2+，Navidrome 全版本支持）。
+     * 仅传 name + songIds：Subsonic 规范里不传 playlistId 即为"创建"语义（传 id 则是整表覆盖），
+     * 这里封装成纯创建，避免调用方误触覆盖。
+     *
+     * Navidrome 兼容性说明：规范并未要求 createPlaylist 响应返回新歌单内容，
+     * 但 Navidrome 实际会在响应中带回新建的 playlist 对象 —— 优先直接解析其 id；
+     * 解析不到（如其他 Subsonic 兼容服务端只回空 envelope）时，
+     * 回查 getPlaylists 取同名最新的一条兜底。
+     *
+     * @param name 新歌单名称
+     * @param songIds 初始曲目列表（Subsonic 歌曲 id）；可为空，创建空歌单
+     * @return 新歌单的 id
+     */
+    suspend fun createPlaylist(name: String, songIds: List<String>): String =
+        withContext(Dispatchers.IO) {
+            // songId 参数可重复出现，需逐个拼进 query
+            val params = mutableListOf("name" to name)
+            songIds.forEach { params.add("songId" to it) }
+            val body = execute("createPlaylist.view", *params.toTypedArray())
+
+            // 路径一：Navidrome 响应直接携带 playlist 对象，取其 id
+            val direct = body.optJSONObject("playlist")?.optString("id")?.ifBlank { null }
+            if (direct != null) return@withContext direct
+
+            // 路径二：回查歌单列表，取同名最新的一条（服务端返回顺序中新歌单在前）兜底
+            val fallback = getPlaylists()
+                .filter { it.name == name && (it.owner.isBlank() || it.owner == username) }
+                .firstOrNull()
+                ?: throw SubsonicException("创建歌单后未能定位新歌单: $name")
+            fallback.id
+        }
+
+    /**
+     * 更新歌单（updatePlaylist，Subsonic API 1.7+，Navidrome 全版本支持）。
+     * 只把非空参数拼进请求 —— updatePlaylist 是"缺省即不改"语义，
+     * 空 name 若被传出会被部分服务端当成改名为空串处理，故调用方传 null 表示不修改。
+     *
+     * Navidrome 兼容性说明：comment（策展说明）参数自 Subsonic 1.14 引入，
+     * Navidrome 支持该字段并持久化；旧版 Subsonic 服务端会忽略未知参数，不会报错。
+     *
+     * @param playlistId 歌单 id
+     * @param name 新名称；null 表示不改名
+     * @param comment 新的策展说明；null 表示不清除、不修改
+     * @param songIdsToAdd 追加到歌单末尾的曲目 id 列表（参数名 songId，可重复出现）
+     * @param songIndexesToRemove 要移除的曲目在歌单内的下标列表（参数名 songIndex，可重复出现）；
+     *   Subsonic 按"原列表下标"语义处理，一次请求内多个下标互不影响
+     */
+    suspend fun updatePlaylist(
+        playlistId: String,
+        name: String?,
+        comment: String?,
+        songIdsToAdd: List<String>,
+        songIndexesToRemove: List<Int>,
+    ): Unit = withContext(Dispatchers.IO) {
+        val params = mutableListOf("playlistId" to playlistId)
+        // 空参不传 —— updatePlaylist 缺省的参数保持原值
+        name?.takeIf { it.isNotBlank() }?.let { params.add("name" to it) }
+        comment?.let { params.add("comment" to it) }
+        songIdsToAdd.forEach { params.add("songId" to it) }
+        songIndexesToRemove.forEach { params.add("songIndex" to it.toString()) }
+        execute("updatePlaylist.view", *params.toTypedArray())
+    }
+
+    /**
+     * 删除歌单（deletePlaylist，Subsonic API 1.2+，Navidrome 全版本支持）。
+     * 只能删除自己拥有的歌单；对他人的公开歌单调用会被服务端拒绝。
+     *
+     * @param playlistId 歌单 id
+     */
+    suspend fun deletePlaylist(playlistId: String): Unit = withContext(Dispatchers.IO) {
+        execute("deletePlaylist.view", "id" to playlistId)
+    }
+
+    /**
+     * 获取歌单详情（getPlaylist，Subsonic API 1.0+，Navidrome 全版本支持）。
+     * 与 getPlaylists 不同，本接口返回的 playlist 对象内嵌 entry[] —— 歌单的完整曲目列表，
+     * 每一项的字段结构与歌曲完全一致，直接复用 [parseSong] 转成统一的 [PlayableTrack] 供播放队列消费。
+     *
+     * @param playlistId 歌单 id
+     * @return 歌单元信息 + 内含曲目（服务端保证曲目按添加顺序排列）
+     */
+    suspend fun getPlaylist(playlistId: String): Pair<SubsonicPlaylist, List<PlayableTrack>> =
+        withContext(Dispatchers.IO) {
+            val body = execute("getPlaylist.view", "id" to playlistId)
+            val playlistJson = body.getJSONObject("playlist")
+            val playlist = parsePlaylist(playlistJson)
+            // entry 数组可能缺省（空歌单），回退空列表
+            val entries = playlistJson.optJSONArray("entry")
+                ?: return@withContext playlist to emptyList()
+            val songs = (0 until entries.length()).map { parseSong(entries.getJSONObject(it)) }
+            playlist to songs
+        }
 
     // ──────────────────────────────────────────────────────
     // 内部实现
@@ -280,6 +387,21 @@ class SubsonicClient(
             coverArtUrl = coverArtId?.let { coverArtUrl(it) },
         )
     }
+
+    /**
+     * 解析单个歌单 JSON 对象（getPlaylists / getPlaylist / createPlaylist 共用）。
+     * duration 为歌单总时长（秒）；comment/owner/public 为 Subsonic 1.14+ 字段，
+     * Navidrome 必回，其他兼容服务端可能缺省 —— 全部用 opt* 宽松解析兜底。
+     */
+    private fun parsePlaylist(json: JSONObject): SubsonicPlaylist = SubsonicPlaylist(
+        id = json.getString("id"),
+        name = json.optString("name", ""),
+        songCount = json.optInt("songCount", 0),
+        durationSeconds = json.optInt("duration", 0),
+        comment = json.optString("comment", ""),
+        public = json.optBoolean("public", false),
+        owner = json.optString("owner", ""),
+    )
 
     companion object {
         /** Subsonic 协议版本 —— 1.16.1 是当前主流服务端（Navidrome）支持的版本 */

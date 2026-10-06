@@ -172,3 +172,26 @@ pub struct ConversationData {
     pub created_at: String,
     pub updated_at: String,
 }
+
+/// 本地歌单摘要 —— music_playlists 表的对外视图
+/// id 为 Nion 内部自增主键（Kotlin 侧拼接 "local-<id>" 作为统一歌单模型的 id）
+/// comment 为策展说明（与 Navidrome updatePlaylist 的 comment 参数语义一致）
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct LocalPlaylistRecord {
+    pub id: i64,
+    pub name: String,
+    pub comment: String,
+    /// 创建时间（Unix 秒）
+    pub created_at: i64,
+    /// 歌单内歌曲数（LEFT JOIN 计数，空歌单为 0）
+    pub song_count: i64,
+}
+
+/// 本地歌单条目 —— music_playlist_items 表的一行
+/// track_id 为 Android MediaStore 的 _ID（Long）
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize, uniffi::Record)]
+pub struct LocalPlaylistItemRecord {
+    /// 歌单内的序号（从 1 开始，按加入顺序递增）
+    pub position: i64,
+    pub track_id: i64,
+}

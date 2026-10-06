@@ -198,6 +198,64 @@ fun SubsonicAlbum.toLibraryAlbum(): LibraryAlbum = LibraryAlbum(
 )
 
 /**
+ * Subsonic 歌单（getPlaylists / getPlaylist / createPlaylist 返回）。
+ *
+ * @property id 歌单 ID（Subsonic 原始 id，直接作为统一模型 [LibraryPlaylist] 的 id）
+ * @property name 歌单名称
+ * @property songCount 歌单内曲目数
+ * @property durationSeconds 歌单总时长（秒）
+ * @property comment 策展说明 —— 对应 Navidrome updatePlaylist 的 comment 参数，
+ *   用于记录歌单的创作背景/说明文案
+ * @property public 是否对其他用户公开（Navidrome 多用户场景）
+ * @property owner 歌单归属的用户名；部分服务端可能缺省为空串
+ */
+data class SubsonicPlaylist(
+    val id: String,
+    val name: String,
+    val songCount: Int = 0,
+    val durationSeconds: Int = 0,
+    val comment: String = "",
+    val public: Boolean = false,
+    val owner: String = "",
+)
+
+/**
+ * 统一歌单模型 —— 服务器歌单（Subsonic）与本地歌单（Nion 自建表）共用同一结构，
+ * 歌单列表 / 歌单详情等 UI 组件因此可以跨音源复用。
+ *
+ * @property id 唯一标识：服务器歌单为 Subsonic 原始 id；本地歌单为 "local-<nion内自增id>"
+ *   （与专辑 local- 前缀风格一致，但取值空间独立，不会与本地专辑 id 混淆）
+ * @property name 歌单名称
+ * @property comment 策展说明：服务器侧对应 Navidrome updatePlaylist 的 comment 参数；
+ *   本地侧存于本地歌单曲的 comment 列
+ * @property songCount 歌单内曲目数
+ * @property durationSeconds 歌单总时长（秒）
+ * @property isLocal 是否本地歌单（打开详情/增删曲目时用于区分走本地表还是服务器接口）
+ */
+data class LibraryPlaylist(
+    val id: String,
+    val name: String,
+    val comment: String,
+    val songCount: Int,
+    val durationSeconds: Int,
+    val isLocal: Boolean,
+)
+
+/**
+ * Subsonic 歌单 → 统一歌单模型 [LibraryPlaylist]。
+ * ViewModel 加载服务器歌单列表时统一映射，UI 层只见 LibraryPlaylist；
+ * 服务器歌单 id 直接使用 Subsonic 原始 id，isLocal 恒为 false。
+ */
+fun SubsonicPlaylist.toLibraryPlaylist(): LibraryPlaylist = LibraryPlaylist(
+    id = id,
+    name = name,
+    comment = comment,
+    songCount = songCount,
+    durationSeconds = durationSeconds,
+    isLocal = false,
+)
+
+/**
  * 统一搜索结果 —— 歌曲在前、专辑在后，本地与服务器音源共用。
  * 与 [SubsonicSearchResult] 的区别：专辑维度已映射为统一的 [LibraryAlbum]，
  * 服务器 search3 结果经 [toLibrarySearchResult] 转换，本地内存搜索直接产出本结构。

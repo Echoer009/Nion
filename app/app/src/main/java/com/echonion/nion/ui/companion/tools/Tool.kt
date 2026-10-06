@@ -22,6 +22,8 @@ enum class DataType {
     SETTINGS,
     /** 笔记数据变更（笔记型清单的增删改、搜索、关联） → TaskViewModel 刷新 */
     NOTEBOOK_DATA,
+    /** 音乐数据变更（歌单增删改、音源切换等） → MusicViewModel 刷新歌单列表/重载音源 */
+    MUSIC_DATA,
 }
 
 /**

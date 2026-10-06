@@ -145,6 +145,15 @@ class NionApp : Application() {
             Log.e("NionApp", "Failed to initialize NionCore", e)
         }
 
+        // 初始化音乐播放门面 —— 建立 Agent 工具（MusicTool）专用的第二条 MediaController
+        // 连接（与音乐页 MusicViewModel 各自独立，进程内多客户端共用同一播放器实例）。
+        // 必须放在 NionCore 初始化之后：工具执行时凭据/音源均从 core settings 读取。
+        try {
+            com.echonion.nion.ui.music.MusicControllerFacade.init(this)
+        } catch (e: Exception) {
+            Log.e("NionApp", "初始化音乐播放门面失败", e)
+        }
+
         // 创建通知渠道（重复调用安全，系统会忽略已存在的渠道）
         NotificationHelper.createChannel(this)
 

@@ -4,6 +4,8 @@ import android.app.Application
 import android.content.ComponentName
 import android.net.Uri
 import com.echonion.nion.core
+import com.echonion.nion.dataEvents
+import com.echonion.nion.ui.companion.tools.DataType
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
@@ -148,6 +150,32 @@ class MusicViewModel(
 
     /** 服务器请求错误信息；非空时 UI 显示错误条，点击重试可清除 */
     var serverError by mutableStateOf<String?>(null)
+
+    // ──────────────────────────────────────────────────────
+    // 歌单状态（本地 / 服务器统一模型，跨音源复用）
+    // ──────────────────────────────────────────────────────
+
+    /**
+     * 当前音源的歌单列表（统一模型 [LibraryPlaylist]）。
+     * 云端 = getPlaylists 映射；本地 = core.list_local_playlists 拼上 "local-" 前缀。
+     */
+    var playlists by mutableStateOf<List<LibraryPlaylist>>(emptyList())
+        private set
+
+    /** 当前打开的歌单（null=歌单列表视图；非 null=歌单详情视图；本地/服务器共用） */
+    var currentPlaylist by mutableStateOf<LibraryPlaylist?>(null)
+        private set
+
+    /** 当前歌单的曲目列表（云端=getPlaylist 返回；本地=按 core 条目在 localTracks 里回查） */
+    var playlistTracks by mutableStateOf<List<PlayableTrack>>(emptyList())
+        private set
+
+    /** 歌单数据是否加载中（列表/详情共用一个标志） */
+    var isLoadingPlaylists by mutableStateOf(false)
+        private set
+
+    /** 歌单操作错误信息；非空时 UI 显示错误条，点击重试可清除 */
+    var playlistError by mutableStateOf<String?>(null)
         private set
 
     // ──────────────────────────────────────────────────────
@@ -265,6 +293,15 @@ class MusicViewModel(
                     }
                 }
         }
+        // 5. 订阅全局数据变更事件：伙伴侧（MusicTool）增删歌单曲目后发出 MUSIC_DATA，
+        //    这里强制重载歌单列表，保证 UI 实时刷新
+        viewModelScope.launch {
+            app.dataEvents().collect { event ->
+                if (DataType.MUSIC_DATA in event.types) {
+                    loadPlaylists(force = true)
+                }
+            }
+        }
     }
 
     // ──────────────────────────────────────────────────────
@@ -282,6 +319,8 @@ class MusicViewModel(
         // 切换音源后清空旧音源的浏览数据：两个服务器的专辑/详情互不可见，
         // 新音源的 ServerMusicContent 会通过 LaunchedEffect 重新加载专辑列表
         resetServerState()
+        // 音源切换后歌单列表对新音源重载（loadPlaylists 有"已有数据不重查"保护，force 绕过）
+        loadPlaylists(force = true)
         viewModelScope.launch {
             withContext(Dispatchers.IO) { core.setSetting(MusicSettings.KEY_SOURCE, newSource.key) }
         }
@@ -308,6 +347,8 @@ class MusicViewModel(
         braingirlUsername = username.trim()
         braingirlPassword = password
         resetServerState()
+        // 账密变更意味着另一个账号的歌单，强制重载
+        loadPlaylists(force = true)
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 core.setSetting(MusicSettings.KEY_BRAINGIRL_USERNAME, braingirlUsername)
@@ -342,6 +383,8 @@ class MusicViewModel(
         customUsername = username.trim()
         customPassword = password
         resetServerState()
+        // 服务器配置变更后强制重载歌单列表
+        loadPlaylists(force = true)
         viewModelScope.launch {
             withContext(Dispatchers.IO) {
                 core.setSetting(MusicSettings.KEY_SERVER_URL, customServerUrl)
@@ -390,13 +433,20 @@ class MusicViewModel(
         configTest = ConfigTestState()
     }
 
-    /** 清空服务器浏览状态与错误信息（配置变更 / 切换音源后调用） */
+    /**
+     * 清空服务器浏览状态与错误信息（配置变更 / 切换音源后调用）。
+     * 歌单状态一并清空：两个音源的歌单互不可见，清空后重新 loadPlaylists。
+     */
     private fun resetServerState() {
         albums = emptyList()
         currentAlbum = null
         albumSongs = emptyList()
         searchResult = null
         serverError = null
+        playlists = emptyList()
+        currentPlaylist = null
+        playlistTracks = emptyList()
+        playlistError = null
     }
 
     // ──────────────────────────────────────────────────────
@@ -562,6 +612,277 @@ class MusicViewModel(
         }
     }
 
+
+    // ──────────────────────────────────────────────────────
+    // 歌单管理（按当前音源分发：云端走 Subsonic 接口，本地走 NionCore 歌单曲）
+    // ──────────────────────────────────────────────────────
+
+    /** 从统一歌单 id 解析本地歌单的库内自增 id（"local-<id>" → id）；非本地 id 返回 null */
+    private fun localPlaylistDbId(id: String): Long? = id.removePrefix(LOCAL_PLAYLIST_ID_PREFIX).toLongOrNull()
+
+    /**
+     * 加载当前音源的歌单列表。
+     * - 云端：getPlaylists → 统一映射为 [LibraryPlaylist]
+     * - 本地：core.list_local_playlists，id 拼 "local-" 前缀，时长未知记 0
+     *
+     * @param force true=忽略"已有数据不重查"保护强制刷新
+     */
+    fun loadPlaylists(force: Boolean = false) {
+        if (isLoadingPlaylists) return
+        if (!force && playlists.isNotEmpty()) return
+        if (source == MusicSource.LOCAL) {
+            isLoadingPlaylists = true
+            playlistError = null
+            viewModelScope.launch {
+                runCatching { withContext(Dispatchers.IO) { core.listLocalPlaylists() } }
+                    .onSuccess { records ->
+                        playlists = records.map { rec ->
+                            LibraryPlaylist(
+                                id = "$LOCAL_PLAYLIST_ID_PREFIX${rec.id}",
+                                name = rec.name,
+                                comment = rec.comment,
+                                songCount = rec.songCount.toInt(),
+                                durationSeconds = 0,
+                                isLocal = true,
+                            )
+                        }
+                    }
+                    .onFailure { playlistError = it.message ?: "加载本地歌单失败" }
+                isLoadingPlaylists = false
+            }
+            return
+        }
+        val client = buildClient() ?: return
+        isLoadingPlaylists = true
+        playlistError = null
+        viewModelScope.launch {
+            runCatching { client.getPlaylists() }
+                .onSuccess { playlists = it.map { p -> p.toLibraryPlaylist() } }
+                .onFailure { playlistError = it.message ?: "加载歌单失败" }
+            isLoadingPlaylists = false
+        }
+    }
+
+    /**
+     * 打开歌单详情 —— 按歌单来源分发：
+     * - 本地：localPlaylistTracks 拿到 (position, trackId) 条目，trackId 为 MediaStore _ID，
+     *   在内存 [localTracks] 里按 "local:<id>" 匹配出 [PlayableTrack]，保持 position 序；
+     *   本地表不存时长，详情头部的曲目数/总时长按匹配结果现算
+     * - 服务器：getPlaylist 直接返回歌单元信息 + 完整曲目（服务端保证添加顺序）
+     *
+     * @param id 统一歌单 id（云端=Subsonic id；本地="local-<库内id>"）
+     */
+    fun openPlaylist(id: String) {
+        val localDbId = localPlaylistDbId(id)
+        if (localDbId != null) {
+            // 先从已加载的列表里找到歌单元信息（详情头部展示用）
+            currentPlaylist = playlists.firstOrNull { it.id == id }
+            playlistTracks = emptyList()
+            viewModelScope.launch {
+                runCatching { withContext(Dispatchers.IO) { core.localPlaylistTracks(localDbId) } }
+                    .onSuccess { items ->
+                        // MediaStore _ID → 内存曲目映射；查不到的条目（文件已删除）静默跳过
+                        val byMediaId = localTracks.associateBy { it.id.removePrefix("local:").toLongOrNull() }
+                        val tracks = items
+                            .sortedBy { it.position }
+                            .mapNotNull { byMediaId[it.trackId] }
+                        playlistTracks = tracks
+                        // 本地记录不带头部统计，按匹配结果补齐曲目数与总时长
+                        val base = currentPlaylist ?: LibraryPlaylist(
+                            id = id,
+                            name = "本地歌单",
+                            comment = "",
+                            songCount = tracks.size,
+                            durationSeconds = 0,
+                            isLocal = true,
+                        )
+                        currentPlaylist = base.copy(
+                            songCount = tracks.size,
+                            durationSeconds = tracks.sumOf { it.durationSeconds }.toInt(),
+                        )
+                    }
+                    .onFailure { playlistError = it.message ?: "加载歌单曲目失败" }
+            }
+            return
+        }
+        val client = buildClient() ?: return
+        currentPlaylist = playlists.firstOrNull { it.id == id }
+        playlistTracks = emptyList()
+        isLoadingPlaylists = true
+        playlistError = null
+        viewModelScope.launch {
+            runCatching { client.getPlaylist(id) }
+                .onSuccess { (meta, songs) ->
+                    currentPlaylist = meta.toLibraryPlaylist()
+                    playlistTracks = songs
+                }
+                .onFailure { playlistError = it.message ?: "加载歌单失败" }
+            isLoadingPlaylists = false
+        }
+    }
+
+    /** 关闭歌单详情回到歌单列表（由 BackHandler / 返回按钮调用） */
+    fun closePlaylist() {
+        currentPlaylist = null
+        playlistTracks = emptyList()
+    }
+
+    /**
+     * 新建空歌单 —— 云端 createPlaylist(name, 空曲目) 先建空单；本地 create_local_playlist。
+     * 完成后强制重载歌单列表。
+     *
+     * @param name 歌单名称
+     * @param comment 策展说明（云端 createPlaylist 不支持 comment，建单后补一次
+     *   updatePlaylist 写入；本地建单时直接落库）
+     */
+    fun createPlaylist(name: String, comment: String) {
+        if (name.isBlank()) return
+        viewModelScope.launch {
+            runCatching {
+                if (source == MusicSource.LOCAL) {
+                    withContext(Dispatchers.IO) { core.createLocalPlaylist(name.trim(), comment) }
+                } else {
+                    val client = buildClient() ?: return@launch
+                    val playlistId = client.createPlaylist(name.trim(), emptyList())
+                    // Subsonic createPlaylist 不带 comment 参数，建单后补一次更新写入说明
+                    if (comment.isNotBlank()) {
+                        client.updatePlaylist(playlistId, null, comment, emptyList(), emptyList())
+                    }
+                }
+            }.onSuccess {
+                loadPlaylists(force = true)
+            }.onFailure { playlistError = it.message ?: "新建歌单失败" }
+        }
+    }
+
+    /**
+     * 删除歌单 —— 云端 deletePlaylist；本地 delete_local_playlist。完成后重载列表，
+     * 若删除的正是当前打开的歌单则同时回到列表视图。
+     *
+     * @param id 统一歌单 id
+     */
+    fun deletePlaylist(id: String) {
+        viewModelScope.launch {
+            runCatching {
+                val localDbId = localPlaylistDbId(id)
+                if (localDbId != null) {
+                    withContext(Dispatchers.IO) { core.deleteLocalPlaylist(localDbId) }
+                } else {
+                    val client = buildClient() ?: return@launch
+                    client.deletePlaylist(id)
+                }
+            }.onSuccess {
+                if (currentPlaylist?.id == id) closePlaylist()
+                loadPlaylists(force = true)
+            }.onFailure { playlistError = it.message ?: "删除歌单失败" }
+        }
+    }
+
+    /**
+     * 重命名/修改歌单说明 —— 云端 updatePlaylist（缺省参数保持原值语义）；
+     * 本地 rename_local_playlist（本地接口 name 与 comment 必传，未提供的字段
+     * 以列表/详情里的现值兜底）。完成后重载列表并同步当前打开歌单的元信息。
+     *
+     * @param id 统一歌单 id
+     * @param name 新名称；云端传 null 表示不改名
+     * @param comment 新说明；云端传 null 表示不修改
+     */
+    fun renamePlaylist(id: String, name: String?, comment: String?) {
+        viewModelScope.launch {
+            runCatching {
+                val localDbId = localPlaylistDbId(id)
+                if (localDbId != null) {
+                    // 本地接口 name/comment 必传：未提供的字段以列表/详情里的现值兜底
+                    val base = playlists.firstOrNull { it.id == id } ?: currentPlaylist
+                    val newName = name?.trim()?.takeIf { it.isNotEmpty() } ?: base?.name ?: ""
+                    val newComment = comment ?: base?.comment ?: ""
+                    withContext(Dispatchers.IO) {
+                        core.renameLocalPlaylist(localDbId, newName, newComment)
+                    }
+                } else {
+                    val client = buildClient() ?: return@launch
+                    client.updatePlaylist(id, name, comment, emptyList(), emptyList())
+                }
+            }.onSuccess {
+                loadPlaylists(force = true)
+                // 立即同步当前打开歌单的头部元信息（loadPlaylists 异步完成，避免头部滞后）
+                currentPlaylist = currentPlaylist?.let { open ->
+                    open.copy(
+                        name = name?.trim()?.takeIf { it.isNotEmpty() } ?: open.name,
+                        comment = comment ?: open.comment,
+                    )
+                }
+            }.onFailure { playlistError = it.message ?: "修改歌单失败" }
+        }
+    }
+
+    /**
+     * 追加曲目到歌单末尾 —— 云端 updatePlaylist(songIdsToAdd)；
+     * 本地逐个 add_track_to_local_playlist（保持传入顺序即添加顺序）。
+     * 完成后重载列表；若目标是当前打开的歌单则同步刷新详情曲目。
+     *
+     * @param id 统一歌单 id
+     * @param trackIds 要追加的曲目 id 列表（[PlayableTrack.id]：云端 "subsonic:<songId>"、
+     *   本地 "local:<MediaStore _ID>"，分发前在此剥掉来源前缀）
+     */
+    fun addToPlaylist(id: String, trackIds: List<String>) {
+        if (trackIds.isEmpty()) return
+        viewModelScope.launch {
+            runCatching {
+                val localDbId = localPlaylistDbId(id)
+                if (localDbId != null) {
+                    withContext(Dispatchers.IO) {
+                        trackIds.forEach { trackId ->
+                            val mediaId = trackId.removePrefix("local:").toLongOrNull() ?: return@forEach
+                            core.addTrackToLocalPlaylist(localDbId, mediaId)
+                        }
+                    }
+                } else {
+                    val client = buildClient() ?: return@launch
+                    client.updatePlaylist(
+                        id,
+                        null,
+                        null,
+                        trackIds.map { it.removePrefix("subsonic:") },
+                        emptyList(),
+                    )
+                }
+            }.onSuccess {
+                loadPlaylists(force = true)
+                if (currentPlaylist?.id == id) openPlaylist(id)
+            }.onFailure { playlistError = it.message ?: "添加曲目失败" }
+        }
+    }
+
+    /**
+     * 从歌单移除指定下标的曲目 —— 云端 updatePlaylist(songIndexesToRemove)（0 基下标）；
+     * 本地 remove_track_from_local_playlist（position 从 1 起，故传 index+1）。
+     * 完成后刷新列表与详情。
+     *
+     * @param id 统一歌单 id
+     * @param index 曲目在歌单内的 0 基下标（对应 [playlistTracks] 的下标）
+     */
+    fun removePlaylistTrack(id: String, index: Int) {
+        viewModelScope.launch {
+            runCatching {
+                val localDbId = localPlaylistDbId(id)
+                if (localDbId != null) {
+                    withContext(Dispatchers.IO) { core.removeTrackFromLocalPlaylist(localDbId, index.toLong() + 1) }
+                } else {
+                    val client = buildClient() ?: return@launch
+                    client.updatePlaylist(id, null, null, emptyList(), listOf(index))
+                }
+            }.onSuccess {
+                loadPlaylists(force = true)
+                if (currentPlaylist?.id == id) openPlaylist(id)
+            }.onFailure { playlistError = it.message ?: "移除曲目失败" }
+        }
+    }
+
+    /** 播放整个当前歌单：以 [playlistTracks] 为队列从第一首开始 */
+    fun playPlaylist() {
+        playQueue(playlistTracks, 0)
+    }
     // ──────────────────────────────────────────────────────
     // 播放控制
     // ──────────────────────────────────────────────────────
@@ -683,6 +1004,9 @@ class MusicViewModel(
          *  注册完成后网页重定向 nion://musicauth 深链回传账密，App 自动完成配置 */
         const val BRAINGIRL_REGISTER_URL = "https://echonion.org/music/reg/start"
 
+
+        /** 本地歌单统一 id 前缀：id 形如 "local-<库内自增id>"，morph key 因此与云端歌单错开 */
+        const val LOCAL_PLAYLIST_ID_PREFIX = "local-"
         /** 本地专辑统一 id 前缀：id 形如 "local-<albumId>"，morph key 因此与服务器专辑错开 */
         const val LOCAL_ALBUM_ID_PREFIX = "local-"
 

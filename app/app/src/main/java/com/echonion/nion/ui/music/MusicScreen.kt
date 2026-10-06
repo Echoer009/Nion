@@ -62,6 +62,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.KeyboardArrowDown
@@ -70,6 +72,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.QueueMusic
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
@@ -449,6 +452,15 @@ private fun LocalLibraryContent(
     // 专辑详情打开时拦截系统返回：先回到专辑列表（与云端一致）
     BackHandler(enabled = vm.currentAlbum != null) { vm.closeAlbum() }
 
+    // 歌单详情打开时拦截系统返回：先回到歌单列表（与专辑详情一致）
+    BackHandler(enabled = vm.currentPlaylist != null) { vm.closePlaylist() }
+
+    // 专辑|歌单视图切换状态（纯 UI 状态；搜索激活时隐藏切换入口并回落专辑视图）
+    var showPlaylists by remember { mutableStateOf(false) }
+
+    // 首次进入加载当前音源的歌单列表（loadPlaylists 内部有"已有数据不重查"保护）
+    LaunchedEffect(Unit) { vm.loadPlaylists() }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -464,20 +476,37 @@ private fun LocalLibraryContent(
             ErrorRetryBar(error = error) { vm.loadLocalTracks(force = true) }
         }
 
-        // ===== 排序切换（本地特有：默认名称序 / 最新添加）=====
-        // 仅在专辑列表视图且未搜索时显示，避免与搜索结果/详情争抢纵向空间
-        if (vm.currentAlbum == null && vm.searchQuery.isBlank()) {
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                LocalAlbumSort.values().forEach { sort ->
-                    FilterChip(
-                        selected = vm.localAlbumSort == sort,
-                        onClick = { vm.localAlbumSort = sort },
-                        label = { Text(sort.label) },
-                    )
-                }
-            }
+        // ===== 视图切换：专辑|歌单（两音源共用同一组件；搜索激活时隐藏）=====
+        if (vm.searchQuery.isBlank()) {
+            LibraryViewChips(showPlaylists = showPlaylists, onSelect = { showPlaylists = it })
             Spacer(modifier = Modifier.height(8.dp))
         }
+
+        if (showPlaylists && vm.searchQuery.isBlank()) {
+            // ===== 歌单视图：与云端共用同一套组件（列表/详情/morph/新建对话框）=====
+            vm.playlistError?.let { error ->
+                ErrorRetryBar(error = error) { vm.loadPlaylists(force = true) }
+            }
+            PlaylistPanel(
+                vm = vm,
+                trackCoverModifier = trackCoverModifier,
+                onPlayFromList = onPlayFromList,
+            )
+        } else {
+            // ===== 排序切换（本地特有：默认名称序 / 最新添加）=====
+            // 仅在专辑列表视图且未搜索时显示，避免与搜索结果/详情争抢纵向空间
+            if (vm.currentAlbum == null && vm.searchQuery.isBlank()) {
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    LocalAlbumSort.values().forEach { sort ->
+                        FilterChip(
+                            selected = vm.localAlbumSort == sort,
+                            onClick = { vm.localAlbumSort = sort },
+                            label = { Text(sort.label) },
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
 
         // ===== 主体：专辑列表 ↔ 专辑详情 morph（与云端同一套结构与动画）=====
         // 本地专辑 id 自带 "local-" 前缀，拼出的 sharedElement key
@@ -544,6 +573,7 @@ private fun LocalLibraryContent(
                 }
             }
         }
+        } // else（专辑视图分支）结束
     }
 }
 
@@ -584,6 +614,15 @@ private fun ServerMusicContent(
     // 专辑详情打开时拦截系统返回：先回到专辑列表
     BackHandler(enabled = vm.currentAlbum != null) { vm.closeAlbum() }
 
+    // 歌单详情打开时拦截系统返回：先回到歌单列表（与本地音源一致）
+    BackHandler(enabled = vm.currentPlaylist != null) { vm.closePlaylist() }
+
+    // 专辑|歌单视图切换状态（与本地音源同构；搜索激活时隐藏切换入口）
+    var showPlaylists by remember { mutableStateOf(false) }
+
+    // 首次进入加载当前账号的歌单列表（loadPlaylists 内部有"已有数据不重查"保护）
+    LaunchedEffect(Unit) { vm.loadPlaylists() }
+
     Column(
         modifier = Modifier
             .fillMaxSize()
@@ -598,6 +637,24 @@ private fun ServerMusicContent(
         vm.serverError?.let { error ->
             ErrorRetryBar(error = error) { vm.loadAlbums(force = true) }
         }
+
+        // ===== 视图切换：专辑|歌单（与本地音源共用同一组件；搜索激活时隐藏）=====
+        if (vm.searchQuery.isBlank()) {
+            LibraryViewChips(showPlaylists = showPlaylists, onSelect = { showPlaylists = it })
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        if (showPlaylists && vm.searchQuery.isBlank()) {
+            // ===== 歌单视图：与本地音源共用同一套组件（列表/详情/morph/新建对话框）=====
+            vm.playlistError?.let { error ->
+                ErrorRetryBar(error = error) { vm.loadPlaylists(force = true) }
+            }
+            PlaylistPanel(
+                vm = vm,
+                trackCoverModifier = trackCoverModifier,
+                onPlayFromList = onPlayFromList,
+            )
+        } else {
 
         // ===== 主体：专辑列表 ↔ 专辑详情 morph（照 TaskScreen 任务卡↔详情浮层范式）=====
         // 局部 SharedTransitionLayout + AnimatedContent(vm.currentAlbum)：
@@ -658,6 +715,7 @@ private fun ServerMusicContent(
                 }
             }
         }
+        } // else（专辑视图分支）结束
     }
 }
 
@@ -954,6 +1012,421 @@ private fun SearchResultContent(
             }
         }
     }
+}
+
+/* ============================================================
+ * 歌单（本地 / 服务器共用同一套组件，双端同构）
+ * ============================================================ */
+
+/**
+ * 曲库视图切换 Chips —— 专辑 | 歌单，本地与服务器音源共用（搜索激活时由调用方隐藏）。
+ *
+ * @param showPlaylists true=当前选中"歌单"视图
+ * @param onSelect 点击切换回调
+ */
+@Composable
+private fun LibraryViewChips(
+    showPlaylists: Boolean,
+    onSelect: (Boolean) -> Unit,
+) {
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FilterChip(
+            selected = !showPlaylists,
+            onClick = { onSelect(false) },
+            label = { Text("专辑") },
+        )
+        FilterChip(
+            selected = showPlaylists,
+            onClick = { onSelect(true) },
+            label = { Text("歌单") },
+        )
+    }
+}
+
+/**
+ * 歌单面板 —— 歌单列表 ↔ 歌单详情 morph（结构与专辑列表 ↔ 专辑详情完全一致）。
+ * 本地与服务器音源共用：数据全部来自 [MusicViewModel] 的统一歌单状态，
+ * 打开/新建/删除等操作由 VM 按音源分发，本组件不感知来源。
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun PlaylistPanel(
+    vm: MusicViewModel,
+    // 曲目行小封面 sharedElement 工厂（点歌时飞成播放页大封面）
+    trackCoverModifier: @Composable (String) -> Modifier,
+    // 从列表点歌回调：展开播放页并配对封面 morph
+    onPlayFromList: (String) -> Unit,
+) {
+    // 新建歌单对话框的开关（提升到面板级：列表↔详情切换不丢状态）
+    var showCreateDialog by remember { mutableStateOf(false) }
+    if (showCreateDialog) {
+        CreatePlaylistDialog(
+            onDismiss = { showCreateDialog = false },
+            onConfirm = { name, comment ->
+                showCreateDialog = false
+                vm.createPlaylist(name, comment)
+            },
+        )
+    }
+
+    // 局部 SharedTransitionLayout + AnimatedContent(currentPlaylist)：
+    // 歌单行与详情头部通过同 key 的 sharedElement（"music_playlist_<id>"）配对，
+    // 本地歌单 id 自带 "local-" 前缀，与云端歌单 key 天然错开
+    SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
+        AnimatedContent(
+            targetState = vm.currentPlaylist,
+            transitionSpec = {
+                if (targetState != null) {
+                    (
+                        EnterTransition.None togetherWith
+                            fadeOut(tween(250, easing = FastOutSlowInEasing))
+                        ) using SizeTransform(clip = false)
+                } else {
+                    (
+                        fadeIn(tween(250, easing = FastOutSlowInEasing)) togetherWith
+                            fadeOut(tween(400, easing = FastOutSlowInEasing))
+                        ) using SizeTransform(clip = false)
+                }
+            },
+            label = "playlistDetail",
+        ) { playlist ->
+            if (playlist != null) {
+                // 歌单详情分支（本地/服务器共用）
+                PlaylistDetailContent(
+                    vm = vm,
+                    playlist = playlist,
+                    sharedTransitionScope = this@SharedTransitionLayout,
+                    animatedVisibilityScope = this@AnimatedContent,
+                    trackCoverModifier = trackCoverModifier,
+                    onPlayFromList = onPlayFromList,
+                )
+            } else {
+                // 歌单列表分支（新建入口 + 歌单行 + 删除）
+                PlaylistListContent(
+                    vm = vm,
+                    sharedTransitionScope = this@SharedTransitionLayout,
+                    animatedVisibilityScope = this@AnimatedContent,
+                    onCreate = { showCreateDialog = true },
+                )
+            }
+        }
+    }
+}
+
+/**
+ * 歌单列表内容 —— 新建入口行 + 歌单行（名称 + 曲数 + 说明摘要 + 删除按钮）。
+ * 加载中/空态与 [AlbumListContent] 同构。
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun PlaylistListContent(
+    vm: MusicViewModel,
+    // 歌单行 morph：需这两个作用域生成 sharedElement key
+    sharedTransitionScope: SharedTransitionScope,
+    animatedVisibilityScope: AnimatedVisibilityScope,
+    onCreate: () -> Unit,
+) {
+    if (vm.isLoadingPlaylists && vm.playlists.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        // 新建歌单入口：整行可点，弹名称/说明对话框
+        item(key = "playlist_create") {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(12.dp))
+                    .clickable(onClick = onCreate)
+                    .padding(horizontal = 8.dp, vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.Add,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Text(
+                    "新建歌单",
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.primary,
+                    fontWeight = FontWeight.Medium,
+                )
+            }
+        }
+        items(vm.playlists, key = { "playlist-${it.id}" }) { playlist ->
+            PlaylistRow(
+                playlist = playlist,
+                onClick = { vm.openPlaylist(playlist.id) },
+                onDelete = { vm.deletePlaylist(playlist.id) },
+                sharedTransitionScope = sharedTransitionScope,
+                animatedVisibilityScope = animatedVisibilityScope,
+            )
+        }
+        if (vm.playlists.isEmpty()) {
+            item(key = "playlist_empty") {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "还没有歌单，点上面新建一个",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 歌单行：图标 + 名称/曲数/说明摘要 + 删除按钮。本地/服务器共用（统一模型）。
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun PlaylistRow(
+    playlist: LibraryPlaylist,
+    onClick: () -> Unit,
+    onDelete: () -> Unit,
+    // 行容器 morph：与歌单详情头部配对（key "music_playlist_<id>"）
+    sharedTransitionScope: SharedTransitionScope,
+    animatedVisibilityScope: AnimatedVisibilityScope,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .then(
+                with(sharedTransitionScope) {
+                    Modifier.sharedElement(
+                        sharedContentState = rememberSharedContentState("music_playlist_${playlist.id}"),
+                        animatedVisibilityScope = animatedVisibilityScope,
+                        boundsTransform = { _, _ ->
+                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                        },
+                    )
+                },
+            )
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Icon(
+            Icons.Default.QueueMusic,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(28.dp),
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                playlist.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            // 曲数 + 说明摘要：说明最多两行，多余省略
+            Text(
+                "${playlist.songCount} 首",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            if (playlist.comment.isNotBlank()) {
+                Text(
+                    playlist.comment,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+        }
+        // 删除按钮（IconButton 自行消费点击事件，不触发整行 onClick）
+        IconButton(onClick = onDelete) {
+            Icon(
+                Icons.Default.Delete,
+                contentDescription = "删除歌单",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+/**
+ * 歌单详情内容 —— 头部（名称 + 说明 + 曲目数/总时长 + 播放整单）+ 曲目列表（可单首移除）。
+ * 点击曲目以整个歌单为队列起播。本地/服务器共用：曲目读 [MusicViewModel.playlistTracks]。
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun PlaylistDetailContent(
+    vm: MusicViewModel,
+    playlist: LibraryPlaylist,
+    // 歌单行 morph：头部 sharedElement 与列表行同 key 配对
+    sharedTransitionScope: SharedTransitionScope,
+    animatedVisibilityScope: AnimatedVisibilityScope,
+    // 曲目行小封面 sharedElement 工厂（点歌时飞成播放页大封面）
+    trackCoverModifier: @Composable (String) -> Modifier,
+    // 从列表点歌回调：展开播放页并配对封面 morph
+    onPlayFromList: (String) -> Unit,
+) {
+    if (vm.isLoadingPlaylists && vm.playlistTracks.isEmpty() && !playlist.isLocal) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        // 歌单头部：容器 morph（与列表歌单行配对）+ 名称/说明/统计 + 播放整单按钮
+        item(key = "playlist_header") {
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .then(
+                        with(sharedTransitionScope) {
+                            Modifier.sharedElement(
+                                sharedContentState = rememberSharedContentState("music_playlist_${playlist.id}"),
+                                animatedVisibilityScope = animatedVisibilityScope,
+                                boundsTransform = { _, _ ->
+                                    spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                                },
+                            )
+                        },
+                    )
+                    .padding(top = 8.dp, bottom = 8.dp),
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.QueueMusic,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(32.dp),
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            playlist.name,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        // 统计行：曲目数 + 总时长（本地歌单头部为现算值，云端为服务端统计）
+                        val duration = if (playlist.durationSeconds > 0) {
+                            playlist.durationSeconds.toLong()
+                        } else {
+                            vm.playlistTracks.sumOf { it.durationSeconds }
+                        }
+                        Text(
+                            listOf("${vm.playlistTracks.size} 首", formatTrackDuration(duration))
+                                .joinToString(" · "),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // 播放整单：以歌单全部曲目为队列从第一首起播
+                    FilledIconButton(
+                        onClick = { vm.playPlaylist() },
+                        colors = IconButtonDefaults.filledIconButtonColors(
+                            containerColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    ) {
+                        Icon(
+                            Icons.Default.PlayArrow,
+                            contentDescription = "播放整单",
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                        )
+                    }
+                }
+                if (playlist.comment.isNotBlank()) {
+                    Text(
+                        playlist.comment,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
+        }
+        // 曲目列表：点击以歌单为队列起播，行尾可单首移除
+        itemsIndexed(vm.playlistTracks, key = { i, t -> "pl-track-$i-${t.id}" }) { index, track ->
+            TrackRow(
+                track = track,
+                index = index,
+                isCurrent = vm.currentTrack?.id == track.id,
+                isPlaying = vm.isPlaying,
+                coverModifier = trackCoverModifier,
+                onClick = {
+                    vm.playQueue(vm.playlistTracks, index)
+                    onPlayFromList(track.id)
+                },
+                onRemove = { vm.removePlaylistTrack(playlist.id, index) },
+            )
+        }
+        if (vm.playlistTracks.isEmpty()) {
+            item(key = "playlist_tracks_empty") {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "歌单还是空的",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 新建歌单对话框 —— 名称（必填）+ 策展说明（选填）。
+ * 确认后回调 [onConfirm]，由 VM 按当前音源分发创建。
+ */
+@Composable
+private fun CreatePlaylistDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (name: String, comment: String) -> Unit,
+) {
+    var nameInput by remember { mutableStateOf("") }
+    var commentInput by remember { mutableStateOf("") }
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("新建歌单") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { Text("歌单名称") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                OutlinedTextField(
+                    value = commentInput,
+                    onValueChange = { commentInput = it },
+                    label = { Text("说明（选填）") },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(nameInput, commentInput) },
+                enabled = nameInput.isNotBlank(),
+            ) {
+                Text("创建")
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("取消")
+            }
+        },
+    )
 }
 
 /**
@@ -1590,6 +2063,8 @@ private fun TrackRow(
     isCurrent: Boolean,
     isPlaying: Boolean,
     coverModifier: @Composable (String) -> Modifier = { Modifier },
+    // 行尾移除按钮回调；null（默认）不显示 —— 歌单详情传入以支持单首移除
+    onRemove: (() -> Unit)? = null,
     onClick: () -> Unit,
 ) {
     Row(
@@ -1666,6 +2141,17 @@ private fun TrackRow(
                 .size(20.dp)
                 .padding(start = 4.dp),
         )
+        // 单首移除按钮（仅歌单详情传入 onRemove 时显示）
+        if (onRemove != null) {
+            IconButton(onClick = onRemove) {
+                Icon(
+                    Icons.Default.Close,
+                    contentDescription = "从歌单移除",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp),
+                )
+            }
+        }
     }
 }
 

@@ -112,6 +112,18 @@ impl NionCore {
                 mime_type TEXT NOT NULL,
                 file_size INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS music_playlists (
+                id INTEGER PRIMARY KEY,
+                name TEXT NOT NULL,
+                comment TEXT NOT NULL DEFAULT '',
+                created_at INTEGER NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS music_playlist_items (
+                playlist_id INTEGER NOT NULL,
+                position INTEGER NOT NULL,
+                track_id INTEGER NOT NULL,
+                PRIMARY KEY (playlist_id, position)
             );"
         ).map_err(|e| NionError::DatabaseError {
             msg: e.to_string(),
@@ -1997,6 +2009,195 @@ impl NionCore {
         }
         Ok(result)
     }
+
+    // ==================== 本地歌单（music_playlists） ====================
+
+    /// 创建本地歌单，返回自增主键 id。
+    /// Kotlin 侧用它拼接统一歌单模型的 id："local-<id>"。
+    /// comment 为策展说明，可为空字符串。
+    pub fn create_local_playlist(&self, name: String, comment: String) -> Result<i64, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        // created_at 存 Unix 秒（INTEGER），与任务表的 RFC3339 文本不同：
+        // 歌单表按 INTEGER 设计，避免排序时做字符串比较
+        let now = chrono::Utc::now().timestamp();
+        db.execute(
+            "INSERT INTO music_playlists (name, comment, created_at) VALUES (?1, ?2, ?3)",
+            params![name, comment, now],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        Ok(db.last_insert_rowid())
+    }
+
+    /// 重命名/更新本地歌单的名称与策展说明。
+    /// 歌单不存在时返回 NotFound。
+    pub fn rename_local_playlist(
+        &self,
+        id: i64,
+        name: String,
+        comment: String,
+    ) -> Result<(), NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        let changed = db
+            .execute(
+                "UPDATE music_playlists SET name = ?2, comment = ?3 WHERE id = ?1",
+                params![id, name, comment],
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        if changed == 0 {
+            return Err(NionError::NotFound {
+                msg: format!("playlist {} not found", id),
+            });
+        }
+        Ok(())
+    }
+
+    /// 删除本地歌单并级联删除其全部条目（music_playlist_items）。
+    /// 歌单不存在时返回 NotFound。
+    pub fn delete_local_playlist(&self, id: i64) -> Result<(), NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        // 先删条目再删歌单本体，保证级联（表上未建外键，由应用层维护）
+        db.execute(
+            "DELETE FROM music_playlist_items WHERE playlist_id = ?1",
+            params![id],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let changed = db
+            .execute("DELETE FROM music_playlists WHERE id = ?1", params![id])
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        if changed == 0 {
+            return Err(NionError::NotFound {
+                msg: format!("playlist {} not found", id),
+            });
+        }
+        Ok(())
+    }
+
+    /// 列出所有本地歌单（按创建时间升序），含每首歌单的歌曲数（LEFT JOIN 计数）。
+    pub fn list_local_playlists(&self) -> Result<Vec<LocalPlaylistRecord>, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        let mut stmt = db
+            .prepare(
+                "SELECT p.id, p.name, p.comment, p.created_at, COUNT(i.position) AS song_count
+                 FROM music_playlists p
+                 LEFT JOIN music_playlist_items i ON i.playlist_id = p.id
+                 GROUP BY p.id
+                 ORDER BY p.created_at ASC, p.id ASC",
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(LocalPlaylistRecord {
+                    id: row.get(0)?,
+                    name: row.get(1)?,
+                    comment: row.get(2)?,
+                    created_at: row.get(3)?,
+                    song_count: row.get(4)?,
+                })
+            })
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })
+    }
+
+    /// 向歌单末尾追加一首歌。position 取该歌单当前 MAX(position)+1（空歌单从 1 开始）。
+    /// track_id 为 Android MediaStore 的 _ID（Long）。
+    /// 歌单不存在时返回 NotFound。
+    pub fn add_track_to_local_playlist(
+        &self,
+        playlist_id: i64,
+        track_id: i64,
+    ) -> Result<(), NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        // 校验歌单存在，避免出现悬挂条目
+        let exists: bool = db
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM music_playlists WHERE id = ?1)",
+                params![playlist_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        if !exists {
+            return Err(NionError::NotFound {
+                msg: format!("playlist {} not found", playlist_id),
+            });
+        }
+        // COALESCE 保证空歌单时 MAX 为 0，首个条目 position = 1
+        let next_pos: i64 = db
+            .query_row(
+                "SELECT COALESCE(MAX(position), 0) + 1 FROM music_playlist_items WHERE playlist_id = ?1",
+                params![playlist_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        db.execute(
+            "INSERT INTO music_playlist_items (playlist_id, position, track_id) VALUES (?1, ?2, ?3)",
+            params![playlist_id, next_pos, track_id],
+        )
+        .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        Ok(())
+    }
+
+    /// 从歌单中移除指定 position 的条目。
+    /// 删除后不 compact 后续 position（保留空洞），查询端按 position 升序即可保持相对顺序。
+    /// 条目不存在时返回 NotFound。
+    pub fn remove_track_from_local_playlist(
+        &self,
+        playlist_id: i64,
+        position: i64,
+    ) -> Result<(), NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        let changed = db
+            .execute(
+                "DELETE FROM music_playlist_items WHERE playlist_id = ?1 AND position = ?2",
+                params![playlist_id, position],
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        if changed == 0 {
+            return Err(NionError::NotFound {
+                msg: format!("item at position {} of playlist {} not found", position, playlist_id),
+            });
+        }
+        Ok(())
+    }
+
+    /// 返回歌单的全部条目，按 position 升序。
+    /// 歌单不存在或为空都返回空数组。
+    pub fn local_playlist_tracks(
+        &self,
+        playlist_id: i64,
+    ) -> Result<Vec<LocalPlaylistItemRecord>, NionError> {
+        let db = self.db.lock().map_err(|e| NionError::DatabaseError {
+            msg: e.to_string(),
+        })?;
+        let mut stmt = db
+            .prepare(
+                "SELECT position, track_id FROM music_playlist_items
+                 WHERE playlist_id = ?1 ORDER BY position ASC",
+            )
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        let rows = stmt
+            .query_map(params![playlist_id], |row| {
+                Ok(LocalPlaylistItemRecord {
+                    position: row.get(0)?,
+                    track_id: row.get(1)?,
+                })
+            })
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| NionError::DatabaseError { msg: e.to_string() })
+    }
 }
 
 /// 递归级联：将 task_id 的 category_id 和 group_id 同步到所有子孙任务。
@@ -3058,5 +3259,61 @@ mod tests {
         let notes = core.get_linked_notes(task1.id.clone()).unwrap();
         assert_eq!(notes.len(), 1);
         assert_eq!(notes[0].id, note2.id);
+    }
+
+    /// 本地歌单全生命周期：创建 → 追加（position 递增）→ 计数 → 移除 → 级联删除
+    #[test]
+    fn test_local_playlist_lifecycle() {
+        let core = make_in_memory();
+
+        // 创建两首歌单，验证自增 id 与字段回读
+        let id1 = core.create_local_playlist("我的最爱".into(), "心情好时听".into()).unwrap();
+        let id2 = core.create_local_playlist("睡前".into(), String::new()).unwrap();
+        assert!(id2 > id1);
+
+        // 空歌单 song_count 应为 0
+        let lists = core.list_local_playlists().unwrap();
+        assert_eq!(lists.len(), 2);
+        assert_eq!(lists[0].name, "我的最爱");
+        assert_eq!(lists[0].comment, "心情好时听");
+        assert_eq!(lists[0].song_count, 0);
+
+        // 追加条目：position 从 1 开始递增
+        core.add_track_to_local_playlist(id1, 101).unwrap();
+        core.add_track_to_local_playlist(id1, 202).unwrap();
+        core.add_track_to_local_playlist(id2, 303).unwrap();
+
+        let tracks = core.local_playlist_tracks(id1).unwrap();
+        assert_eq!(
+            tracks,
+            vec![
+                LocalPlaylistItemRecord { position: 1, track_id: 101 },
+                LocalPlaylistItemRecord { position: 2, track_id: 202 },
+            ]
+        );
+
+        // LEFT JOIN 计数
+        let lists = core.list_local_playlists().unwrap();
+        assert_eq!(lists[0].song_count, 2);
+        assert_eq!(lists[1].song_count, 1);
+
+        // 移除条目后剩余条目保持相对顺序（不 compact）
+        core.remove_track_from_local_playlist(id1, 1).unwrap();
+        let tracks = core.local_playlist_tracks(id1).unwrap();
+        assert_eq!(tracks, vec![LocalPlaylistItemRecord { position: 2, track_id: 202 }]);
+
+        // 重命名 + 改 comment
+        core.rename_local_playlist(id2, "晚安".into(), "轻音乐".into()).unwrap();
+        let lists = core.list_local_playlists().unwrap();
+        assert_eq!(lists[1].name, "晚安");
+        assert_eq!(lists[1].comment, "轻音乐");
+
+        // 删除歌单应级联清空条目；再删应报 NotFound
+        core.delete_local_playlist(id1).unwrap();
+        assert!(core.local_playlist_tracks(id1).unwrap().is_empty());
+        assert!(core.delete_local_playlist(id1).is_err());
+
+        // 不存在的歌单追加条目应报 NotFound
+        assert!(core.add_track_to_local_playlist(9999, 1).is_err());
     }
 }
