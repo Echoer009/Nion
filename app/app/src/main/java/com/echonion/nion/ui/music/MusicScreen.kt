@@ -1,0 +1,1425 @@
+package com.echonion.nion.ui.music
+
+import android.Manifest
+import android.app.Application
+import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.os.Build
+import android.util.LruCache
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.Album
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Headphones
+import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.Pause
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.SkipNext
+import androidx.compose.material.icons.filled.SkipPrevious
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.Slider
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+
+/**
+ * 获取 Activity 作用域的 MusicViewModel。
+ *
+ * 与 FocusScreen 的 focusTimerViewModel 相同的手法：把 ViewModel 绑定到
+ * Activity 而非 NavBackStackEntry，这样用户在底部导航各页之间切换时
+ * ViewModel（连同 MediaController、播放队列、浏览状态）不会销毁，音乐不中断。
+ */
+@Composable
+fun musicViewModel(): MusicViewModel {
+    val context = LocalContext.current
+    val app = context.applicationContext as Application
+    return viewModel(
+        viewModelStoreOwner = context as ComponentActivity,
+        factory = MusicViewModel.Factory(app),
+    )
+}
+
+/**
+ * 音乐主界面。
+ *
+ * 结构：
+ * - Scaffold + TopAppBar（标题"音乐"、右上角打开伙伴面板）
+ * - 主体：AnimatedContent 按 [MusicViewModel.source] 切换三态
+ *   （本地曲目列表 / 类脑娘服务器 / 自己的服务器），切换动画照抄
+ *   FocusStatsPanel 日/周/月切换（水平滑动 + 淡入淡出，方向由音源顺序决定）
+ * - 底部：迷你播放条（有曲目在播时显示），点击展开完整播放页
+ * - 完整播放页：全屏覆盖层（AnimatedVisibility 上下滑出入），
+ *   含封面、可拖动进度条、上一首/下一首、播放队列列表
+ *
+ * @param onOpenCompanion 点击右上角伙伴图标时触发，由上层打开右侧伙伴面板
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun MusicScreen(
+    onOpenCompanion: () -> Unit = {},
+) {
+    val vm = musicViewModel()
+
+    // 完整播放页是否展开（纯 UI 状态，留在 Composable 内）
+    var showFullPlayer by remember { mutableStateOf(false) }
+
+    // 完整播放页打开时拦截系统返回：先收起播放页而不是退出音乐页
+    BackHandler(enabled = showFullPlayer) { showFullPlayer = false }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        Scaffold(
+            contentWindowInsets = WindowInsets.statusBars,
+            topBar = {
+                TopAppBar(
+                    title = {
+                        Text(
+                            "音乐",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
+                    },
+                    actions = {
+                        // 右上角伙伴入口，与专注页/日程页保持一致
+                        IconButton(onClick = onOpenCompanion) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Chat,
+                                contentDescription = "打开伙伴",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = Color.Transparent,
+                    ),
+                )
+            },
+        ) { innerPadding ->
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+            ) {
+                // ===== 音源三态切换主区域 =====
+                AnimatedContent(
+                    targetState = vm.source,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    transitionSpec = {
+                        // 切换方向：向顺序更后的音源切换（本地→类脑娘→自定义）
+                        // 新内容从右滑入；反向切换从左滑入 —— 与专注统计日/周/月切换同一套动效
+                        val direction = if (targetState.order > initialState.order) 1 else -1
+                        (
+                            slideInHorizontally(
+                                animationSpec = tween(300, easing = FastOutSlowInEasing),
+                                initialOffsetX = { fullWidth -> direction * fullWidth / 3 },
+                            ) + fadeIn(tween(200, delayMillis = 50))
+                            ) togetherWith (
+                            slideOutHorizontally(
+                                animationSpec = tween(300, easing = FastOutSlowInEasing),
+                                targetOffsetX = { fullWidth -> -direction * fullWidth / 3 },
+                            ) + fadeOut(tween(150))
+                            ) using SizeTransform(clip = false)
+                    },
+                    label = "musicSource",
+                ) { targetSource ->
+                    when (targetSource) {
+                        // 本地曲目：MediaStore 全机音频（含权限申请流程）
+                        MusicSource.LOCAL -> LocalMusicContent(vm)
+                        // 服务器：未配置时显示引导配置表单，配置后进入曲库浏览
+                        MusicSource.BRAINGIRL -> ServerMusicContent(vm, isCustom = false)
+                        MusicSource.CUSTOM -> ServerMusicContent(vm, isCustom = true)
+                    }
+                }
+
+                // ===== 迷你播放条（有正在播放的曲目时显示）=====
+                vm.currentTrack?.let { track ->
+                    MiniPlayerBar(
+                        vm = vm,
+                        track = track,
+                        // 点击播放条主体 → 展开完整播放页
+                        onExpand = { showFullPlayer = true },
+                    )
+                }
+            }
+        }
+
+        // ===== 完整播放页：全屏覆盖层 =====
+        AnimatedVisibility(
+            visible = showFullPlayer,
+            // 从底部滑入 + 淡入，模拟"从迷你条展开"的层级感
+            enter = slideInVertically(
+                animationSpec = tween(300, easing = FastOutSlowInEasing),
+                initialOffsetY = { fullHeight -> fullHeight },
+            ) + fadeIn(tween(200)),
+            exit = slideOutVertically(
+                animationSpec = tween(250, easing = FastOutSlowInEasing),
+                targetOffsetY = { fullHeight -> fullHeight },
+            ) + fadeOut(tween(150)),
+        ) {
+            FullPlayerOverlay(
+                vm = vm,
+                onClose = { showFullPlayer = false },
+            )
+        }
+    }
+}
+
+/* ============================================================
+ * 本地曲目
+ * ============================================================ */
+
+/**
+ * 本地曲目内容区 —— 权限申请 + MediaStore 扫描结果列表。
+ *
+ * 流程：
+ * 1. 进入时检查音频读取权限（Android 13+ 用 READ_MEDIA_AUDIO，
+ *    更早版本用 READ_EXTERNAL_STORAGE），无权限则弹系统授权框
+ * 2. 授权成功后触发 ViewModel 扫描 MediaStore
+ * 3. 列表展示全部曲目，点击某曲即以整个列表为队列开始播放
+ *
+ * @param vm 共享的音乐 ViewModel
+ */
+@Composable
+private fun LocalMusicContent(vm: MusicViewModel) {
+    val context = LocalContext.current
+    // 按系统版本选择权限串：13+ 细化的媒体权限，旧版通用存储权限
+    val permission = if (Build.VERSION.SDK_INT >= 33) {
+        Manifest.permission.READ_MEDIA_AUDIO
+    } else {
+        Manifest.permission.READ_EXTERNAL_STORAGE
+    }
+    var hasPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(context, permission) == PackageManager.PERMISSION_GRANTED,
+        )
+    }
+    // 用户是否明确拒绝过授权（拒绝后显示引导卡片而不是空白列表）
+    var permissionDenied by remember { mutableStateOf(false) }
+
+    // 系统授权框回调：授权成功立即扫描；拒绝则进入引导态
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission(),
+    ) { granted ->
+        hasPermission = granted
+        permissionDenied = !granted
+        if (granted) vm.loadLocalTracks()
+    }
+
+    // 首次进入：有权限直接扫描，无权限弹授权框
+    LaunchedEffect(Unit) {
+        if (hasPermission) {
+            vm.loadLocalTracks()
+        } else {
+            permissionLauncher.launch(permission)
+        }
+    }
+
+    when {
+        // 引导态：权限被拒，提示用户去系统设置开启
+        permissionDenied -> {
+            EmptyHint(
+                icon = Icons.Default.Headphones,
+                title = "需要音频访问权限",
+                subtitle = "点击下方按钮重新授权后即可扫描本机音乐",
+                actionLabel = "重新授权",
+                onAction = {
+                    // 再次拉起系统授权框（系统会记住拒绝，可能直接落到设置引导）
+                    permissionDenied = false
+                    permissionLauncher.launch(permission)
+                },
+            )
+        }
+        // 加载态
+        vm.isLoadingLocal -> {
+            Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+        }
+        // 空列表
+        vm.localTracks.isEmpty() -> {
+            EmptyHint(
+                icon = Icons.Default.MusicNote,
+                title = "本机没有找到音频",
+                subtitle = "把音乐文件复制到手机后点击刷新",
+                actionLabel = "刷新",
+                onAction = { vm.loadLocalTracks() },
+            )
+        }
+        // 正常列表：整表作为播放队列
+        else -> {
+            TrackList(
+                tracks = vm.localTracks,
+                currentTrackId = vm.currentTrack?.id,
+                isPlaying = vm.isPlaying,
+                onPlay = { index -> vm.playQueue(vm.localTracks, index) },
+            )
+        }
+    }
+}
+
+/* ============================================================
+ * 服务器（类脑娘 / 自己的）
+ * ============================================================ */
+
+/**
+ * 服务器音源内容区 —— 统一处理"未配置引导态"与"已配置浏览态"。
+ *
+ * 未配置（引导态）：显示配置表单（URL + 账密），保存后自动进入浏览态；
+ * 已配置（浏览态）：搜索框 + 专辑列表 + 专辑详情（BackHandler 返回列表）。
+ *
+ * @param vm 共享的音乐 ViewModel
+ * @param isCustom true=自己的服务器（表单多一个 URL 输入框）；false=类脑娘预置服务器
+ */
+@Composable
+private fun ServerMusicContent(vm: MusicViewModel, isCustom: Boolean) {
+    val configured = if (isCustom) vm.isCustomConfigured else vm.isBraingirlConfigured
+
+    if (!configured) {
+        // 引导态：配置表单
+        ServerConfigForm(vm, isCustom = isCustom)
+        return
+    }
+
+    // 已配置：首次进入自动加载专辑列表（loadAlbums 内部有"已有数据不重复请求"保护）
+    LaunchedEffect(Unit) { vm.loadAlbums() }
+
+    // 专辑详情打开时拦截系统返回：先回到专辑列表
+    BackHandler(enabled = vm.currentAlbum != null) { vm.closeAlbum() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+    ) {
+        // ===== 搜索框 =====
+        OutlinedTextField(
+            value = vm.searchQuery,
+            onValueChange = {
+                vm.searchQuery = it
+            },
+            modifier = Modifier.fillMaxWidth(),
+            placeholder = { Text("搜索歌曲 / 专辑 / 艺术家") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            // 输入非空时显示一键清空按钮
+            trailingIcon = {
+                if (vm.searchQuery.isNotBlank()) {
+                    IconButton(onClick = { vm.searchQuery = "" }) {
+                        Icon(Icons.Default.Close, contentDescription = "清空搜索")
+                    }
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(14.dp),
+        )
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // ===== 错误提示条 =====
+        vm.serverError?.let { error ->
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.errorContainer,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { vm.loadAlbums(force = true) }
+                        .padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        error,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.weight(1f),
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "点击重试",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // ===== 主体：搜索结果 / 专辑详情 / 专辑列表 三选一 =====
+        when {
+            // 搜索中：优先展示搜索结果（歌曲在前、专辑在后）
+            vm.searchQuery.isNotBlank() && vm.searchResult != null -> SearchResultContent(vm)
+            // 专辑详情
+            vm.currentAlbum != null -> AlbumDetailContent(vm)
+            // 专辑列表（加载中显示居中转圈）
+            else -> AlbumListContent(vm)
+        }
+    }
+}
+
+/**
+ * 专辑列表内容。
+ */
+@Composable
+private fun AlbumListContent(vm: MusicViewModel) {
+    if (vm.isLoadingServer && vm.albums.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+    if (vm.albums.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                "服务器上还没有专辑",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items(vm.albums, key = { "album-${it.id}" }) { album ->
+            AlbumRow(
+                album = album,
+                onClick = { vm.openAlbum(album) },
+            )
+        }
+    }
+}
+
+/**
+ * 专辑详情内容 —— 专辑头部信息 + 曲目列表；点击曲目以专辑为队列播放。
+ */
+@Composable
+private fun AlbumDetailContent(vm: MusicViewModel) {
+    val album = vm.currentAlbum ?: return
+    if (vm.isLoadingServer && vm.albumSongs.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            CircularProgressIndicator()
+        }
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        // 专辑头部：名称 / 艺术家 / 年份与曲目数
+        item(key = "album_header") {
+            Column(modifier = Modifier.padding(top = 8.dp, bottom = 8.dp)) {
+                Text(
+                    album.name,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    album.artist,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                val meta = buildList {
+                    if (album.year > 0) add(album.year.toString())
+                    add("${album.songCount} 首")
+                    if (album.durationSeconds > 0) add(formatTrackDuration(album.durationSeconds))
+                }.joinToString(" · ")
+                Text(
+                    meta,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+        // 曲目列表：点击即以专辑全部曲目为队列，从该曲开始播放
+        itemsIndexed(vm.albumSongs) { index, track ->
+            TrackRow(
+                track = track,
+                index = index,
+                isCurrent = vm.currentTrack?.id == track.id,
+                isPlaying = vm.isPlaying,
+                onClick = { vm.playQueue(vm.albumSongs, index) },
+            )
+        }
+    }
+}
+
+/**
+ * 搜索结果内容 —— 歌曲（可点播）在前、专辑（可点开详情）在后。
+ */
+@Composable
+private fun SearchResultContent(vm: MusicViewModel) {
+    val result = vm.searchResult ?: return
+    if (result.songs.isEmpty() && result.albums.isEmpty()) {
+        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text(
+                "没有找到「${vm.searchQuery}」相关的结果",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        return
+    }
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        if (result.songs.isNotEmpty()) {
+            item(key = "search_songs_header") { SectionLabel("歌曲") }
+            itemsIndexed(result.songs) { index, track ->
+                TrackRow(
+                    track = track,
+                    index = index,
+                    isCurrent = vm.currentTrack?.id == track.id,
+                    isPlaying = vm.isPlaying,
+                    // 搜索结果播放队列 = 搜索到的歌曲列表
+                    onClick = { vm.playQueue(result.songs, index) },
+                )
+            }
+        }
+        if (result.albums.isNotEmpty()) {
+            item(key = "search_albums_header") { SectionLabel("专辑") }
+            items(result.albums, key = { "search-album-${it.id}" }) { album ->
+                AlbumRow(album = album, onClick = { vm.openAlbum(album) })
+            }
+        }
+    }
+}
+
+/**
+ * 服务器配置表单（引导态）。
+ *
+ * 类脑娘服务器：只填用户名/密码（URL 已预置），并提示先在网页端创建账号；
+ * 自己的服务器：额外填写服务器地址。
+ * 提供"测试连接"（ping 校验，不落库）与"保存"（持久化到 settings 表）。
+ *
+ * @param vm 共享的音乐 ViewModel
+ * @param isCustom true=自己的服务器表单；false=类脑娘服务器表单
+ */
+@Composable
+private fun ServerConfigForm(vm: MusicViewModel, isCustom: Boolean) {
+    // 表单本地输入状态；LaunchedEffect 在 VM 异步加载完已存配置后回填，
+    // 让"返回修改账密"场景能看到旧值
+    var urlInput by remember { mutableStateOf(vm.customServerUrl) }
+    var userInput by remember {
+        mutableStateOf(if (isCustom) vm.customUsername else vm.braingirlUsername)
+    }
+    var passInput by remember {
+        mutableStateOf(if (isCustom) vm.customPassword else vm.braingirlPassword)
+    }
+    LaunchedEffect(vm.customServerUrl, vm.customUsername, vm.braingirlUsername) {
+        urlInput = vm.customServerUrl
+        userInput = if (isCustom) vm.customUsername else vm.braingirlUsername
+        passInput = if (isCustom) vm.customPassword else vm.braingirlPassword
+    }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        item(key = "title") {
+            Column {
+                Text(
+                    if (isCustom) "连接你的服务器" else "连接类脑娘服务器",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                )
+                Text(
+                    if (isCustom) {
+                        "填入 Navidrome / Subsonic 服务器地址与账号信息"
+                    } else {
+                        "预置音源 ${MusicViewModel.BRAINGIRL_SERVER_URL}，使用你在网页端注册的账号登录"
+                    },
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+        }
+
+        // 仅"自己的服务器"需要填地址
+        if (isCustom) {
+            item(key = "url") {
+                OutlinedTextField(
+                    value = urlInput,
+                    onValueChange = {
+                        urlInput = it
+                        vm.clearConfigTest()
+                    },
+                    label = { Text("服务器地址") },
+                    placeholder = { Text("https://music.example.com") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+        }
+
+        item(key = "username") {
+            OutlinedTextField(
+                value = userInput,
+                onValueChange = {
+                    userInput = it
+                    vm.clearConfigTest()
+                },
+                label = { Text("用户名") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+        item(key = "password") {
+            OutlinedTextField(
+                value = passInput,
+                onValueChange = {
+                    passInput = it
+                    vm.clearConfigTest()
+                },
+                label = { Text("密码") },
+                // 密码框用密码掩码，同时允许临时明文查看防输错
+                visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+            )
+        }
+
+        item(key = "buttons") {
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // 测试连接：用表单当前值 ping 服务器，不落库
+                OutlinedButton(
+                    onClick = {
+                        vm.testServerConfig(
+                            sourceToTest = if (isCustom) MusicSource.CUSTOM else MusicSource.BRAINGIRL,
+                            url = urlInput,
+                            username = userInput,
+                            password = passInput,
+                        )
+                    },
+                    enabled = !vm.configTest.isTesting,
+                ) {
+                    Text(if (vm.configTest.isTesting) "测试中..." else "测试连接")
+                }
+                // 保存：持久化配置；保存后 isXxxConfigured 变 true，UI 自动切到浏览态
+                Button(
+                    onClick = {
+                        if (isCustom) {
+                            vm.saveCustomConfig(urlInput, userInput, passInput)
+                        } else {
+                            vm.saveBraingirlConfig(userInput, passInput)
+                        }
+                    },
+                    // URL + 账密任一为空禁用保存
+                    enabled = userInput.isNotBlank() && passInput.isNotBlank() &&
+                        (!isCustom || urlInput.isNotBlank()),
+                ) {
+                    Text("保存并进入")
+                }
+            }
+        }
+
+        // 测试结果反馈：成功绿色（primary）、失败红色（error）
+        if (vm.configTest.message.isNotBlank()) {
+            item(key = "test_result") {
+                Text(
+                    vm.configTest.message,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (vm.configTest.success == true) {
+                        MaterialTheme.colorScheme.primary
+                    } else {
+                        MaterialTheme.colorScheme.error
+                    },
+                )
+            }
+        }
+    }
+}
+
+/* ============================================================
+ * 播放器 UI（迷你条 + 完整播放页）
+ * ============================================================ */
+
+/**
+ * 迷你播放条 —— 固定在音乐页底部。
+ *
+ * 结构：细进度条（当前曲进度）+ 封面缩略图 + 曲名/艺术家 + 播放暂停 + 下一首。
+ * 点击条主体（按钮区域除外）展开完整播放页。
+ *
+ * @param vm 共享的音乐 ViewModel
+ * @param track 当前播放曲目
+ * @param onExpand 点击播放条主体时触发（展开完整播放页）
+ */
+@Composable
+private fun MiniPlayerBar(vm: MusicViewModel, track: PlayableTrack, onExpand: () -> Unit) {
+    Surface(
+        tonalElevation = 4.dp,
+        shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+    ) {
+        Column(modifier = Modifier.clickable(onClick = onExpand)) {
+            // 细进度条：宽度按 position/duration 比例；时长未知时隐藏
+            val progress = if (vm.durationMs > 0) {
+                (vm.positionMs.toFloat() / vm.durationMs).coerceIn(0f, 1f)
+            } else null
+            if (progress != null) {
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                // 封面缩略图（无封面时用音符图标占位）
+                CoverArt(
+                    coverUrl = track.coverArtUrl,
+                    modifier = Modifier.size(44.dp),
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        track.title,
+                        style = MaterialTheme.typography.bodyMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        track.artist,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                // 播放/暂停
+                IconButton(onClick = { vm.togglePlayPause() }) {
+                    Icon(
+                        if (vm.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (vm.isPlaying) "暂停" else "播放",
+                        tint = MaterialTheme.colorScheme.primary,
+                    )
+                }
+                // 下一首
+                IconButton(onClick = { vm.skipToNext() }) {
+                    Icon(
+                        Icons.Default.SkipNext,
+                        contentDescription = "下一首",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * 完整播放页 —— 全屏覆盖层。
+ *
+ * 从上到下：收起按钮 / 大封面 / 曲名+艺术家+专辑 / 进度条（可拖动）/ 
+ * 播放控制（上一首、播放暂停、下一首）/ 播放队列列表。
+ *
+ * 进度条交互：拖动期间显示本地 dragPosition（避免 500ms 轮询把滑块拽回去），
+ * 松手时一次性 seek 到目标位置并清空本地值。
+ *
+ * @param vm 共享的音乐 ViewModel
+ * @param onClose 收起播放页（回到音乐列表页）时触发
+ */
+@Composable
+private fun FullPlayerOverlay(vm: MusicViewModel, onClose: () -> Unit) {
+    val track = vm.currentTrack
+    Surface(
+        modifier = Modifier.fillMaxSize(),
+        color = MaterialTheme.colorScheme.background,
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 24.dp)
+                .statusBarsPadding(),
+        ) {
+            // ===== 顶部收起按钮 =====
+            Row(modifier = Modifier.fillMaxWidth()) {
+                IconButton(onClick = onClose) {
+                    Icon(
+                        Icons.Default.KeyboardArrowDown,
+                        contentDescription = "收起播放页",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+
+            if (track == null) {
+                // 队列被清空的极端情况：提示并允许收起
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .weight(1f),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        "没有正在播放的曲目",
+                        style = MaterialTheme.typography.bodyLarge,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                return@Surface
+            }
+
+            // ===== 大封面 =====
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 8.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(24.dp),
+                    tonalElevation = 2.dp,
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                ) {
+                    CoverArt(
+                        coverUrl = track.coverArtUrl,
+                        modifier = Modifier.size(280.dp),
+                        placeHolderSize = 96.dp,
+                    )
+                }
+            }
+
+            // ===== 曲名 / 艺术家 / 专辑 =====
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 16.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+            ) {
+                Text(
+                    track.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    track.artist,
+                    style = MaterialTheme.typography.bodyLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                if (track.album.isNotBlank()) {
+                    Text(
+                        track.album,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+
+            // ===== 进度条 =====
+            // 拖动期间非空；null=跟随播放进度。key 绑定曲目 id，切歌重置拖动态
+            var dragPosition by remember(track.id) { mutableStateOf<Float?>(null) }
+            // 拖动中显示 dragPosition；总时长未知时滑块不可交互（duration=0）
+            val sliderValue = dragPosition ?: vm.positionMs.toFloat()
+            val sliderMax = vm.durationMs.toFloat().coerceAtLeast(1f)
+            Slider(
+                value = sliderValue.coerceIn(0f, sliderMax),
+                onValueChange = { dragPosition = it },
+                onValueChangeFinished = {
+                    // 松手：seek 到拖动位置并恢复跟随播放进度
+                    dragPosition?.let { vm.seekTo(it.toLong()) }
+                    dragPosition = null
+                },
+                valueRange = 0f..sliderMax,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                enabled = vm.durationMs > 0,
+            )
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 8.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    formatTrackDuration((dragPosition?.toLong() ?: vm.positionMs) / 1000),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                Text(
+                    formatTrackDuration(vm.durationMs / 1000),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+
+            // ===== 播放控制 =====
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                IconButton(onClick = { vm.skipToPrevious() }) {
+                    Icon(
+                        Icons.Default.SkipPrevious,
+                        contentDescription = "上一首",
+                        modifier = Modifier.size(36.dp),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Spacer(modifier = Modifier.width(24.dp))
+                // 主按钮：实心圆形，视觉上作为播放页的核心操作
+                FilledIconButton(
+                    onClick = { vm.togglePlayPause() },
+                    modifier = Modifier.size(72.dp),
+                    colors = IconButtonDefaults.filledIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.primary,
+                    ),
+                ) {
+                    Icon(
+                        if (vm.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (vm.isPlaying) "暂停" else "播放",
+                        modifier = Modifier.size(36.dp),
+                    )
+                }
+                Spacer(modifier = Modifier.width(24.dp))
+                IconButton(onClick = { vm.skipToNext() }) {
+                    Icon(
+                        Icons.Default.SkipNext,
+                        contentDescription = "下一首",
+                        modifier = Modifier.size(36.dp),
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+
+            // ===== 播放队列 =====
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 8.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(
+                    Icons.Default.Headphones,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(16.dp),
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    "播放队列（${vm.queue.size} 首）",
+                    style = MaterialTheme.typography.titleSmall,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+            }
+            LazyColumn(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .weight(1f),
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+            ) {
+                itemsIndexed(vm.queue) { index, item ->
+                    QueueRow(
+                        track = item,
+                        index = index,
+                        isCurrent = index == vm.currentIndex,
+                        onClick = { vm.playQueueIndex(index) },
+                    )
+                }
+            }
+        }
+    }
+}
+
+/* ============================================================
+ * 通用小组件
+ * ============================================================ */
+
+/**
+ * 通用曲目列表（本地曲目用）：LazyColumn + [TrackRow]。
+ *
+ * @param tracks 曲目列表
+ * @param currentTrackId 当前播放曲目 id（高亮）；null=未播放
+ * @param isPlaying 是否在播放（控制高亮行的小图标）
+ * @param onPlay 点击某曲时触发，回调传入曲目下标
+ */
+@Composable
+private fun TrackList(
+    tracks: List<PlayableTrack>,
+    currentTrackId: String?,
+    isPlaying: Boolean,
+    onPlay: (Int) -> Unit,
+) {
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        itemsIndexed(tracks) { index, track ->
+            TrackRow(
+                track = track,
+                index = index,
+                isCurrent = track.id == currentTrackId,
+                isPlaying = isPlaying,
+                onClick = { onPlay(index) },
+            )
+        }
+    }
+}
+
+/**
+ * 单个曲目行：序号（或播放中动效图标）+ 曲名/艺术家 + 时长。
+ *
+ * @param track 曲目数据
+ * @param index 显示用的序号（从 0 开始，展示时 +1）
+ * @param isCurrent 是否为当前播放曲目（高亮标题 + 显示音符图标）
+ * @param isPlaying 是否正在播放
+ * @param onClick 点击整行时触发（开始播放该曲）
+ */
+@Composable
+private fun TrackRow(
+    track: PlayableTrack,
+    index: Int,
+    isCurrent: Boolean,
+    isPlaying: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(10.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 序号列：当前曲显示音符图标（播放中）/序号，宽度固定保证对齐
+        Box(
+            modifier = Modifier.width(32.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            if (isCurrent) {
+                Icon(
+                    Icons.Default.MusicNote,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(18.dp),
+                )
+            } else {
+                Text(
+                    "${index + 1}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                track.title,
+                style = MaterialTheme.typography.bodyMedium,
+                // 当前曲目高亮 + 加粗，一眼定位队列位置
+                color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                track.artist,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // 时长（本地曲目未上报时长时显示为空，保持行高一致）
+        Text(
+            if (track.durationSeconds > 0) formatTrackDuration(track.durationSeconds) else "--:--",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        // 引导播放入口的视觉提示（isPlaying 参数保留给未来"跳动音符"动效用）
+        Icon(
+            Icons.Default.PlayArrow,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isPlaying && isCurrent) 1f else 0.4f),
+            modifier = Modifier
+                .size(20.dp)
+                .padding(start = 4.dp),
+        )
+    }
+}
+
+/**
+ * 队列行 —— 与 TrackRow 类似但左侧固定显示序号（当前曲高亮序号替代为图标）。
+ *
+ * @param track 曲目数据
+ * @param index 队列下标
+ * @param isCurrent 是否当前播放（primary 色高亮）
+ * @param onClick 点击跳播该曲
+ */
+@Composable
+private fun QueueRow(
+    track: PlayableTrack,
+    index: Int,
+    isCurrent: Boolean,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(8.dp))
+            .background(
+                if (isCurrent) MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f) else Color.Transparent,
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(modifier = Modifier.width(28.dp), contentAlignment = Alignment.Center) {
+            if (isCurrent) {
+                Icon(
+                    Icons.Default.Headphones,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.size(16.dp),
+                )
+            } else {
+                Text(
+                    "${index + 1}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                )
+            }
+        }
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                track.title,
+                style = MaterialTheme.typography.bodyMedium,
+                color = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                fontWeight = if (isCurrent) FontWeight.SemiBold else FontWeight.Normal,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                track.artist,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            if (track.durationSeconds > 0) formatTrackDuration(track.durationSeconds) else "",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * 专辑行：封面缩略图 + 专辑名/艺术家 + 年份。
+ *
+ * @param album 专辑数据
+ * @param onClick 点击打开专辑详情
+ */
+@Composable
+private fun AlbumRow(album: SubsonicAlbum, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(12.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        // 封面：优先服务器封面，无封面 ID 时显示专辑图标占位
+        CoverArt(
+            coverUrl = album.coverArtUrl,
+            modifier = Modifier.size(52.dp),
+            cornerRadius = 10.dp,
+        )
+        Spacer(modifier = Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                album.name,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                listOf(album.artist, if (album.year > 0) album.year.toString() else null)
+                    .filterNotNull()
+                    .joinToString(" · ")
+                    .ifBlank { "未知艺术家" },
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Text(
+            "${album.songCount} 首",
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+/**
+ * 分区标题（"歌曲"/"专辑"）。
+ */
+@Composable
+private fun SectionLabel(text: String) {
+    Text(
+        text,
+        style = MaterialTheme.typography.titleSmall,
+        fontWeight = FontWeight.SemiBold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
+    )
+}
+
+/**
+ * 空状态/引导卡片 —— 图标 + 标题 + 副标题 + 可选操作按钮。
+ *
+ * @param icon 大图标
+ * @param title 主标题
+ * @param subtitle 说明文字
+ * @param actionLabel 操作按钮文字；null=不显示按钮
+ * @param onAction 点击操作按钮时触发
+ */
+@Composable
+private fun EmptyHint(
+    icon: ImageVector,
+    title: String,
+    subtitle: String,
+    actionLabel: String?,
+    onAction: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 32.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
+    ) {
+        Icon(
+            icon,
+            contentDescription = null,
+            modifier = Modifier.size(56.dp),
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+        )
+        Spacer(modifier = Modifier.height(16.dp))
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            fontWeight = FontWeight.SemiBold,
+            color = MaterialTheme.colorScheme.onSurface,
+        )
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            subtitle,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+        if (actionLabel != null) {
+            Spacer(modifier = Modifier.height(16.dp))
+            OutlinedButton(onClick = onAction) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(actionLabel)
+            }
+        }
+    }
+}
+
+/* ============================================================
+ * 封面加载
+ * ============================================================ */
+
+/**
+ * 进程内封面缓存 —— URL → Bitmap 的 LruCache（24 张），
+ * 滚动列表时重复项直接命中内存，避免重复下载。
+ */
+private object CoverArtCache {
+    private val cache = object : LruCache<String, Bitmap>(24) {}
+
+    /** 查缓存；未命中返回 null */
+    fun get(url: String): Bitmap? = cache.get(url)
+
+    /** 写入缓存 */
+    fun put(url: String, bitmap: Bitmap) = cache.put(url, bitmap)
+}
+
+/**
+ * 封面 HTTP 加载器 —— OkHttp 同步 GET + BitmapFactory 解码。
+ * 专为封面 URL 设计（不含 Subsonic 业务解析逻辑）。
+ */
+private object CoverArtLoader {
+    private val client = OkHttpClient()
+
+    /** 下载并解码封面；失败返回 null */
+    fun load(url: String): Bitmap? = runCatching {
+        client.newCall(Request.Builder().url(url).build()).execute().use { response ->
+            if (!response.isSuccessful) return@runCatching null
+            val bytes = response.body?.bytes() ?: return@runCatching null
+            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+        }
+    }.getOrNull()
+}
+
+
+/**
+ * 封面图 Composable —— 优先内存缓存 → 异步下载 → 占位图标。
+ *
+ * @param coverUrl 封面完整 URL（含认证参数）；空/null 显示占位图标
+ * @param modifier 尺寸约束
+ * @param placeHolderSize 占位图标大小（大封面用大图标）
+ * @param cornerRadius 圆角半径（默认 8dp）
+ */
+@Composable
+private fun CoverArt(
+    coverUrl: String?,
+    modifier: Modifier = Modifier,
+    placeHolderSize: androidx.compose.ui.unit.Dp = 24.dp,
+    cornerRadius: androidx.compose.ui.unit.Dp = 8.dp,
+) {
+    // produceState：初值取内存缓存（同步命中无闪烁）；未命中则异步下载并写入缓存。
+    // key 绑定 URL，URL 变化（切歌/换专辑）时自动重新加载
+    val bitmap by produceState<Bitmap?>(
+        initialValue = coverUrl?.let { CoverArtCache.get(it) },
+        key1 = coverUrl,
+    ) {
+        if (value == null && coverUrl != null) {
+            value = withContext(Dispatchers.IO) {
+                CoverArtLoader.load(coverUrl)?.also { CoverArtCache.put(coverUrl, it) }
+            }
+        }
+    }
+
+    Box(
+        modifier = modifier.clip(RoundedCornerShape(cornerRadius)),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (bitmap != null) {
+            Image(
+                bitmap = bitmap.asImageBitmap(),
+                contentDescription = "封面",
+                modifier = Modifier.fillMaxSize(),
+                contentScale = ContentScale.Crop,
+            )
+        } else {
+            // 占位：中性色专辑图标
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    Icons.Default.Album,
+                    contentDescription = null,
+                    modifier = Modifier.size(placeHolderSize),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                )
+            }
+        }
+    }
+}
+
+

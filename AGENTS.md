@@ -54,7 +54,7 @@ cd app && ./gradlew assembleDebug     # build APK
 - All DB ops are synchronous on the caller thread. Kotlin callers should use `Dispatchers.IO`.
 - `reorder_tasks` uses manual `BEGIN`/`COMMIT`; other multi-step DB ops do not.
 - The app uses a `DualPanelLayout` with left sidebar (checklists) and right sidebar (companion), both swipeable.
-- Navigation: `tasks`, `schedule`, `pomodoro`, `settings` routes via Jetpack Navigation Compose.
+- Navigation: `tasks`, `schedule`, `pomodoro`, `music`, `settings` routes via Jetpack Navigation Compose.
 - **分组 (Groups)**: 清单下的二级分类。数据模型: `Checklist → Group → Task`。`TaskData.group_id` 关联分组，`GroupData.checklist_id` 关联清单。
 
 ## Data Model
@@ -106,6 +106,7 @@ Task (任务) ──1:N──> Task (子任务, via parent_id)
 | Rust models/errors | `core/src/models.rs` |
 | Kotlin entry composable | `app/app/src/main/java/com/echonion/nion/ui/NionApp.kt` |
 | Task screen + ViewModel | `app/app/src/main/java/com/echonion/nion/ui/task/` |
+| Music module (Subsonic + Media3 播放) | `app/app/src/main/java/com/echonion/nion/ui/music/` |
 | Memory tool | `app/app/src/main/java/com/echonion/nion/ui/companion/tools/MemoryTool.kt` |
 | UniFFI binding output | `app/app/src/main/java/uniffi/nion_core/nion_core.kt` |
 | Known pitfalls | `docs/pitfalls.md` |

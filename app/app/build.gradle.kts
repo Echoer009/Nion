@@ -122,6 +122,11 @@ dependencies {
     // WorkManager —— 后台提醒任务调度（渐进式循环、LLM 文案生成）
     implementation("androidx.work:work-runtime-ktx:2.10.0")
 
+    // Media3 —— 音乐模块播放器：ExoPlayer 播放内核 + MediaSession 通知栏控制 + UI 组件
+    implementation("androidx.media3:media3-exoplayer:1.11.1")
+    implementation("androidx.media3:media3-session:1.11.1")
+    implementation("androidx.media3:media3-ui:1.11.1")
+
     // Google Play Services Location —— GPS 定位，用于天气功能获取用户位置
     implementation("com.google.android.gms:play-services-location:21.3.0")
 

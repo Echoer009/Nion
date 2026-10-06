@@ -10,6 +10,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CalendarMonth
 import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.MusicNote
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Icon
@@ -49,6 +50,8 @@ import com.echonion.nion.ui.companion.tools.DataType
 import com.echonion.nion.ui.focus.CompletionOverlay
 import com.echonion.nion.ui.focus.FocusScreen
 import com.echonion.nion.ui.focus.FocusStatsPanel
+import com.echonion.nion.ui.music.MusicScreen
+import com.echonion.nion.ui.music.MusicSourcePanel
 import com.echonion.nion.ui.schedule.ScheduleScreen
 import com.echonion.nion.ui.settings.SettingsScreen
 import com.echonion.nion.ui.task.ReminderOverlay
@@ -72,6 +75,7 @@ val bottomNavItems = listOf(
     BottomNavItem("tasks", "任务", Icons.Default.CheckCircle),
     BottomNavItem("schedule", "日程", Icons.Default.CalendarMonth),
     BottomNavItem("pomodoro", "专注", Icons.Default.Timer),
+    BottomNavItem("music", "音乐", Icons.Default.MusicNote),
     BottomNavItem("settings", "设置", Icons.Default.Settings),
 )
 
@@ -217,7 +221,9 @@ fun NionApp() {
                     leftPanelWidth = if (currentRoute == "pomodoro") 300.dp else 260.dp,
                     rightPanelWidth = 320.dp,
                     state = dualState,
-                    enableLeftSwipe = currentRoute == "tasks" || currentRoute == "pomodoro",
+                    // music 路由左滑呼出音源选择面板（与 tasks 清单/pomodoro 统计同一手势）
+                    enableLeftSwipe = currentRoute == "tasks" || currentRoute == "pomodoro" ||
+                        currentRoute == "music",
                     modifier = Modifier.padding(innerPadding),
                     leftPanel = { onDrag, onDragStopped, modifier ->
                         NionLeftPanel(
@@ -276,6 +282,12 @@ fun NionApp() {
                                     preselectedFocusDuration = null
                                     autoStartFocus = false
                                 },
+                            )
+                        }
+                        // 音乐页：底部导航新增的第五个路由，支持左滑音源面板
+                        composable("music") {
+                            MusicRoute(
+                                onOpenCompanion = { dualState.openRight() },
                             )
                         }
                         composable("settings") {
@@ -354,6 +366,7 @@ private fun NionBottomNavBar(
  *
  * 根据当前路由显示不同内容：
  * - pomodoro 路由 → 显示专注统计面板 FocusStatsPanel
+ * - music 路由 → 显示音源选择面板 MusicSourcePanel
  * - 其他路由 → 显示清单侧边栏 SidebarContent
  *
  * @param currentRoute 当前导航路由名称
@@ -374,6 +387,13 @@ private fun NionLeftPanel(
 ) {
     if (currentRoute == "pomodoro") {
         FocusStatsPanel(
+            onSidebarDrag = onDrag,
+            onSidebarDragStopped = onDragStopped,
+            modifier = modifier,
+        )
+    } else if (currentRoute == "music") {
+        // 音乐路由 → 左滑呼出音源选择面板（本地曲目/类脑娘服务器/自己的服务器）
+        MusicSourcePanel(
             onSidebarDrag = onDrag,
             onSidebarDragStopped = onDragStopped,
             modifier = modifier,
@@ -443,6 +463,18 @@ private fun ScheduleRoute(
     onOpenCompanion: () -> Unit,
 ) {
     ScheduleScreen(onOpenCompanion = onOpenCompanion)
+}
+
+/**
+ * 音乐页面路由。
+ *
+ * @param onOpenCompanion 用户请求打开伙伴侧边栏时触发
+ */
+@Composable
+private fun MusicRoute(
+    onOpenCompanion: () -> Unit,
+) {
+    MusicScreen(onOpenCompanion = onOpenCompanion)
 }
 
 /**

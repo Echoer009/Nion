@@ -17,6 +17,14 @@
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- 位置权限：天气功能需要 GPS 定位获取用户所在城市 -->
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+    <!-- 音乐模块：Android 13+ 细化的音频读取权限，扫描本机音乐 -->
+    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />
+    <!-- 音乐模块：Android 12 及以下读取本机音频（maxSdkVersion 上限对应 READ_MEDIA_AUDIO 生效版本） -->
+    <uses-permission
+        android:name="android.permission.READ_EXTERNAL_STORAGE"
+        android:maxSdkVersion="32" />
+    <!-- 音乐模块：Android 14+ 媒体播放类型前台 Service 必须声明此权限，否则启动前台服务崩溃 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
     <!-- Phone Agent 需要查询所有已安装应用来启动目标 App（Android 11+ Package Visibility）
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" /> -->
@@ -71,6 +79,17 @@
             android:name=".reminder.WeatherAlertFloatingService"
             android:exported="false"
             android:foregroundServiceType="specialUse" />
+
+        <!-- 音乐播放前台 Service（Media3 MediaSessionService）：
+             通知栏播放控制 + 后台播放，mediaPlayback 类型对应音频焦点管理 -->
+        <service
+            android:name=".ui.music.PlaybackService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback">
+            <intent-filter>
+                <action android:name="androidx.media3.session.MediaSessionService" />
+            </intent-filter>
+        </service>
 
         <!-- 开机重调度接收器，设备重启后重新注册所有闹钟 -->
         <receiver
