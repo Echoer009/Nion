@@ -67,7 +67,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Chat
+import androidx.compose.material.icons.rounded.QuestionAnswer
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -273,7 +273,7 @@ fun MusicScreen(
                                 // 右上角伙伴入口，与专注页/日程页保持一致
                                 IconButton(onClick = onOpenCompanion) {
                                     Icon(
-                                        Icons.AutoMirrored.Rounded.Chat,
+                                        Icons.Rounded.QuestionAnswer,
                                         contentDescription = "打开伙伴",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )

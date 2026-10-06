@@ -59,7 +59,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.automirrored.rounded.Chat
+import androidx.compose.material.icons.rounded.QuestionAnswer
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material.icons.filled.ArrowDropUp
@@ -636,7 +636,7 @@ private fun TaskScreenContent(
                             if (dualState.isLeftOpen) dualState.closeLeft()
                             dualState.toggleRight()
                         }) {
-                            Icon(Icons.AutoMirrored.Rounded.Chat, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
+                            Icon(Icons.Rounded.QuestionAnswer, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
                         }
                     },
                     title = {
