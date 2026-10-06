@@ -38,7 +38,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Message
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -76,6 +75,7 @@ import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 import java.util.Locale
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 日程事件数据类。
@@ -280,7 +280,7 @@ private fun ScheduleContent(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 actions = {
                     IconButton(onClick = onOpenCompanion) {
-                        Icon(Icons.AutoMirrored.Rounded.Message, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
+                        Icon(LucideIcons.Bot, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 },
             )

@@ -53,19 +53,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AddCircleOutline
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.automirrored.rounded.Message
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowDropUp
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material.icons.outlined.Alarm
 import androidx.compose.material.icons.outlined.DeleteOutline
@@ -128,6 +116,7 @@ import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 任务主屏幕 —— 显示任务列表 + FAB。
@@ -422,7 +411,7 @@ fun TaskScreen(
                                         contentColor = MaterialTheme.colorScheme.onPrimary,
                                         elevation = FloatingActionButtonDefaults.elevation(defaultElevation = 0.dp, hoveredElevation = 0.dp),
                                         shape = RoundedCornerShape(16.dp),
-                                    ) { Icon(Icons.Default.Add, contentDescription = if (viewModel.isNotebookView) "添加笔记" else "添加任务") }
+                                    ) { Icon(LucideIcons.Plus, contentDescription = if (viewModel.isNotebookView) "添加笔记" else "添加任务") }
                                 }
                             },
                             reorderableItems = reorderableItems,
@@ -636,7 +625,7 @@ private fun TaskScreenContent(
                             if (dualState.isLeftOpen) dualState.closeLeft()
                             dualState.toggleRight()
                         }) {
-                            Icon(Icons.AutoMirrored.Rounded.Message, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
+                            Icon(LucideIcons.Bot, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
                         }
                     },
                     title = {
@@ -1207,7 +1196,7 @@ private fun PanelHeader(
         )
         Spacer(modifier = Modifier.weight(1f))
         IconButton(onClick = onClose) {
-            Icon(Icons.Default.Close, contentDescription = "关闭")
+            Icon(LucideIcons.X, contentDescription = "关闭")
         }
     }
 }
@@ -1394,7 +1383,7 @@ private fun SelectionTopBar(
     TopAppBar(
         navigationIcon = {
             IconButton(onClick = onClearSelection) {
-                Icon(Icons.Default.Close, contentDescription = "取消选择")
+                Icon(LucideIcons.X, contentDescription = "取消选择")
             }
         },
         title = {
@@ -1406,7 +1395,7 @@ private fun SelectionTopBar(
         },
         actions = {
             IconButton(onClick = onDeleteSelected) {
-                Icon(Icons.Default.Delete, contentDescription = "删除选中", tint = MaterialTheme.colorScheme.error)
+                Icon(LucideIcons.Trash2, contentDescription = "删除选中", tint = MaterialTheme.colorScheme.error)
             }
         },
         colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -1477,7 +1466,7 @@ private fun GroupTabBar(
                     modifier = Modifier.size(32.dp),
                 ) {
                     Icon(
-                        Icons.Default.AddCircleOutline,
+                        LucideIcons.CirclePlus,
                         contentDescription = "新建分组",
                         modifier = Modifier.size(20.dp),
                         // 次要操作使用 secondary

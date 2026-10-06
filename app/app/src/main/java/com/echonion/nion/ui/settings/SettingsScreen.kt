@@ -48,16 +48,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Message
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.LocationOn
 import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -108,6 +105,7 @@ import com.echonion.nion.ui.theme.ThemePalette
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 设置页面 —— 应用配置中心。
@@ -204,7 +202,7 @@ fun SettingsScreen(
                 ),
                 actions = {
                     IconButton(onClick = onOpenCompanion) {
-                        Icon(Icons.AutoMirrored.Rounded.Message, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
+                        Icon(LucideIcons.Bot, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 },
             )
@@ -895,7 +893,7 @@ private fun LocationSearchArea(
             },
             leadingIcon = {
                 Icon(
-                    Icons.Default.Search,
+                    LucideIcons.Search,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1379,7 +1377,7 @@ private fun CustomThemeItem(
                 modifier = Modifier.size(28.dp),
             ) {
                 Icon(
-                    Icons.Default.Delete,
+                    LucideIcons.Trash2,
                     contentDescription = "删除主题",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SECONDARY),
                     modifier = Modifier.size(18.dp),
@@ -1561,7 +1559,7 @@ private fun LocationCard(
                             modifier = Modifier.size(36.dp),
                         ) {
                             Icon(
-                                Icons.Default.Search,
+                                LucideIcons.Search,
                                 contentDescription = if (expanded) "收起搜索" else "展开搜索",
                                 // 使用 sharedElement 让放大镜图标在展开/收起过程中平滑过渡
                                 modifier = Modifier

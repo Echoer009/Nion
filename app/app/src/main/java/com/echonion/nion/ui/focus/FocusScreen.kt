@@ -36,11 +36,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Message
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
@@ -103,6 +99,7 @@ import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.roundToInt
 import kotlin.math.sin
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 专注任务选择的 ViewModel —— 加载清单列表和未完成任务（含子任务层级），
@@ -421,7 +418,7 @@ fun FocusScreen(
                     actions = {
                         IconButton(onClick = onOpenCompanion) {
                             Icon(
-                                Icons.AutoMirrored.Rounded.Message,
+                                LucideIcons.Bot,
                                 contentDescription = "伙伴",
                                 tint = MaterialTheme.colorScheme.onSurface,
                             )
@@ -738,7 +735,7 @@ private fun FocusControlBar(
                 modifier = Modifier.size(52.dp),
             ) {
                 Icon(
-                    Icons.Default.Refresh,
+                    LucideIcons.RefreshCw,
                     contentDescription = "重置",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -760,7 +757,7 @@ private fun FocusControlBar(
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
-                    if (isRunning) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    if (isRunning) LucideIcons.Pause else LucideIcons.Play,
                     contentDescription = if (isRunning) "暂停" else "开始",
                     tint = MaterialTheme.colorScheme.onPrimary,
                     modifier = Modifier.size(36.dp),

@@ -19,9 +19,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Cloud
-import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -35,6 +32,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 音乐音源侧边面板 —— 从音乐界面左滑呼出。
@@ -67,9 +65,9 @@ fun MusicSourcePanel(
 
     // 音源项配置列表：顺序固定 本地→类脑娘→自定义，与主界面切换动画的方向计算一致
     val items = listOf(
-        SourceItem(MusicSource.LOCAL, "本地曲目", "扫描本机全部音频", Icons.Default.LibraryMusic),
-        SourceItem(MusicSource.BRAINGIRL, "类脑娘服务器", MusicViewModel.BRAINGIRL_SERVER_URL, Icons.Default.Cloud),
-        SourceItem(MusicSource.CUSTOM, "自己的服务器", "连接你自己的 Navidrome", Icons.Default.Dns),
+        SourceItem(MusicSource.LOCAL, "本地曲目", "扫描本机全部音频", LucideIcons.AudioLines),
+        SourceItem(MusicSource.BRAINGIRL, "类脑娘服务器", MusicViewModel.BRAINGIRL_SERVER_URL, LucideIcons.Cloud),
+        SourceItem(MusicSource.CUSTOM, "自己的服务器", "连接你自己的 Navidrome", LucideIcons.Server),
     )
 
     Surface(

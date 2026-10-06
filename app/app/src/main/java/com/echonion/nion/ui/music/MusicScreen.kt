@@ -39,8 +39,6 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
-import androidx.compose.material.icons.filled.Schedule
-import androidx.compose.material.icons.filled.SortByAlpha
 import androidx.compose.animation.togetherWith
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
@@ -69,21 +67,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.rounded.Message
-import androidx.compose.material.icons.filled.Album
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Headphones
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.QueueMusic
-import androidx.compose.material.icons.filled.SkipNext
-import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -130,6 +113,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 获取 Activity 作用域的 MusicViewModel。
@@ -275,7 +259,7 @@ fun MusicScreen(
                                 // 右上角伙伴入口，与专注页/日程页保持一致
                                 IconButton(onClick = onOpenCompanion) {
                                     Icon(
-                                        Icons.AutoMirrored.Rounded.Message,
+                                        LucideIcons.Bot,
                                         contentDescription = "打开伙伴",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -423,7 +407,7 @@ private fun LocalMusicContent(
         // 引导态：权限被拒，提示用户去系统设置开启
         permissionDenied -> {
             EmptyHint(
-                icon = Icons.Default.Headphones,
+                icon = LucideIcons.Headphones,
                 title = "需要音频访问权限",
                 subtitle = "点击下方按钮重新授权后即可扫描本机音乐",
                 actionLabel = "重新授权",
@@ -579,7 +563,7 @@ private fun LocalLibraryContent(
                         )
                         // 空态：保留刷新按钮（强制重查 MediaStore）
                         vm.localAlbums.isEmpty() && !vm.isLoadingLocal -> EmptyHint(
-                            icon = Icons.Default.MusicNote,
+                            icon = LucideIcons.Music,
                             title = "本机没有找到音频",
                             subtitle = "把音乐文件复制到手机后点击刷新",
                             actionLabel = "刷新",
@@ -807,19 +791,21 @@ private fun MusicToolbar(
     // 排序/视图的选项集合（未来加选项 = 加一项，控件栏占位不变）
     val sortOptions = remember {
         listOf(
-            SelectorOption("title", Icons.Default.SortByAlpha, "名称"),
-            SelectorOption("newest", Icons.Default.Schedule, "最新"),
+            SelectorOption("title", LucideIcons.ArrowDownAZ, "名称"),
+            SelectorOption("newest", LucideIcons.CalendarClock, "最新"),
         )
     }
     val viewOptions = remember {
         listOf(
-            SelectorOption("album", Icons.Default.Album, "专辑"),
-            SelectorOption("playlist", Icons.Default.QueueMusic, "歌单"),
+            SelectorOption("album", LucideIcons.Disc3, "专辑"),
+            SelectorOption("playlist", LucideIcons.ListMusic, "歌单"),
         )
     }
 
-    SharedTransitionLayout(modifier = Modifier.fillMaxWidth()) {
-        AnimatedContent(
+    // 注意：这里不能套 SharedTransitionLayout/sharedElement——shared-element 机制会在
+    // 过渡期接管元素绘制、把内容钉在匹配 bounds 上，吃掉 AnimatedContent 的滑移动画
+    //（行高恒定时 bounds 全等，sharedElement 本就无视觉贡献）。
+    AnimatedContent(
             targetState = mode,
             transitionSpec = {
                 // 带位移的 morph：展开时选项行从右缘滑入+微放大，图标行让位滑出；
@@ -850,14 +836,9 @@ private fun MusicToolbar(
                 .height(48.dp),
         ) { m ->
             Row(
-                // 收起态与全部展开态共享同一 sharedElement：整行容器 morph
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(48.dp)
-                    .sharedElement(
-                        rememberSharedContentState("music_toolbar_container"),
-                        this@AnimatedContent,
-                    ),
+                    .height(48.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 when (m) {
@@ -893,7 +874,7 @@ private fun MusicToolbar(
                         // 搜索入口：进入整行搜索态
                         IconButton(onClick = { mode = MusicToolbarMode.SEARCH }) {
                             Icon(
-                                Icons.Default.Search,
+                                LucideIcons.Search,
                                 contentDescription = "搜索音乐",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -950,7 +931,7 @@ private fun MusicToolbar(
                                     .padding(horizontal = 12.dp),
                             ) {
                                 Icon(
-                                    Icons.Default.Search,
+                                    LucideIcons.Search,
                                     contentDescription = null,
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(18.dp),
@@ -991,7 +972,6 @@ private fun MusicToolbar(
                 }
             }
         }
-    }
 }
 
 /**
@@ -1034,7 +1014,7 @@ private fun SelectorCell(
 private fun CloseToolbarButton(onClose: () -> Unit) {
     IconButton(onClick = onClose) {
         Icon(
-            Icons.Default.Close,
+            LucideIcons.X,
             contentDescription = "收起",
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
         )
@@ -1098,7 +1078,7 @@ private fun PlaylistViewWithFab(
                 ),
                 shape = RoundedCornerShape(16.dp),
             ) {
-                Icon(Icons.Default.Add, contentDescription = "新建歌单")
+                Icon(LucideIcons.Plus, contentDescription = "新建歌单")
             }
         }
     }
@@ -1134,7 +1114,7 @@ private fun ErrorRetryBar(error: String, onRetry: () -> Unit) {
             )
             // 重试操作用 Refresh 图标（无障碍朗读由整条 clickable 语义兜底）
             Icon(
-                Icons.Default.Refresh,
+                LucideIcons.RefreshCw,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.primary,
             )
@@ -1509,7 +1489,7 @@ private fun PlaylistRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            Icons.Default.QueueMusic,
+            LucideIcons.ListMusic,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(28.dp),
@@ -1542,7 +1522,7 @@ private fun PlaylistRow(
         // 删除按钮（IconButton 自行消费点击事件，不触发整行 onClick）
         IconButton(onClick = onDelete) {
             Icon(
-                Icons.Default.Delete,
+                LucideIcons.Trash2,
                 contentDescription = "删除歌单",
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -1597,7 +1577,7 @@ private fun PlaylistDetailContent(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        Icons.Default.QueueMusic,
+                        LucideIcons.ListMusic,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.size(32.dp),
@@ -1630,7 +1610,7 @@ private fun PlaylistDetailContent(
                         ),
                     ) {
                         Icon(
-                            Icons.Default.PlayArrow,
+                            LucideIcons.Play,
                             contentDescription = "播放整单",
                             tint = MaterialTheme.colorScheme.onPrimary,
                         )
@@ -1999,7 +1979,7 @@ private fun MiniPlayerBar(
                 // 下一首
                 IconButton(onClick = { vm.skipToNext() }) {
                     Icon(
-                        Icons.Default.SkipNext,
+                        LucideIcons.SkipForward,
                         contentDescription = "下一首",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -2062,7 +2042,7 @@ private fun FullPlayerOverlay(
             Row(modifier = Modifier.fillMaxWidth()) {
                 IconButton(onClick = onClose) {
                     Icon(
-                        Icons.Default.KeyboardArrowDown,
+                        LucideIcons.ChevronDown,
                         contentDescription = "收起播放页",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -2202,7 +2182,7 @@ private fun FullPlayerOverlay(
             ) {
                 IconButton(onClick = { vm.skipToPrevious() }) {
                     Icon(
-                        Icons.Default.SkipPrevious,
+                        LucideIcons.SkipBack,
                         contentDescription = "上一首",
                         modifier = Modifier.size(36.dp),
                         tint = MaterialTheme.colorScheme.onSurface,
@@ -2226,7 +2206,7 @@ private fun FullPlayerOverlay(
                 Spacer(modifier = Modifier.width(24.dp))
                 IconButton(onClick = { vm.skipToNext() }) {
                     Icon(
-                        Icons.Default.SkipNext,
+                        LucideIcons.SkipForward,
                         contentDescription = "下一首",
                         modifier = Modifier.size(36.dp),
                         tint = MaterialTheme.colorScheme.onSurface,
@@ -2242,7 +2222,7 @@ private fun FullPlayerOverlay(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    Icons.Default.Headphones,
+                    LucideIcons.Headphones,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(16.dp),
@@ -2326,7 +2306,7 @@ private fun AnimatedPlayPauseIcon(
         modifier = modifier.graphicsLayer { rotationZ = rotation },
     ) { playing ->
         Icon(
-            if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+            if (playing) LucideIcons.Pause else LucideIcons.Play,
             contentDescription = if (playing) "暂停" else "播放",
             tint = tint,
         )
@@ -2392,7 +2372,7 @@ private fun TrackRow(
                     contentAlignment = Alignment.Center,
                 ) {
                     Icon(
-                        Icons.Default.MusicNote,
+                        LucideIcons.Music,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.onPrimary,
                         modifier = Modifier.size(10.dp),
@@ -2427,7 +2407,7 @@ private fun TrackRow(
         )
         // 引导播放入口的视觉提示（isPlaying 参数保留给未来"跳动音符"动效用）
         Icon(
-            Icons.Default.PlayArrow,
+            LucideIcons.Play,
             contentDescription = null,
             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isPlaying && isCurrent) 1f else 0.4f),
             modifier = Modifier
@@ -2438,7 +2418,7 @@ private fun TrackRow(
         if (onRemove != null) {
             IconButton(onClick = onRemove) {
                 Icon(
-                    Icons.Default.Close,
+                    LucideIcons.X,
                     contentDescription = "从歌单移除",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(18.dp),
@@ -2477,7 +2457,7 @@ private fun QueueRow(
         Box(modifier = Modifier.width(28.dp), contentAlignment = Alignment.Center) {
             if (isCurrent) {
                 Icon(
-                    Icons.Default.Headphones,
+                    LucideIcons.Headphones,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(16.dp),
@@ -2663,7 +2643,7 @@ private fun EmptyHint(
             Spacer(modifier = Modifier.height(16.dp))
             // 图标优先：操作按钮只保留 Refresh 图标，语义由 contentDescription 朗读
             OutlinedIconButton(onClick = onAction) {
-                Icon(Icons.Default.Refresh, contentDescription = actionLabel)
+                Icon(LucideIcons.RefreshCw, contentDescription = actionLabel)
             }
         }
     }
@@ -2762,7 +2742,7 @@ private fun CoverArt(
                 contentAlignment = Alignment.Center,
             ) {
                 Icon(
-                    Icons.Default.Album,
+                    LucideIcons.Disc3,
                     contentDescription = null,
                     modifier = Modifier.size(placeHolderSize),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
