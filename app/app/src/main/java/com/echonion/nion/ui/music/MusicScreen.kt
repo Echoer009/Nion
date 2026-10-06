@@ -50,6 +50,7 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -92,6 +93,7 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
@@ -795,15 +797,7 @@ private fun MusicToolbar(
     // 内容显示模式：展开立即切换；收起延迟到宽度动画收尾再换回图标——
     // 否则小图标锚在仍在滑动的 zone 右缘上跟着横穿一行，收起观感不对称
     var displayMode by remember { mutableStateOf(MusicToolbarMode.NORMAL) }
-    LaunchedEffect(mode) {
-        if (mode != MusicToolbarMode.NORMAL) {
-            displayMode = mode
-        } else {
-            // 收起：等弹簧基本到位（MediumLow ~600ms）后再显示图标，图标落在原位
-            kotlinx.coroutines.delay(420)
-            displayMode = MusicToolbarMode.NORMAL
-        }
-    }
+    // （displayMode 的落位切换在下方三区宽度动画声明之后统一处理）
 
     // 排序/视图的选项集合（未来加选项 = 加一项，控件栏占位不变）
     val sortOptions = remember {
@@ -834,6 +828,49 @@ private fun MusicToolbar(
         val sortVisible = vm.source == MusicSource.LOCAL && !showPlaylists && vm.searchQuery.isBlank()
         val viewVisible = vm.searchQuery.isBlank()
 
+        // 三区宽度动画（提升到本作用域：收起落位判断需要读取动画值）
+        val sortWidth by animateDpAsState(
+            targetValue = when {
+                mode == MusicToolbarMode.SORT -> toolbarWidth
+                mode == MusicToolbarMode.NORMAL && sortVisible -> 48.dp
+                else -> 0.dp
+            },
+            animationSpec = zoneSpring,
+            label = "sortWidth",
+        )
+        val viewWidth by animateDpAsState(
+            targetValue = when {
+                mode == MusicToolbarMode.VIEW -> toolbarWidth
+                mode == MusicToolbarMode.NORMAL && viewVisible -> 48.dp
+                else -> 0.dp
+            },
+            animationSpec = zoneSpring,
+            label = "viewWidth",
+        )
+        val searchWidth by animateDpAsState(
+            targetValue = when {
+                mode == MusicToolbarMode.SEARCH -> toolbarWidth
+                mode == MusicToolbarMode.NORMAL -> 48.dp
+                else -> 0.dp
+            },
+            animationSpec = zoneSpring,
+            label = "searchWidth",
+        )
+
+        // 收起落位切换：等三区宽度全部到达目标值（动画真正结束）再换回图标，
+        // 避免固定延时在弹簧未停稳时切换造成的宽度残差跳变
+        LaunchedEffect(mode) {
+            if (mode != MusicToolbarMode.NORMAL) {
+                displayMode = mode
+            } else {
+                val sortTarget = if (sortVisible) 48.dp else 0.dp
+                val viewTarget = if (viewVisible) 48.dp else 0.dp
+                androidx.compose.runtime.snapshotFlow { Triple(sortWidth, viewWidth, searchWidth) }
+                    .first { (sw, vw, ew) -> sw == sortTarget && vw == viewTarget && ew == 48.dp }
+                displayMode = MusicToolbarMode.NORMAL
+            }
+        }
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -842,15 +879,6 @@ private fun MusicToolbar(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             // —— 排序区：宽度动画（展开=整栏 / 常态=48 / 让位=0）——
-            val sortWidth by animateDpAsState(
-                targetValue = when {
-                    mode == MusicToolbarMode.SORT -> toolbarWidth
-                    mode == MusicToolbarMode.NORMAL && sortVisible -> 48.dp
-                    else -> 0.dp
-                },
-                animationSpec = zoneSpring,
-                label = "sortWidth",
-            )
             Box(
                 modifier = Modifier
                     .width(sortWidth)
@@ -909,15 +937,6 @@ private fun MusicToolbar(
             }
 
             // —— 视图区：宽度动画 ——
-            val viewWidth by animateDpAsState(
-                targetValue = when {
-                    mode == MusicToolbarMode.VIEW -> toolbarWidth
-                    mode == MusicToolbarMode.NORMAL && viewVisible -> 48.dp
-                    else -> 0.dp
-                },
-                animationSpec = zoneSpring,
-                label = "viewWidth",
-            )
             Box(
                 modifier = Modifier
                     .width(viewWidth)
@@ -973,15 +992,6 @@ private fun MusicToolbar(
             }
 
             // —— 搜索区：宽度动画 ——
-            val searchWidth by animateDpAsState(
-                targetValue = when {
-                    mode == MusicToolbarMode.SEARCH -> toolbarWidth
-                    mode == MusicToolbarMode.NORMAL -> 48.dp
-                    else -> 0.dp
-                },
-                animationSpec = zoneSpring,
-                label = "searchWidth",
-            )
             Box(
                 modifier = Modifier
                     .width(searchWidth)
@@ -990,15 +1000,29 @@ private fun MusicToolbar(
                 contentAlignment = Alignment.CenterEnd,
             ) {
                 when {
-                    displayMode == MusicToolbarMode.SEARCH -> Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.width(toolbarWidth),
-                    ) {
-                        SearchFieldRectangle(vm = vm, modifier = Modifier.weight(1f))
-                        CloseToolbarButton {
-                            // 退出搜索即清空查询词（视图自动回落专辑列表）
-                            vm.searchQuery = ""
-                            mode = MusicToolbarMode.NORMAL
+                    displayMode == MusicToolbarMode.SEARCH -> {
+                        // 搜索内容（输入框+✕）小淡入淡出：与排序/视图区文字同款节奏，
+                        // 避免大矩形输入框瞬时弹出/消失的生硬感（窗口推动仍由宽度动画承担）
+                        val contentAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
+                        androidx.compose.runtime.LaunchedEffect(mode) {
+                            if (mode == MusicToolbarMode.NORMAL) {
+                                contentAlpha.animateTo(0f, tween(durationMillis = 120))
+                            } else {
+                                contentAlpha.animateTo(1f, tween(durationMillis = 150, delayMillis = 80))
+                            }
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .width(toolbarWidth)
+                                .alpha(contentAlpha.value),
+                        ) {
+                            SearchFieldRectangle(vm = vm, modifier = Modifier.weight(1f))
+                            CloseToolbarButton {
+                                // 退出搜索即清空查询词（视图自动回落专辑列表）
+                                vm.searchQuery = ""
+                                mode = MusicToolbarMode.NORMAL
+                            }
                         }
                     }
 
@@ -1038,6 +1062,14 @@ private fun SelectorCell(
         modifier = Modifier
             .height(40.dp)
             .clip(RoundedCornerShape(6.dp))
+            // 选中 = 主色淡底（primaryContainer 半透明）+ 主色文字；图标保持常灰
+            .background(
+                if (selected) {
+                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
+                } else {
+                    androidx.compose.ui.graphics.Color.Transparent
+                }
+            )
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
     ) {
