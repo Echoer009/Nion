@@ -1351,10 +1351,10 @@ private fun AnimatedPlayPauseIcon(
     modifier: Modifier = Modifier,
     tint: Color = LocalContentColor.current,
 ) {
-    // 轻微旋转质感：每次切换累计 +90°，用 animateFloatAsState 平滑转过去，
-    // 图标内容本身仍保持正立（每次恰好整圈数的倍数），只有过渡过程能看到旋转
+    // 轻微旋转质感：每次切换累计 +360°（整圈自旋），用 animateFloatAsState 平滑转过去，
+    // 落点永远是 360° 的整数倍，图标静止时始终正立，只有过渡过程能看到旋转
     var spin by remember { mutableStateOf(0) }
-    LaunchedEffect(isPlaying) { spin += 90 }
+    LaunchedEffect(isPlaying) { spin += 360 }
     val rotation by animateFloatAsState(
         targetValue = spin.toFloat(),
         animationSpec = tween(250, easing = FastOutSlowInEasing),

@@ -147,7 +147,13 @@ class MusicViewModel(
     var currentIndex by mutableIntStateOf(-1)
         private set
 
-    /** 是否正在播放（含 buffering）；由 onIsPlayingChanged 回调同步 */
+    /**
+     * 是否处于"播放中"的视觉状态（含缓冲）。
+     * 不直接采用 player.isPlaying：seek 时 ExoPlayer 会短暂进入 BUFFERING，
+     * isPlaying 瞬间 false→true，会造成播放/暂停图标闪一次切换动画。
+     * 这里用稳定映射 playWhenReady && state in {READY, BUFFERING}，
+     * 缓冲期间保持播放态视觉，seek/网络缓冲不再触发图标翻转。
+     */
     var isPlaying by mutableStateOf(false)
         private set
 
@@ -167,8 +173,21 @@ class MusicViewModel(
      * 注意：所有回调都在主线程执行（MediaController 保证），可直接写状态。
      */
     private val playerListener = object : Player.Listener {
+        /** 任一前置条件变化时重算稳定的播放态视觉（见 isPlaying 属性注释） */
+        private fun refreshPlayingState() {
+            val c = controller ?: return
+            isPlaying = c.playWhenReady &&
+                (c.playbackState == Player.STATE_READY || c.playbackState == Player.STATE_BUFFERING)
+        }
+
         override fun onIsPlayingChanged(playing: Boolean) {
-            isPlaying = playing
+            // 不直接透传 playing（BUFFERING 期间它会变 false），改走稳定映射
+            refreshPlayingState()
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            // 用户点播放/暂停只改 playWhenReady，这里同步视觉状态
+            refreshPlayingState()
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
@@ -182,6 +201,8 @@ class MusicViewModel(
             val c = controller ?: return
             val d = c.duration
             durationMs = if (d == C.TIME_UNSET) 0L else d
+            // 播放状态变化也影响稳定映射（如 BUFFERING→READY、进入 ENDED），同步重算
+            refreshPlayingState()
         }
     }
 
