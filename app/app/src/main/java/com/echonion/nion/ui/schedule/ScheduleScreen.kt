@@ -38,7 +38,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.QuestionAnswer
+import androidx.compose.material.icons.automirrored.rounded.Message
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -280,7 +280,7 @@ private fun ScheduleContent(
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
                 actions = {
                     IconButton(onClick = onOpenCompanion) {
-                        Icon(Icons.Rounded.QuestionAnswer, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
+                        Icon(Icons.AutoMirrored.Rounded.Message, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 },
             )

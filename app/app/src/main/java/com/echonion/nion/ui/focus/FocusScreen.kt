@@ -36,7 +36,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.QuestionAnswer
+import androidx.compose.material.icons.automirrored.rounded.Message
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
@@ -421,7 +421,7 @@ fun FocusScreen(
                     actions = {
                         IconButton(onClick = onOpenCompanion) {
                             Icon(
-                                Icons.Rounded.QuestionAnswer,
+                                Icons.AutoMirrored.Rounded.Message,
                                 contentDescription = "伙伴",
                                 tint = MaterialTheme.colorScheme.onSurface,
                             )
