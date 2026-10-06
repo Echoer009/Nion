@@ -33,6 +33,9 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -72,6 +75,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.LinearProgressIndicator
@@ -93,6 +97,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -1039,11 +1044,10 @@ private fun MiniPlayerBar(
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
-                // 播放/暂停
+                // 播放/暂停（▶↔⏸ 带缩放+旋转+淡入淡出过渡，见 AnimatedPlayPauseIcon）
                 IconButton(onClick = { vm.togglePlayPause() }) {
-                    Icon(
-                        if (vm.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (vm.isPlaying) "暂停" else "播放",
+                    AnimatedPlayPauseIcon(
+                        isPlaying = vm.isPlaying,
                         tint = MaterialTheme.colorScheme.primary,
                     )
                 }
@@ -1268,9 +1272,9 @@ private fun FullPlayerOverlay(
                         containerColor = MaterialTheme.colorScheme.primary,
                     ),
                 ) {
-                    Icon(
-                        if (vm.isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (vm.isPlaying) "暂停" else "播放",
+                    // ▶↔⏸ 切换过渡（缩放+旋转+淡入淡出），与迷你条共用同一组件
+                    AnimatedPlayPauseIcon(
+                        isPlaying = vm.isPlaying,
                         modifier = Modifier.size(36.dp),
                     )
                 }
@@ -1325,6 +1329,64 @@ private fun FullPlayerOverlay(
     }
 }
 
+/* ============================================================
+ * 播放/暂停切换动画
+ * ============================================================ */
+
+/**
+ * 播放/暂停图标 —— 状态切换时的过渡动画组件。
+ *
+ * ▶ ↔ ⏸ 切换用 AnimatedContent 交叉过渡：
+ * 缩放（0.5→1）+ 淡入淡出 + 每次切换 90° 的轻微旋转，
+ * 全部走 tween + FastOutSlowInEasing，与全 app 动画语言一致。
+ * 播放页大按钮和迷你播放条按钮共用，保证两处手感相同。
+ *
+ * @param isPlaying 是否正在播放（true=⏸，false=▶）
+ * @param modifier 图标额外修饰符（如指定尺寸）
+ * @param tint 图标颜色
+ */
+@Composable
+private fun AnimatedPlayPauseIcon(
+    isPlaying: Boolean,
+    modifier: Modifier = Modifier,
+    tint: Color = LocalContentColor.current,
+) {
+    // 轻微旋转质感：每次切换累计 +90°，用 animateFloatAsState 平滑转过去，
+    // 图标内容本身仍保持正立（每次恰好整圈数的倍数），只有过渡过程能看到旋转
+    var spin by remember { mutableStateOf(0) }
+    LaunchedEffect(isPlaying) { spin += 90 }
+    val rotation by animateFloatAsState(
+        targetValue = spin.toFloat(),
+        animationSpec = tween(250, easing = FastOutSlowInEasing),
+        label = "playPauseSpin",
+    )
+    AnimatedContent(
+        targetState = isPlaying,
+        transitionSpec = {
+            // 进入：从一半大小放大 + 淡入；退出：缩小 + 淡出。
+            // 全部 tween + FastOutSlowInEasing，与全 app 动画语言一致
+            (
+                scaleIn(
+                    animationSpec = tween(200, easing = FastOutSlowInEasing),
+                    initialScale = 0.5f,
+                ) + fadeIn(tween(150, easing = FastOutSlowInEasing))
+                ) togetherWith (
+                scaleOut(
+                    animationSpec = tween(150, easing = FastOutSlowInEasing),
+                    targetScale = 0.5f,
+                ) + fadeOut(tween(100, easing = FastOutSlowInEasing))
+                )
+        },
+        label = "playPause",
+        modifier = modifier.graphicsLayer { rotationZ = rotation },
+    ) { playing ->
+        Icon(
+            if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+            contentDescription = if (playing) "暂停" else "播放",
+            tint = tint,
+        )
+    }
+}
 /* ============================================================
  * 通用小组件
  * ============================================================ */
