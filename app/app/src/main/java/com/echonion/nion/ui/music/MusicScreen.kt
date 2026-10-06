@@ -864,8 +864,14 @@ private fun MusicToolbar(
                     displayMode == MusicToolbarMode.SORT -> {
                         // 文字小淡入：窗口先撑开(80ms)后标签渐显；收起时快速淡出
                         val labelAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
-                        androidx.compose.runtime.LaunchedEffect(Unit) {
-                            labelAlpha.animateTo(1f, tween(durationMillis = 150, delayMillis = 80))
+                        // 展开：延迟 80ms 小淡入；收起(mode 回 NORMAL)：120ms 快速淡出，
+                        // 避免"专/歌"等字样在窗口收回过程中残留闪现
+                        androidx.compose.runtime.LaunchedEffect(mode) {
+                            if (mode == MusicToolbarMode.NORMAL) {
+                                labelAlpha.animateTo(0f, tween(durationMillis = 120))
+                            } else {
+                                labelAlpha.animateTo(1f, tween(durationMillis = 150, delayMillis = 80))
+                            }
                         }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -923,8 +929,14 @@ private fun MusicToolbar(
                     displayMode == MusicToolbarMode.VIEW -> {
                         // 同排序区：固定宽度 + 文字小淡入
                         val labelAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
-                        androidx.compose.runtime.LaunchedEffect(Unit) {
-                            labelAlpha.animateTo(1f, tween(durationMillis = 150, delayMillis = 80))
+                        // 展开：延迟 80ms 小淡入；收起(mode 回 NORMAL)：120ms 快速淡出，
+                        // 避免"专/歌"等字样在窗口收回过程中残留闪现
+                        androidx.compose.runtime.LaunchedEffect(mode) {
+                            if (mode == MusicToolbarMode.NORMAL) {
+                                labelAlpha.animateTo(0f, tween(durationMillis = 120))
+                            } else {
+                                labelAlpha.animateTo(1f, tween(durationMillis = 150, delayMillis = 80))
+                            }
                         }
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
