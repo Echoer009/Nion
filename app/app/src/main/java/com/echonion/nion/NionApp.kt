@@ -132,8 +132,11 @@ class NionApp : Application() {
     override fun onCreate() {
         super.onCreate()
         instance = this
-        val dataDir = getExternalFilesDir(null) ?: getDir("nion_data", MODE_PRIVATE)
-        val dbPath = File(dataDir, "nion.db").absolutePath
+        // 数据库放内部存储（databases/ 目录）。历史版本曾放 getExternalFilesDir
+        // （FUSE 外置存储），SQLite 在其上写入不可靠，且 adb 恢复的文件属主是
+        // shell(2000)，App 无写权限 → "attempt to write a readonly database" 崩溃。
+        // prepareDatabasePath() 内含一次性迁移：把旧外置库原样搬进来，数据不丢。
+        val dbPath = prepareDatabasePath()
         Log.d("NionApp", "Database path: $dbPath")
         try {
             core = NionCore(dbPath)
@@ -168,7 +171,6 @@ class NionApp : Application() {
         } catch (e: Exception) {
             Log.e("NionApp", "启动天气预警调度失败", e)
         }
-
         // 重调度定时手机自动化任务闹钟 —— Phone Agent 功能暂未成熟，注释禁用
         // try {
         //     PhoneAutomationScheduler.rescheduleAll(this, core)
@@ -192,6 +194,34 @@ class NionApp : Application() {
             override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
         })
     }
+
+    /**
+     * 计算数据库路径，并在首次运行时把旧外置存储的库迁移到内部存储。
+     *
+     * 迁移规则：内部库不存在 && 旧外置库存在 → 整文件拷贝到内部 databases/ 目录，
+     * 成功后将旧库改名 nion.db.migrated 留档（不再使用），失败则回退用全新内部库。
+     *
+     * @return 内部存储数据库文件绝对路径
+     */
+    private fun prepareDatabasePath(): String {
+        val target = getDatabasePath("nion.db") // → /data/user/0/<包名>/databases/nion.db
+        target.parentFile?.mkdirs()
+        val legacy = getExternalFilesDir(null)?.resolve("nion.db")
+        if (!target.exists() && legacy != null && legacy.exists()) {
+            try {
+                legacy.inputStream().use { input ->
+                    target.outputStream().use { input.copyTo(it) }
+                }
+                val archive = File(legacy.parentFile, "nion.db.migrated")
+                if (!legacy.renameTo(archive)) legacy.delete() // 改名失败就删除，防止重复迁移
+                Log.i("NionApp", "数据库已从外置存储迁移到内部存储: ${target.absolutePath}")
+            } catch (e: Exception) {
+                Log.e("NionApp", "数据库迁移失败，使用内部存储新库", e)
+            }
+        }
+        return target.absolutePath
+    }
+
 
     companion object {
         /** 全局 Application 实例引用，供 QueryTool 天气查询等需要 Context 的组件使用 */
