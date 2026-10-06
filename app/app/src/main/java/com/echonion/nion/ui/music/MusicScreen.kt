@@ -67,7 +67,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Album
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -258,8 +258,13 @@ fun MusicScreen(
                     topBar = {
                         TopAppBar(
                             title = {
+                                // 标题直接显示当前音源名（页面不再叠"音乐"两行标题）
                                 Text(
-                                    "音乐",
+                                    when (vm.source) {
+                                        MusicSource.LOCAL -> "本地曲目"
+                                        MusicSource.BRAINGIRL -> "类脑娘服务器"
+                                        MusicSource.CUSTOM -> "自己的服务器"
+                                    },
                                     style = MaterialTheme.typography.headlineSmall,
                                     fontWeight = FontWeight.Bold,
                                 )
@@ -268,7 +273,7 @@ fun MusicScreen(
                                 // 右上角伙伴入口，与专注页/日程页保持一致
                                 IconButton(onClick = onOpenCompanion) {
                                     Icon(
-                                        Icons.AutoMirrored.Filled.Chat,
+                                        Icons.Default.AutoAwesome,
                                         contentDescription = "打开伙伴",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -473,19 +478,11 @@ private fun LocalLibraryContent(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        // ===== 顶栏：标题 + 视图/排序图标选择器 + 搜索开关（与云端同一组件）=====
-        var searchOpen by remember { mutableStateOf(false) }
+        // ===== 控件栏：排序/视图/搜索 三入口（整行四态 morph；标题在页面 TopAppBar）=====
         MusicToolbar(
             vm = vm,
-            title = "本地曲目",
             showPlaylists = showPlaylists,
             onSelectView = { showPlaylists = it },
-            searchOpen = searchOpen,
-            onToggleSearch = {
-                // 笔记页同款：收起时清空查询词（视图自动回落专辑列表）
-                searchOpen = !searchOpen
-                if (!searchOpen) vm.searchQuery = ""
-            },
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -656,19 +653,11 @@ private fun ServerMusicContent(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        // ===== 顶栏：标题 + 视图选择器 + 搜索开关（与本地音源同一组件）=====
-        var searchOpen by remember { mutableStateOf(false) }
+        // ===== 控件栏：视图/搜索 入口（整行四态 morph；标题在页面 TopAppBar）=====
         MusicToolbar(
             vm = vm,
-            title = if (vm.source == MusicSource.BRAINGIRL) "类脑娘服务器" else "自己的服务器",
             showPlaylists = showPlaylists,
             onSelectView = { showPlaylists = it },
-            searchOpen = searchOpen,
-            onToggleSearch = {
-                // 笔记页同款：收起时清空查询词（视图自动回落专辑列表）
-                searchOpen = !searchOpen
-                if (!searchOpen) vm.searchQuery = ""
-            },
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -781,103 +770,16 @@ private fun ServerMusicContent(
 }
 
 /**
- * 曲库顶栏 —— 标题 + 排序/视图图标选择器 + 搜索开关（本地与服务器音源共用）。
- * 控件全部图标化且只占一行：排序与视图切换用 [ExpandableIconSelector]
- * （点按原地 share-element 展开成选项条），搜索照抄笔记页交互
- * （图标开关 + 展开滑出输入框 + 激活时图标染主色）。
- *
- * @param vm 共享的音乐 ViewModel（读音源/排序状态，写搜索词）
- * @param title 左侧标题（音源名：本地曲目 / 类脑娘服务器 / 自己的服务器）
- * @param showPlaylists 当前是否处于歌单视图
- * @param onSelectView 视图切换回调（专辑 ↔ 歌单）
- * @param searchOpen 搜索框是否展开
- * @param onToggleSearch 搜索开关回调（收起时由调用方清空查询词）
+ * 曲库控件栏 —— 整行单 sharedElement 容器，四态 morph（本地与服务器音源共用）：
+ * NORMAL（图标收起态）/ SORT（整行=排序选项）/ VIEW（整行=视图选项）/ SEARCH（整行=搜索框）。
+ * 展开某态时其余控件被挤开、行内只剩该态内容；行高恒定 48dp 不跳变；
+ * 收起态与任一展开态互为同一 sharedElement（"music_toolbar_container"），
+ * 切换即整行容器 morph。标题不在此栏（在页面 TopAppBar，显示音源名）。
  */
-@Composable
-private fun MusicToolbar(
-    vm: MusicViewModel,
-    title: String,
-    showPlaylists: Boolean,
-    onSelectView: (Boolean) -> Unit,
-    searchOpen: Boolean,
-    onToggleSearch: () -> Unit,
-) {
-    Column {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                title,
-                style = MaterialTheme.typography.titleLarge,
-                fontWeight = FontWeight.Bold,
-                modifier = Modifier.weight(1f),
-            )
-            // 排序选择器：仅本地音源 + 专辑视图 + 未搜索时出现（云端排序由服务端定）
-            if (vm.source == MusicSource.LOCAL && !showPlaylists && vm.searchQuery.isBlank()) {
-                ExpandableIconSelector(
-                    sharedKey = "music_sort_selector",
-                    selectedKey = if (vm.localAlbumSort == LocalAlbumSort.TITLE) "title" else "newest",
-                    options = listOf(
-                        SelectorOption("title", Icons.Default.SortByAlpha, "名称"),
-                        SelectorOption("newest", Icons.Default.Schedule, "最新"),
-                    ),
-                    onSelect = { key ->
-                        vm.localAlbumSort = if (key == "title") LocalAlbumSort.TITLE else LocalAlbumSort.NEWEST
-                    },
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-            // 视图选择器：专辑 | 歌单（搜索激活时隐藏，搜索结果在专辑视图内展示）
-            if (vm.searchQuery.isBlank()) {
-                ExpandableIconSelector(
-                    sharedKey = "music_view_selector",
-                    selectedKey = if (showPlaylists) "playlist" else "album",
-                    options = listOf(
-                        SelectorOption("album", Icons.Default.Album, "专辑"),
-                        SelectorOption("playlist", Icons.Default.QueueMusic, "歌单"),
-                    ),
-                    onSelect = { key -> onSelectView(key == "playlist") },
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-            }
-            // 搜索开关：笔记页同款 —— 激活时图标染主色
-            IconButton(onClick = onToggleSearch) {
-                Icon(
-                    Icons.Default.Search,
-                    contentDescription = "搜索音乐",
-                    tint = if (searchOpen) {
-                        MaterialTheme.colorScheme.primary
-                    } else {
-                        MaterialTheme.colorScheme.onSurface
-                    },
-                )
-            }
-        }
-        // 搜索框：笔记页同款 —— expandVertically 从顶栏下方滑出，收起即清空
-        AnimatedVisibility(
-            visible = searchOpen,
-            enter = expandVertically() + fadeIn(),
-            exit = shrinkVertically() + fadeOut(),
-        ) {
-            OutlinedTextField(
-                value = vm.searchQuery,
-                onValueChange = { vm.searchQuery = it },
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("搜索歌曲 / 专辑 / 艺术家") },
-                singleLine = true,
-                shape = RoundedCornerShape(14.dp),
-            )
-        }
-    }
-}
+private enum class MusicToolbarMode { NORMAL, SORT, VIEW, SEARCH }
 
 /**
- * 展开式图标选择器的一个选项。
- *
- * @property key 稳定标识（用于回调与选中判断）
- * @property icon 图标
- * @property label 两字短标签（等宽格子内居中对齐）
+ * 展开式图标选择器的一个选项（图标 + 两字标签，横排格子用）。
  */
 private data class SelectorOption(
     val key: String,
@@ -886,100 +788,146 @@ private data class SelectorOption(
 )
 
 /**
- * 展开式图标选择器 —— 收起态是单个图标按钮（显示当前选中项），
- * 点按后以 sharedElement 容器 morph 原地展开成等宽选项条（图标+两字标签，
- * 当前项染主色）；点选某项后收回 morph 回单图标并回调。未来加选项只需
- * 在 options 里加一项，顶栏占位不变。
- *
- * @param sharedKey sharedElement 键（收起/展开两态互为同一元素）
- * @param selectedKey 当前选中项 key
- * @param options 全部选项
- * @param onSelect 点选某项时的回调（收起动画由组件自理）
+ * 曲库控件栏（四态整行 morph）。收起态：右对齐 [排序图标][视图图标][搜索图标]；
+ * 点排序/视图图标 → 整行 morph 成等高横排选项（其余控件挤开）；
+ * 点搜索图标 → 整行 morph 成搜索输入框（同样走 sharedElement）。
+ * 展开态点选某项即生效并收回；✕ 收起；退出搜索清空查询词。
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
-private fun ExpandableIconSelector(
-    sharedKey: String,
-    selectedKey: String,
-    options: List<SelectorOption>,
-    onSelect: (String) -> Unit,
+private fun MusicToolbar(
+    vm: MusicViewModel,
+    showPlaylists: Boolean,
+    onSelectView: (Boolean) -> Unit,
 ) {
-    // 展开/收起状态：局部持有，点选即收
-    var expanded by remember { mutableStateOf(false) }
-    val selected = options.first { it.key == selectedKey }
+    var mode by remember { mutableStateOf(MusicToolbarMode.NORMAL) }
 
-    SharedTransitionLayout {
+    // 排序/视图的选项集合（未来加选项 = 加一项，控件栏占位不变）
+    val sortOptions = remember {
+        listOf(
+            SelectorOption("title", Icons.Default.SortByAlpha, "名称"),
+            SelectorOption("newest", Icons.Default.Schedule, "最新"),
+        )
+    }
+    val viewOptions = remember {
+        listOf(
+            SelectorOption("album", Icons.Default.Album, "专辑"),
+            SelectorOption("playlist", Icons.Default.QueueMusic, "歌单"),
+        )
+    }
+
+    SharedTransitionLayout(modifier = Modifier.fillMaxWidth()) {
         AnimatedContent(
-            targetState = expanded,
+            targetState = mode,
             transitionSpec = {
-                // 容器（sharedElement）bounds morph 由 sharedElement 机制驱动，
-                // 这里只补内容淡入淡出与尺寸动画
+                // 容器 bounds 一致（恒定行高），morph 主要是内容交叉淡化
                 fadeIn(tween(200)) togetherWith fadeOut(tween(150)) using SizeTransform(clip = false)
             },
-            label = sharedKey,
-        ) { isOpen ->
-            if (!isOpen) {
-                // 收起态：当前项的单图标圆形按钮
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .sharedElement(
-                            rememberSharedContentState(sharedKey),
-                            this@AnimatedContent,
-                        )
-                        .size(40.dp)
-                        .clip(CircleShape)
-                        .clickable { expanded = true },
-                ) {
-                    Icon(
-                        selected.icon,
-                        contentDescription = selected.label,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            } else {
-                // 展开态：等宽格子选项条（浅色圆角容器），当前项染主色
-                Row(
-                    modifier = Modifier
-                        .sharedElement(
-                            rememberSharedContentState(sharedKey),
-                            this@AnimatedContent,
-                        )
-                        .clip(RoundedCornerShape(20.dp))
-                        .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f))
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                ) {
-                    options.forEach { opt ->
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier
-                                .width(52.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .clickable {
-                                    expanded = false
-                                    onSelect(opt.key)
-                                }
-                                .padding(vertical = 6.dp),
-                        ) {
+            label = "musicToolbar",
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(48.dp),
+        ) { m ->
+            Row(
+                // 收起态与全部展开态共享同一 sharedElement：整行容器 morph
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp)
+                    .sharedElement(
+                        rememberSharedContentState("music_toolbar_container"),
+                        this@AnimatedContent,
+                    ),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                when (m) {
+                    MusicToolbarMode.NORMAL -> {
+                        // 左侧留空把图标推到右端（标题在页面 TopAppBar）
+                        Spacer(modifier = Modifier.weight(1f))
+                        // 排序入口：仅本地音源 + 专辑视图 + 未搜索
+                        if (vm.source == MusicSource.LOCAL && !showPlaylists && vm.searchQuery.isBlank()) {
+                            val current = if (vm.localAlbumSort == LocalAlbumSort.TITLE) {
+                                sortOptions[0]
+                            } else {
+                                sortOptions[1]
+                            }
+                            IconButton(onClick = { mode = MusicToolbarMode.SORT }) {
+                                Icon(
+                                    current.icon,
+                                    contentDescription = "排序方式",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        // 视图入口：搜索激活时隐藏（搜索结果在专辑视图内展示）
+                        if (vm.searchQuery.isBlank()) {
+                            val current = if (showPlaylists) viewOptions[1] else viewOptions[0]
+                            IconButton(onClick = { mode = MusicToolbarMode.VIEW }) {
+                                Icon(
+                                    current.icon,
+                                    contentDescription = "曲库视图",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                        }
+                        // 搜索入口：进入整行搜索态
+                        IconButton(onClick = { mode = MusicToolbarMode.SEARCH }) {
                             Icon(
-                                opt.icon,
-                                contentDescription = null,
-                                tint = if (opt.key == selectedKey) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                Icons.Default.Search,
+                                contentDescription = "搜索音乐",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+
+                    MusicToolbarMode.SORT -> {
+                        // 整行只剩排序选项（横排等高格子），其余控件被挤开
+                        sortOptions.forEach { opt ->
+                            SelectorCell(
+                                option = opt,
+                                selected = (vm.localAlbumSort == LocalAlbumSort.TITLE) == (opt.key == "title"),
+                                onClick = {
+                                    vm.localAlbumSort =
+                                        if (opt.key == "title") LocalAlbumSort.TITLE else LocalAlbumSort.NEWEST
+                                    mode = MusicToolbarMode.NORMAL
                                 },
                             )
-                            Text(
-                                opt.label,
-                                style = MaterialTheme.typography.labelSmall,
-                                color = if (opt.key == selectedKey) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.onSurfaceVariant
+                        }
+                        Spacer(modifier = Modifier.weight(1f))
+                        CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
+                    }
+
+                    MusicToolbarMode.VIEW -> {
+                        // 整行只剩视图选项
+                        viewOptions.forEach { opt ->
+                            SelectorCell(
+                                option = opt,
+                                selected = showPlaylists == (opt.key == "playlist"),
+                                onClick = {
+                                    onSelectView(opt.key == "playlist")
+                                    mode = MusicToolbarMode.NORMAL
                                 },
                             )
+                        }
+                        Spacer(modifier = Modifier.weight(1f))
+                        CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
+                    }
+
+                    MusicToolbarMode.SEARCH -> {
+                        // 整行 = 搜索输入框（同样在 sharedElement 容器内 morph 出现）
+                        OutlinedTextField(
+                            value = vm.searchQuery,
+                            onValueChange = { vm.searchQuery = it },
+                            placeholder = { Text("搜索歌曲 / 专辑 / 艺术家") },
+                            singleLine = true,
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(44.dp),
+                        )
+                        CloseToolbarButton {
+                            // 退出搜索即清空查询词（视图自动回落专辑列表）
+                            vm.searchQuery = ""
+                            mode = MusicToolbarMode.NORMAL
                         }
                     }
                 }
@@ -987,6 +935,54 @@ private fun ExpandableIconSelector(
         }
     }
 }
+
+/**
+ * 展开态的横排选项格 —— 图标 + 两字标签并排、等高 40dp 胶囊按钮，
+ * 当前项染主色。点击由调用方处理（选完收回 NORMAL）。
+ */
+@Composable
+private fun SelectorCell(
+    option: SelectorOption,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    val tint = if (selected) {
+        MaterialTheme.colorScheme.primary
+    } else {
+        MaterialTheme.colorScheme.onSurfaceVariant
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(20.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp),
+    ) {
+        Icon(option.icon, contentDescription = null, tint = tint, modifier = Modifier.size(20.dp))
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            option.label,
+            style = MaterialTheme.typography.labelLarge,
+            color = tint,
+        )
+    }
+}
+
+/**
+ * 控件栏展开态右侧的 ✕ 收起按钮。
+ */
+@Composable
+private fun CloseToolbarButton(onClose: () -> Unit) {
+    IconButton(onClick = onClose) {
+        Icon(
+            Icons.Default.Close,
+            contentDescription = "收起",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
 
 /**
  * 歌单视图（含新建 FAB）—— 歌单列表 ↔ 详情 morph 面板 + 右下角新建按钮。

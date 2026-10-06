@@ -48,7 +48,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.automirrored.filled.OpenInNew
 import androidx.compose.material.icons.filled.BatteryAlert
 import androidx.compose.material.icons.filled.Check
@@ -204,7 +204,7 @@ fun SettingsScreen(
                 ),
                 actions = {
                     IconButton(onClick = onOpenCompanion) {
-                        Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
+                        Icon(Icons.Default.AutoAwesome, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 },
             )
