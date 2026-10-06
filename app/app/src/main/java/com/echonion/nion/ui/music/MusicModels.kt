@@ -66,6 +66,10 @@ enum class MusicSource {
  *   由 MediaStore 的 ALBUM_ID 拼出，可用 ContentResolver.loadThumbnail 提取内嵌封面；
  *   服务器曲目为 null
  * @property isLocal 是否本地曲目，用于 UI 上区分图标展示
+ * @property albumId 本地专辑 ID（MediaStore ALBUM_ID）—— 本地专辑聚合的分组键；服务器曲目为 0
+ * @property artistId 本地艺术家 ID（MediaStore ARTIST_ID）—— 模型携带、预留后续艺术家维度；服务器曲目为 0
+ * @property year 发行年份（MediaStore YEAR），0 表示未知
+ * @property dateAddedSeconds 添加时间（MediaStore DATE_ADDED，Unix 秒）—— 本地专辑"最新添加"排序依据；服务器曲目为 0
  */
 data class PlayableTrack(
     val id: String,
@@ -77,6 +81,11 @@ data class PlayableTrack(
     val coverArtUrl: String? = null,
     val albumArtUri: String? = null,
     val isLocal: Boolean = false,
+    // ── 本地 MediaStore 聚合专用字段（服务器曲目保持默认值，不参与播放逻辑）──
+    val albumId: Long = 0,
+    val artistId: Long = 0,
+    val year: Int = 0,
+    val dateAddedSeconds: Long = 0,
 )
 
 /**
@@ -140,6 +149,85 @@ data class SubsonicSearchResult(
     val albums: List<SubsonicAlbum> = emptyList(),
     val songs: List<PlayableTrack> = emptyList(),
 )
+
+/**
+ * 统一专辑模型 —— 服务器专辑（Subsonic）与本地专辑（MediaStore 聚合）共用同一结构，
+ * 专辑列表 / 专辑详情 / 搜索结果等 UI 组件因此可以跨音源复用。
+ *
+ * @property id 唯一标识：服务器专辑为 Subsonic id；本地专辑为 "local-<MediaStore albumId>"
+ *   （本地 id 自带 "local-" 前缀，拼接出的 sharedElement morph key "music_album_local-<id>"
+ *   天然与服务器专辑的 key 错开，不会撞车）
+ * @property name 专辑名
+ * @property artist 艺术家名（本地专辑取组内出现次数最多的艺术家，合辑场景更准确）
+ * @property coverArtUrl 服务器封面完整 URL（客户端已拼好认证参数），UI 直接加载；本地专辑为 null
+ * @property albumArtUri 本地专辑封面 URI（content://media/external/audio/albums/{albumId}），
+ *   可用 ContentResolver.loadThumbnail 提取音频内嵌封面；服务器专辑为 null
+ * @property songCount 歌曲数
+ * @property durationSeconds 专辑总时长（秒）
+ * @property year 发行年份，0 表示未知
+ * @property isLocal 是否本地专辑（打开详情时用于区分：本地直接内存过滤、服务器走 getAlbum）
+ * @property dateAddedSeconds 本地专辑"最新添加"排序依据（组内 DATE_ADDED 最大值，Unix 秒）；
+ *   服务器专辑为 0（服务器侧排序由服务端 type=newest 决定）
+ */
+data class LibraryAlbum(
+    val id: String,
+    val name: String,
+    val artist: String,
+    val coverArtUrl: String? = null,
+    val albumArtUri: String? = null,
+    val songCount: Int = 0,
+    val durationSeconds: Long = 0,
+    val year: Int = 0,
+    val isLocal: Boolean = false,
+    val dateAddedSeconds: Long = 0,
+)
+
+/**
+ * Subsonic 专辑 → 统一专辑模型 [LibraryAlbum]。
+ * ViewModel 加载服务器专辑列表/搜索结果时统一映射，UI 层只见 LibraryAlbum。
+ */
+fun SubsonicAlbum.toLibraryAlbum(): LibraryAlbum = LibraryAlbum(
+    id = id,
+    name = name,
+    artist = artist,
+    coverArtUrl = coverArtUrl,
+    songCount = songCount,
+    durationSeconds = durationSeconds,
+    year = year,
+    isLocal = false,
+)
+
+/**
+ * 统一搜索结果 —— 歌曲在前、专辑在后，本地与服务器音源共用。
+ * 与 [SubsonicSearchResult] 的区别：专辑维度已映射为统一的 [LibraryAlbum]，
+ * 服务器 search3 结果经 [toLibrarySearchResult] 转换，本地内存搜索直接产出本结构。
+ *
+ * @property songs 匹配的歌曲（统一 PlayableTrack）
+ * @property albums 匹配的专辑（统一 LibraryAlbum）
+ */
+data class LibrarySearchResult(
+    val songs: List<PlayableTrack> = emptyList(),
+    val albums: List<LibraryAlbum> = emptyList(),
+)
+
+/** Subsonic search3 结果 → 统一搜索结果（艺术家维度当前 UI 未消费，转换时丢弃） */
+fun SubsonicSearchResult.toLibrarySearchResult(): LibrarySearchResult = LibrarySearchResult(
+    songs = songs,
+    albums = albums.map { it.toLibraryAlbum() },
+)
+
+/**
+ * 本地专辑排序方式。
+ *
+ * @property label 排序切换 Chip 的展示文案
+ */
+enum class LocalAlbumSort(val label: String) {
+    /** 默认：专辑名字典序（忽略大小写） */
+    TITLE("默认排序"),
+
+    /** 最新添加：按组内 DATE_ADDED 最大值倒序 */
+    NEWEST("最新添加"),
+}
 
 /**
  * 音乐模块在 NionCore settings 表中使用的键名常量。

@@ -47,7 +47,8 @@ data class ConfigTestState(
  * 职责划分：
  * 1. 音源选择与配置持久化（NionCore settings 表，键名见 [MusicSettings]）
  * 2. 本地曲目扫描（MediaStore 全机音频，过滤 <10s 的提示音）
- * 3. 服务器浏览状态（专辑列表 / 专辑详情 / search3 搜索）
+ * 3. 曲库浏览状态（专辑列表 / 专辑详情 / 搜索）—— 本地 MediaStore 聚合与服务器
+ *    Subsonic 统一成 [LibraryAlbum] 模型，UI 组件跨音源复用
  * 4. 播放控制 —— 通过 MediaController 连接 [PlaybackService]：
  *    - 队列管理（setMediaItems + 指定起始曲目）
  *    - 播放/暂停/seek/上一首/下一首
@@ -100,27 +101,45 @@ class MusicViewModel(
     var isLoadingLocal by mutableStateOf(false)
         private set
 
+    /** 本地扫描错误信息；非空时 UI 显示错误条，点击重试可清除并强制重查 */
+    var localError by mutableStateOf<String?>(null)
+        private set
+
+    /** 本地曲目按 ALBUM_ID 聚合出的专辑列表（统一模型，默认按专辑名排序） */
+    var localAlbums by mutableStateOf<List<LibraryAlbum>>(emptyList())
+        private set
+
+    /** 本地专辑排序方式（默认名称序；仅本地音源展示排序切换；公开 setter 供 UI 排序 Chip 直接赋值） */
+    var localAlbumSort by mutableStateOf(LocalAlbumSort.TITLE)
+
+    /** 当前排序下的本地专辑列表 —— 读取聚合结果并按 [localAlbumSort] 现算，排序切换即触发重组 */
+    val sortedLocalAlbums: List<LibraryAlbum>
+        get() = when (localAlbumSort) {
+            LocalAlbumSort.TITLE -> localAlbums
+            LocalAlbumSort.NEWEST -> localAlbums.sortedByDescending { it.dateAddedSeconds }
+        }
+
     // ──────────────────────────────────────────────────────
     // 服务器浏览状态
     // ──────────────────────────────────────────────────────
 
-    /** 专辑列表（getAlbumList2 newest） */
-    var albums by mutableStateOf<List<SubsonicAlbum>>(emptyList())
+    /** 专辑列表（getAlbumList2 newest；已映射为统一模型 [LibraryAlbum]） */
+    var albums by mutableStateOf<List<LibraryAlbum>>(emptyList())
         private set
 
-    /** 当前打开的专辑（null=专辑列表视图；非 null=专辑详情视图） */
-    var currentAlbum by mutableStateOf<SubsonicAlbum?>(null)
+    /** 当前打开的专辑（null=专辑列表视图；非 null=专辑详情视图；本地/服务器共用） */
+    var currentAlbum by mutableStateOf<LibraryAlbum?>(null)
         private set
 
     /** 当前专辑的曲目列表 */
     var albumSongs by mutableStateOf<List<PlayableTrack>>(emptyList())
         private set
 
-    /** 搜索关键词 —— UI 输入框直接写入，VM 内部 debounce 后触发 search3 */
+    /** 搜索关键词 —— UI 输入框直接写入，VM 内部 debounce 后分发：服务器走 search3，本地走内存过滤 */
     var searchQuery by mutableStateOf("")
 
-    /** 最近一次搜索结果（null=无搜索） */
-    var searchResult by mutableStateOf<SubsonicSearchResult?>(null)
+    /** 最近一次搜索结果（null=无搜索；统一模型，本地/服务器共用） */
+    var searchResult by mutableStateOf<LibrarySearchResult?>(null)
         private set
 
     /** 服务器数据是否加载中（专辑列表/专辑详情共用一个标志） */
@@ -385,16 +404,31 @@ class MusicViewModel(
     // ──────────────────────────────────────────────────────
 
     /**
-     * 扫描全机音频（MediaStore）。
+     * 扫描全机音频（MediaStore）并聚合成专辑列表。
      * 过滤规则：时长 >= 10 秒，排除通知音/提示音等碎片音频；
-     * 本地权限被拒时返回空列表，UI 显示权限引导。
+     * 扫描抛异常（权限被回收等）时写入 [localError]，UI 显示错误条供点击重试。
+     *
+     * @param force true=忽略"已有数据不重查"保护强制重查（刷新/重试场景）
      */
-    fun loadLocalTracks() {
+    fun loadLocalTracks(force: Boolean = false) {
         if (isLoadingLocal) return
+        // 与 loadAlbums 一致的缓存保护：已有数据且非强制时不重查
+        if (!force && localTracks.isNotEmpty()) return
         isLoadingLocal = true
+        localError = null
         viewModelScope.launch {
-            val tracks = withContext(Dispatchers.IO) { queryLocalTracks(app) }
-            localTracks = tracks
+            // queryLocalTracks 不吞异常：失败向上抛到这里统一捕获，
+            // 成功则同时刷新曲目列表与聚合出的专辑列表
+            runCatching { withContext(Dispatchers.IO) { queryLocalTracks(app) } }
+                .onSuccess { tracks ->
+                    localTracks = tracks
+                    localAlbums = buildLocalAlbums(tracks)
+                    // 曲目库更新后，若正处于本地搜索态则同步重算结果
+                    if (source == MusicSource.LOCAL && searchQuery.isNotBlank()) {
+                        performLocalSearch(searchQuery)
+                    }
+                }
+                .onFailure { localError = it.message ?: "扫描本地音乐失败" }
             isLoadingLocal = false
         }
     }
@@ -432,18 +466,32 @@ class MusicViewModel(
         serverError = null
         viewModelScope.launch {
             runCatching { client.getAlbumList2(type = "newest", size = 30) }
-                .onSuccess { albums = it }
+                // 服务器专辑统一映射成 LibraryAlbum，UI 层不感知 Subsonic 类型
+                .onSuccess { albums = it.map { album -> album.toLibraryAlbum() } }
                 .onFailure { serverError = it.message ?: "加载失败" }
             isLoadingServer = false
         }
     }
 
     /**
-     * 打开专辑详情（getAlbum 拉取曲目）。
+     * 打开专辑详情 —— 按专辑来源分发：
+     * - 本地专辑：曲目已在内存（聚合来源即 localTracks），直接按 ALBUM_ID
+     *   过滤出该专辑的曲目作为详情列表与播放队列，同步完成无网络请求
+     * - 服务器专辑：getAlbum 拉取曲目（服务端已按音轨号排序）
      *
-     * @param album 被点击的专辑（来自专辑列表或搜索结果）
+     * @param album 被点击的专辑（来自专辑列表或搜索结果，统一模型）
      */
-    fun openAlbum(album: SubsonicAlbum) {
+    fun openAlbum(album: LibraryAlbum) {
+        if (album.isLocal) {
+            currentAlbum = album
+            val albumId = album.id.removePrefix(LOCAL_ALBUM_ID_PREFIX).toLongOrNull()
+            albumSongs = if (albumId != null) {
+                localTracks.filter { it.albumId == albumId }
+            } else {
+                emptyList()
+            }
+            return
+        }
         val client = buildClient() ?: return
         currentAlbum = album
         isLoadingServer = true
@@ -462,13 +510,55 @@ class MusicViewModel(
         albumSongs = emptyList()
     }
 
-    /** 执行一次 search3 搜索并记录结果（内部由 debounce collect 调用） */
+    /**
+     * 执行一次搜索并记录结果（内部由 debounce collect 调用）。
+     * 按音源分发：本地走内存过滤，服务器走 search3。
+     */
     private fun performSearch(query: String) {
+        if (source == MusicSource.LOCAL) {
+            performLocalSearch(query)
+            return
+        }
         val client = buildClient() ?: return
         viewModelScope.launch {
             runCatching { client.search3(query) }
-                .onSuccess { searchResult = it }
+                // 统一映射：专辑维度转 LibraryAlbum，艺术家维度当前 UI 未消费
+                .onSuccess { searchResult = it.toLibrarySearchResult() }
                 .onFailure { /* 搜索失败静默：保留旧结果，不打断输入 */ }
+        }
+    }
+
+    /**
+     * 本地内存搜索：不发起任何请求，直接在 [localTracks]/[localAlbums] 上做包含匹配 ——
+     * 曲目按 标题/艺术家/专辑名，专辑按 专辑名/艺术家；结果歌在前、专辑在后，
+     * 与服务器搜索走同一个 SearchResultContent 展示。
+     */
+    private fun performLocalSearch(query: String) {
+        val q = query.trim()
+        if (q.isEmpty()) {
+            searchResult = null
+            return
+        }
+        val songs = localTracks.filter {
+            it.title.contains(q, ignoreCase = true) ||
+                it.artist.contains(q, ignoreCase = true) ||
+                it.album.contains(q, ignoreCase = true)
+        }
+        val albums = localAlbums.filter {
+            it.name.contains(q, ignoreCase = true) ||
+                it.artist.contains(q, ignoreCase = true)
+        }
+        searchResult = LibrarySearchResult(songs = songs, albums = albums)
+    }
+
+    /**
+     * 进入本地音源时补一次本地搜索刷新：searchQuery 为三音源共享状态，
+     * 从服务器切回本地时关键词未变化、debounce 不会重发，这里手动重算
+     * 保证搜索框内容与结果一致。
+     */
+    fun refreshLocalSearch() {
+        if (source == MusicSource.LOCAL && searchQuery.isNotBlank()) {
+            performLocalSearch(searchQuery)
         }
     }
 
@@ -593,12 +683,17 @@ class MusicViewModel(
          *  注册完成后网页重定向 nion://musicauth 深链回传账密，App 自动完成配置 */
         const val BRAINGIRL_REGISTER_URL = "https://echonion.org/music/reg/start"
 
+        /** 本地专辑统一 id 前缀：id 形如 "local-<albumId>"，morph key 因此与服务器专辑错开 */
+        const val LOCAL_ALBUM_ID_PREFIX = "local-"
+
         /**
          * 查询 MediaStore 全部音频，转换为统一的 [PlayableTrack] 列表。
          *
          * 过滤：时长 >= 10s（排除提示音/录音碎片）；
          * 排序：曲名字典序（COLLATE NOCASE 忽略大小写）。
          * MediaStore 的 "<unknown>" 占位统一替换为中文"未知艺术家/未知专辑"。
+         * 抛出的异常（权限刚回收等）向上传给 [loadLocalTracks] 统一捕获，
+         * 由 UI 显示错误条 + 点击重试，不再静默吞掉。
          */
         private fun queryLocalTracks(app: Application): List<PlayableTrack> {
             val projection = arrayOf(
@@ -607,61 +702,99 @@ class MusicViewModel(
                 MediaStore.Audio.Media.ARTIST,
                 MediaStore.Audio.Media.ALBUM,
                 // 专辑 ID：用于拼出专辑封面 URI（content://media/external/audio/albums/{id}），
-                // 供 CoverArt 通过 loadThumbnail 提取 FLAC/MP3 内嵌封面
+                // 供 CoverArt 通过 loadThumbnail 提取 FLAC/MP3 内嵌封面；
+                // 同时是本地专辑聚合的分组键
                 MediaStore.Audio.Media.ALBUM_ID,
                 MediaStore.Audio.Media.DURATION,
+                // 发行年份：聚合进专辑模型，详情头部展示 "年份 · N 首 · 总时长"
+                MediaStore.Audio.Media.YEAR,
+                // 艺术家 ID：随模型携带，预留给后续艺术家维度浏览
+                MediaStore.Audio.Media.ARTIST_ID,
+                // 添加时间（Unix 秒）：本地专辑"最新添加"排序依据（组内取最大值）
+                MediaStore.Audio.Media.DATE_ADDED,
             )
             val result = mutableListOf<PlayableTrack>()
-            // query 可能抛异常（权限刚回收等），捕获后返回已收集部分
-            runCatching {
-                app.contentResolver.query(
-                    MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                    projection,
-                    "${MediaStore.Audio.Media.DURATION} >= ?",
-                    arrayOf("10000"),
-                    "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC",
-                )?.use { cursor ->
-                    val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-                    val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
-                    val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
-                    val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
-                    val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
-                    val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-                    while (cursor.moveToNext()) {
-                        val id = cursor.getLong(idCol)
-                        val uri = android.content.ContentUris.withAppendedId(
-                            MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
-                            id,
-                        )
-                        // 专辑封面 URI：albums 表的 content URI + albumId，
-                        // loadThumbnail 会解析音频文件的内嵌封面（FLAC metadata block 等）
-                        val albumId = cursor.getLong(albumIdCol)
-                        val albumArtUri =
-                            if (albumId > 0) android.content.ContentUris.withAppendedId(
+            app.contentResolver.query(
+                MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                projection,
+                "${MediaStore.Audio.Media.DURATION} >= ?",
+                arrayOf("10000"),
+                "${MediaStore.Audio.Media.TITLE} COLLATE NOCASE ASC",
+            )?.use { cursor ->
+                val idCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
+                val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
+                val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
+                val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val yearCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.YEAR)
+                val artistIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST_ID)
+                val dateAddedCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                while (cursor.moveToNext()) {
+                    val id = cursor.getLong(idCol)
+                    val uri = android.content.ContentUris.withAppendedId(
+                        MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
+                        id,
+                    )
+                    // 专辑封面 URI：albums 表的 content URI + albumId，
+                    // loadThumbnail 会解析音频文件的内嵌封面（FLAC metadata block 等）
+                    val albumId = cursor.getLong(albumIdCol)
+                    val albumArtUri =
+                        if (albumId > 0) android.content.ContentUris.withAppendedId(
                                 MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
                                 albumId,
                             ).toString() else null
-                        result.add(
-                            PlayableTrack(
-                                id = "local:$id",
-                                title = cursor.getString(titleCol)?.ifBlank { "未知曲目" } ?: "未知曲目",
-                                artist = cursor.getString(artistCol)
-                                    ?.takeIf { it.isNotBlank() && it != MediaStore.UNKNOWN_STRING }
-                                    ?: "未知艺术家",
-                                album = cursor.getString(albumCol)
-                                    ?.takeIf { it.isNotBlank() && it != MediaStore.UNKNOWN_STRING }
-                                    ?: "未知专辑",
-                                durationSeconds = cursor.getLong(durationCol) / 1000,
-                                playbackUri = uri.toString(),
-                                albumArtUri = albumArtUri,
-                                isLocal = true,
-                            ),
-                        )
-                    }
+                    result.add(
+                        PlayableTrack(
+                            id = "local:$id",
+                            title = cursor.getString(titleCol)?.ifBlank { "未知曲目" } ?: "未知曲目",
+                            artist = cursor.getString(artistCol)
+                                ?.takeIf { it.isNotBlank() && it != MediaStore.UNKNOWN_STRING }
+                                ?: "未知艺术家",
+                            album = cursor.getString(albumCol)
+                                ?.takeIf { it.isNotBlank() && it != MediaStore.UNKNOWN_STRING }
+                                ?: "未知专辑",
+                            durationSeconds = cursor.getLong(durationCol) / 1000,
+                            playbackUri = uri.toString(),
+                            albumArtUri = albumArtUri,
+                            isLocal = true,
+                            // ── 本地聚合专用字段 ──
+                            albumId = albumId,
+                            artistId = cursor.getLong(artistIdCol),
+                            year = cursor.getInt(yearCol),
+                            dateAddedSeconds = cursor.getLong(dateAddedCol),
+                        ),
+                    )
                 }
             }
             return result
         }
+
+        /**
+         * 本地曲目按 ALBUM_ID 聚合为统一专辑列表：
+         * - name：组内第一首的专辑名（同一 ALBUM_ID 的专辑名一致）
+         * - artist：组内出现次数最多的艺术家（众数，合辑场景更准确）
+         * - year：组内第一个非零年份（0=未知）
+         * - 封面：组内第一个非空 albumArtUri
+         * - songCount / durationSeconds：组内计数 / 求和
+         * - dateAddedSeconds：组内最大值，"最新添加"排序依据
+         * 输出按专辑名排序（忽略大小写），即默认 TITLE 序。
+         */
+        private fun buildLocalAlbums(tracks: List<PlayableTrack>): List<LibraryAlbum> =
+            tracks.groupBy { it.albumId }.map { (albumId, group) ->
+                LibraryAlbum(
+                    id = "$LOCAL_ALBUM_ID_PREFIX$albumId",
+                    name = group.first().album,
+                    artist = group.groupingBy { it.artist }.eachCount()
+                        .maxByOrNull { it.value }?.key ?: "未知艺术家",
+                    albumArtUri = group.firstOrNull { it.albumArtUri != null }?.albumArtUri,
+                    songCount = group.size,
+                    durationSeconds = group.sumOf { it.durationSeconds },
+                    year = group.firstOrNull { it.year > 0 }?.year ?: 0,
+                    isLocal = true,
+                    dateAddedSeconds = group.maxOf { it.dateAddedSeconds },
+                )
+            }.sortedBy { it.name.lowercase() }
     }
 
     /** ViewModel 工厂 —— 注入 Application 与 NionCore 单例 */

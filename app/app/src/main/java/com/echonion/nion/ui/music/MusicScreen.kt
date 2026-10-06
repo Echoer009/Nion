@@ -75,6 +75,7 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
@@ -141,7 +142,7 @@ fun musicViewModel(): MusicViewModel {
  * 结构：
  * - Scaffold + TopAppBar（标题"音乐"、右上角打开伙伴面板）
  * - 主体：AnimatedContent 按 [MusicViewModel.source] 切换三态
- *   （本地曲目列表 / 类脑娘服务器 / 自己的服务器），切换动画照抄
+ *   （本地专辑库 / 类脑娘服务器 / 自己的服务器），切换动画照抄
  *   FocusStatsPanel 日/周/月切换（水平滑动 + 淡入淡出，方向由音源顺序决定）
  * - 底部：迷你播放条（有曲目在播时显示），点击展开完整播放页
  * - 完整播放页：全屏覆盖层（AnimatedVisibility 上下滑出入），
@@ -347,13 +348,14 @@ fun MusicScreen(
  * ============================================================ */
 
 /**
- * 本地曲目内容区 —— 权限申请 + MediaStore 扫描结果列表。
+ * 本地音源内容区 —— 权限申请 + 与服务器音源 [ServerMusicContent] 完全同构的浏览界面。
  *
  * 流程：
  * 1. 进入时检查音频读取权限（Android 13+ 用 READ_MEDIA_AUDIO，
  *    更早版本用 READ_EXTERNAL_STORAGE），无权限则弹系统授权框
- * 2. 授权成功后触发 ViewModel 扫描 MediaStore
- * 3. 列表展示全部曲目，点击某曲即以整个列表为队列开始播放
+ * 2. 授权成功后触发 ViewModel 扫描 MediaStore 并聚合出专辑列表
+ * 3. 浏览态与云端一一对应：搜索框（内存过滤）→ 错误提示条（点击重试）
+ *    → 专辑列表 ↔ 专辑详情（含 morph 动画），点专辑内歌曲以该专辑曲目为队列起播
  *
  * @param vm 共享的音乐 ViewModel
  */
@@ -386,13 +388,15 @@ private fun LocalMusicContent(
     ) { granted ->
         hasPermission = granted
         permissionDenied = !granted
-        if (granted) vm.loadLocalTracks()
+        if (granted) vm.loadLocalTracks(force = true)
     }
 
-    // 首次进入：有权限直接扫描，无权限弹授权框
+    // 首次进入：有权限直接扫描（并补一次本地搜索刷新，覆盖"从服务器带着关键词切回"场景），
+    // 无权限弹授权框
     LaunchedEffect(Unit) {
         if (hasPermission) {
             vm.loadLocalTracks()
+            vm.refreshLocalSearch()
         } else {
             permissionLauncher.launch(permission)
         }
@@ -413,35 +417,132 @@ private fun LocalMusicContent(
                 },
             )
         }
-        // 加载态
-        vm.isLoadingLocal -> {
+        // 等待授权结果：系统授权框展示期间显示加载态
+        !hasPermission -> {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 CircularProgressIndicator()
             }
         }
-        // 空列表
-        vm.localTracks.isEmpty() -> {
-            EmptyHint(
-                icon = Icons.Default.MusicNote,
-                title = "本机没有找到音频",
-                subtitle = "把音乐文件复制到手机后点击刷新",
-                actionLabel = "刷新",
-                onAction = { vm.loadLocalTracks() },
-            )
+        // 浏览态：与云端同构（搜索 + 专辑列表/详情 + morph）
+        else -> LocalLibraryContent(
+            vm = vm,
+            trackCoverModifier = trackCoverModifier,
+            onPlayFromList = onPlayFromList,
+        )
+    }
+}
+
+/**
+ * 本地曲库浏览区 —— 结构与 [ServerMusicContent] 的已配置浏览态完全一致：
+ * 搜索框 → 错误提示条 → 专辑列表 ↔ 专辑详情 morph；数据来自本地 MediaStore 聚合。
+ * 差异仅两处：错误条重试走 [MusicViewModel.loadLocalTracks]、多一排本地专辑排序切换。
+ */
+@OptIn(ExperimentalSharedTransitionApi::class)
+@Composable
+private fun LocalLibraryContent(
+    vm: MusicViewModel,
+    // 曲目行小封面 sharedElement 工厂（由 MusicScreen 创建，key 带曲目 id）
+    trackCoverModifier: @Composable (String) -> Modifier,
+    // 从列表点歌回调：传入被点曲目 id，由上层展开播放页并配对封面 morph
+    onPlayFromList: (String) -> Unit,
+) {
+    // 专辑详情打开时拦截系统返回：先回到专辑列表（与云端一致）
+    BackHandler(enabled = vm.currentAlbum != null) { vm.closeAlbum() }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp),
+    ) {
+        // ===== 搜索框（与云端同一组件：本地由 VM 分发为内存过滤）=====
+        MusicSearchField(vm)
+
+        Spacer(modifier = Modifier.height(8.dp))
+
+        // ===== 错误提示条（扫描失败，点击强制重查；样式与云端一致）=====
+        vm.localError?.let { error ->
+            ErrorRetryBar(error = error) { vm.loadLocalTracks(force = true) }
         }
-        // 正常列表：整表作为播放队列
-        else -> {
-            TrackList(
-                tracks = vm.localTracks,
-                currentTrackId = vm.currentTrack?.id,
-                isPlaying = vm.isPlaying,
-                coverModifier = trackCoverModifier,
-                onPlay = { index ->
-                    vm.playQueue(vm.localTracks, index)
-                    // 记录被点曲目 id：播放页大封面与该行小封面配对飞行
-                    onPlayFromList(vm.localTracks[index].id)
+
+        // ===== 排序切换（本地特有：默认名称序 / 最新添加）=====
+        // 仅在专辑列表视图且未搜索时显示，避免与搜索结果/详情争抢纵向空间
+        if (vm.currentAlbum == null && vm.searchQuery.isBlank()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                LocalAlbumSort.values().forEach { sort ->
+                    FilterChip(
+                        selected = vm.localAlbumSort == sort,
+                        onClick = { vm.localAlbumSort = sort },
+                        label = { Text(sort.label) },
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.height(8.dp))
+        }
+
+        // ===== 主体：专辑列表 ↔ 专辑详情 morph（与云端同一套结构与动画）=====
+        // 本地专辑 id 自带 "local-" 前缀，拼出的 sharedElement key
+        // （"music_album_local-<albumId>"）天然与服务器专辑 key 错开不冲突
+        SharedTransitionLayout(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            AnimatedContent(
+                targetState = vm.currentAlbum,
+                transitionSpec = {
+                    if (targetState != null) {
+                        // 展开：详情立即出现（不淡入），仅列表淡出 —— 与 TaskScreen 一致，
+                        // 避免 scrim 淡入期间透明导致底层列表透出
+                        (
+                            EnterTransition.None togetherWith
+                                fadeOut(tween(250, easing = FastOutSlowInEasing))
+                            ) using SizeTransform(clip = false)
+                    } else {
+                        // 收回：列表快速淡入，详情缓慢淡出
+                        (
+                            fadeIn(tween(250, easing = FastOutSlowInEasing)) togetherWith
+                                fadeOut(tween(400, easing = FastOutSlowInEasing))
+                            ) using SizeTransform(clip = false)
+                    }
                 },
-            )
+                label = "albumDetail",
+            ) { album ->
+                if (album != null) {
+                    // 专辑详情分支（本地/服务器共用组件；本地曲目已在打开时同步就位）
+                    AlbumDetailContent(
+                        vm = vm,
+                        album = album,
+                        sharedTransitionScope = this@SharedTransitionLayout,
+                        animatedVisibilityScope = this@AnimatedContent,
+                        trackCoverModifier = trackCoverModifier,
+                        onPlayFromList = onPlayFromList,
+                    )
+                } else {
+                    when {
+                        // 搜索中：优先展示搜索结果（歌曲在前、专辑在后；与云端同组件）
+                        vm.searchQuery.isNotBlank() && vm.searchResult != null -> SearchResultContent(
+                            vm = vm,
+                            sharedTransitionScope = this@SharedTransitionLayout,
+                            animatedVisibilityScope = this@AnimatedContent,
+                            trackCoverModifier = trackCoverModifier,
+                            onPlayFromList = onPlayFromList,
+                        )
+                        // 空态：保留刷新按钮（强制重查 MediaStore）
+                        vm.localAlbums.isEmpty() && !vm.isLoadingLocal -> EmptyHint(
+                            icon = Icons.Default.MusicNote,
+                            title = "本机没有找到音频",
+                            subtitle = "把音乐文件复制到手机后点击刷新",
+                            actionLabel = "刷新",
+                            onAction = { vm.loadLocalTracks(force = true) },
+                        )
+                        // 专辑列表（加载中由 AlbumListContent 显示居中转圈）
+                        else -> AlbumListContent(
+                            albums = vm.sortedLocalAlbums,
+                            isLoading = vm.isLoadingLocal,
+                            emptyText = "本机没有专辑",
+                            onOpenAlbum = { vm.openAlbum(it) },
+                            sharedTransitionScope = this@SharedTransitionLayout,
+                            animatedVisibilityScope = this@AnimatedContent,
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -488,59 +589,14 @@ private fun ServerMusicContent(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        // ===== 搜索框 =====
-        OutlinedTextField(
-            value = vm.searchQuery,
-            onValueChange = {
-                vm.searchQuery = it
-            },
-            modifier = Modifier.fillMaxWidth(),
-            placeholder = { Text("搜索歌曲 / 专辑 / 艺术家") },
-            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
-            // 输入非空时显示一键清空按钮
-            trailingIcon = {
-                if (vm.searchQuery.isNotBlank()) {
-                    IconButton(onClick = { vm.searchQuery = "" }) {
-                        Icon(Icons.Default.Close, contentDescription = "清空搜索")
-                    }
-                }
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(14.dp),
-        )
+        // ===== 搜索框（与本地音源共用同一组件）=====
+        MusicSearchField(vm)
 
         Spacer(modifier = Modifier.height(8.dp))
 
-        // ===== 错误提示条 =====
+        // ===== 错误提示条（与本地音源共用同一组件，重试走强制刷新）=====
         vm.serverError?.let { error ->
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.errorContainer,
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clickable { vm.loadAlbums(force = true) }
-                        .padding(horizontal = 12.dp, vertical = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        error,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.weight(1f),
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                    Text(
-                        "点击重试",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
-            }
-            Spacer(modifier = Modifier.height(8.dp))
+            ErrorRetryBar(error = error) { vm.loadAlbums(force = true) }
         }
 
         // ===== 主体：专辑列表 ↔ 专辑详情 morph（照 TaskScreen 任务卡↔详情浮层范式）=====
@@ -591,7 +647,10 @@ private fun ServerMusicContent(
                         )
                         // 专辑列表（加载中显示居中转圈）
                         else -> AlbumListContent(
-                            vm = vm,
+                            albums = vm.albums,
+                            isLoading = vm.isLoadingServer,
+                            emptyText = "服务器上还没有专辑",
+                            onOpenAlbum = { vm.openAlbum(it) },
                             sharedTransitionScope = this@SharedTransitionLayout,
                             animatedVisibilityScope = this@AnimatedContent,
                         )
@@ -603,26 +662,103 @@ private fun ServerMusicContent(
 }
 
 /**
- * 专辑列表内容。
+ * 曲库搜索框 —— 本地与服务器音源共用（外观完全一致）。
+ * 输入写入 [MusicViewModel.searchQuery]，VM 内按音源分发：
+ * 服务器 debounce 后走 search3，本地 debounce 后走内存过滤。
+ *
+ * @param vm 共享的音乐 ViewModel
+ */
+@Composable
+private fun MusicSearchField(vm: MusicViewModel) {
+    OutlinedTextField(
+        value = vm.searchQuery,
+        onValueChange = {
+            vm.searchQuery = it
+        },
+        modifier = Modifier.fillMaxWidth(),
+        placeholder = { Text("搜索歌曲 / 专辑 / 艺术家") },
+        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+        // 输入非空时显示一键清空按钮
+        trailingIcon = {
+            if (vm.searchQuery.isNotBlank()) {
+                IconButton(onClick = { vm.searchQuery = "" }) {
+                    Icon(Icons.Default.Close, contentDescription = "清空搜索")
+                }
+            }
+        },
+        singleLine = true,
+        shape = RoundedCornerShape(14.dp),
+    )
+}
+
+/**
+ * 错误提示条 —— 本地与服务器音源共用：错误文案 + "点击重试"，整条可点。
+ *
+ * @param error 展示给用户的错误信息
+ * @param onRetry 点击整条时的重试回调
+ */
+@Composable
+private fun ErrorRetryBar(error: String, onRetry: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.errorContainer,
+        modifier = Modifier.fillMaxWidth(),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onRetry)
+                .padding(horizontal = 12.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                error,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                modifier = Modifier.weight(1f),
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                "点击重试",
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.primary,
+            )
+        }
+    }
+    Spacer(modifier = Modifier.height(8.dp))
+}
+
+/**
+ * 专辑列表内容 —— 本地与服务器音源共用（数据由调用方注入）。
+ *
+ * @param albums 专辑列表（统一模型 [LibraryAlbum]）
+ * @param isLoading 数据加载中（列表为空时显示居中转圈）
+ * @param emptyText 列表为空时的提示文案（本地/服务器各传各的）
+ * @param onOpenAlbum 点击专辑行回调（打开详情）
+ * @param sharedTransitionScope 专辑卡 morph：列表行的 sharedElement 需要这两个作用域生成 key
+ * @param animatedVisibilityScope 同上
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun AlbumListContent(
-    vm: MusicViewModel,
-    // 专辑卡 morph：列表行的 sharedElement 需要这两个作用域生成 key
+    albums: List<LibraryAlbum>,
+    isLoading: Boolean,
+    emptyText: String,
+    onOpenAlbum: (LibraryAlbum) -> Unit,
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
 ) {
-    if (vm.isLoadingServer && vm.albums.isEmpty()) {
+    if (isLoading && albums.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             CircularProgressIndicator()
         }
         return
     }
-    if (vm.albums.isEmpty()) {
+    if (albums.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text(
-                "服务器上还没有专辑",
+                emptyText,
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -633,10 +769,10 @@ private fun AlbumListContent(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(vm.albums, key = { "album-${it.id}" }) { album ->
+        items(albums, key = { "album-${it.id}" }) { album ->
             AlbumRow(
                 album = album,
-                onClick = { vm.openAlbum(album) },
+                onClick = { onOpenAlbum(album) },
                 sharedTransitionScope = sharedTransitionScope,
                 animatedVisibilityScope = animatedVisibilityScope,
             )
@@ -645,14 +781,16 @@ private fun AlbumListContent(
 }
 
 /**
- * 专辑详情内容 —— 专辑头部信息 + 曲目列表；点击曲目以专辑为队列播放。
+ * 专辑详情内容 —— 专辑头部信息 + 曲目列表；点击曲目以该专辑全部曲目为队列起播。
+ * 本地/服务器共用：曲目读 [MusicViewModel.albumSongs]（服务器=getAlbum 结果，
+ * 本地=按 ALBUM_ID 过滤出的该专辑曲目），封面双通道（服务器 URL / 本地 albumArtUri）。
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun AlbumDetailContent(
     vm: MusicViewModel,
     // 专辑数据由外层 AnimatedContent 分支直接传入（进入本分支时必然非空）
-    album: SubsonicAlbum,
+    album: LibraryAlbum,
     // 专辑卡 morph：详情头部的 sharedElement 与列表行同 key 配对
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
@@ -695,6 +833,8 @@ private fun AlbumDetailContent(
                 // 打开详情时小封面放大飞到此位置，关闭时缩回
                 CoverArt(
                     coverUrl = album.coverArtUrl,
+                    // 本地专辑封面走 albumArtUri 通道（loadThumbnail 提取内嵌封面）
+                    albumArtUri = album.albumArtUri,
                     modifier = Modifier
                         .size(96.dp)
                         .then(
@@ -1431,42 +1571,6 @@ private fun AnimatedPlayPauseIcon(
  * ============================================================ */
 
 /**
- * 通用曲目列表（本地曲目用）：LazyColumn + [TrackRow]。
- *
- * @param tracks 曲目列表
- * @param currentTrackId 当前播放曲目 id（高亮）；null=未播放
- * @param isPlaying 是否在播放（控制高亮行的小图标）
- * @param onPlay 点击某曲时触发，回调传入曲目下标
- */
-@Composable
-private fun TrackList(
-    tracks: List<PlayableTrack>,
-    currentTrackId: String?,
-    isPlaying: Boolean,
-    // 曲目行小封面 sharedElement 工厂：传给每个 TrackRow（key 带曲目 id）
-    coverModifier: @Composable (String) -> Modifier = { Modifier },
-    onPlay: (Int) -> Unit,
-) {
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        itemsIndexed(tracks) { index, track ->
-            TrackRow(
-                track = track,
-                index = index,
-                isCurrent = track.id == currentTrackId,
-                isPlaying = isPlaying,
-                coverModifier = coverModifier,
-                onClick = { onPlay(index) },
-            )
-        }
-    }
-}
-
-/**
  * 单个曲目行：封面缩略图 + 曲名/艺术家 + 时长。
  *
  * 封面来源双通道：本地曲目用专辑内嵌封面（albumArtUri），服务器曲目用 coverUrl；
@@ -1634,15 +1738,15 @@ private fun QueueRow(
 }
 
 /**
- * 专辑行：封面缩略图 + 专辑名/艺术家 + 年份。
+ * 专辑行：封面缩略图 + 专辑名/艺术家 + 年份。本地/服务器共用（统一模型）。
  *
- * @param album 专辑数据
+ * @param album 专辑数据（统一模型 [LibraryAlbum]，id 自带来源前缀、morph key 天然不撞）
  * @param onClick 点击打开专辑详情
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun AlbumRow(
-    album: SubsonicAlbum,
+    album: LibraryAlbum,
     onClick: () -> Unit,
     // 专辑卡 ↔ 专辑详情 morph：行容器与封面都挂 sharedElement，需这两个作用域
     sharedTransitionScope: SharedTransitionScope,
@@ -1669,10 +1773,12 @@ private fun AlbumRow(
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // 封面：优先服务器封面，无封面 ID 时显示专辑图标占位。
+        // 封面双通道：服务器走 coverUrl，本地走 albumArtUri（loadThumbnail 内嵌封面），
+        // 均无时显示专辑图标占位。
         // 与详情页大封面同 key 配对，打开详情时小封面放大飞行
         CoverArt(
             coverUrl = album.coverArtUrl,
+            albumArtUri = album.albumArtUri,
             modifier = Modifier
                 .size(52.dp)
                 .then(
