@@ -44,10 +44,11 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.ui.unit.Dp
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
-import androidx.compose.ui.layout.LookaheadScope
-import androidx.compose.animation.animateBounds
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -805,27 +806,41 @@ private fun MusicToolbar(
         )
     }
 
-    // ===== 推动式控件栏（LookaheadScope + animateBounds）=====
-    // 概念：整栏是一个整体，三个区域（排序/视图/搜索）常驻一行；
-    // 展开某区域时它长宽变大、把兄弟区域"推扁"（宽度动画到 0），
-    // 左侧弹簧被压缩 —— 全部由布局解算器驱动，元素互相推动、无覆盖。
-    LookaheadScope {
+    // ===== 推动式控件栏（animateDpAsState 驱动宽度，Row 每帧真实重排）=====
+    // 单动画系统：每个区域的宽度是一个 Dp 动画值（展开=整栏宽 / 常态=48 / 让位=0），
+    // Row 按每帧动画宽度重新布局 → 兄弟被真实推动（非覆盖）；Arrangement.End 使
+    // 展开区从右端图标位置向左生长、兄弟被推出右缘。区域裁剪、内容瞬时切换、无淡化。
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(48.dp),
+    ) {
+        val toolbarWidth = maxWidth
+        // 三区共用同一弹簧参数：同速率推动/回弹，消除相对抖动
+        val zoneSpring = spring<Dp>(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)
+        val sortVisible = vm.source == MusicSource.LOCAL && !showPlaylists && vm.searchQuery.isBlank()
+        val viewVisible = vm.searchQuery.isBlank()
+
         Row(
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),
+            horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // 左弹簧：常态把三组图标推到右端；任一区域展开时被压缩到 0
-            Spacer(modifier = Modifier.weight(1f))
-
-            // —— 排序区：常态=排序图标；SORT=整行排序选项；其他模式=0宽让位 ——
-            // 只有 animateBounds 一套动画（无内层 AnimatedContent，避免双尺寸动画打架抽搐）；
-            // 让位=仅宽度归零（高度不变）→ 兄弟被纯水平推动，不会斜向缩走；
-            // clipToBounds 防止展开内容在 bounds 动画期间溢出盖人
+            // —— 排序区：宽度动画（展开=整栏 / 常态=48 / 让位=0）——
+            val sortWidth by animateDpAsState(
+                targetValue = when {
+                    mode == MusicToolbarMode.SORT -> toolbarWidth
+                    mode == MusicToolbarMode.NORMAL && sortVisible -> 48.dp
+                    else -> 0.dp
+                },
+                animationSpec = zoneSpring,
+                label = "sortWidth",
+            )
             Box(
                 modifier = Modifier
-                    .animateBounds(this@LookaheadScope)
+                    .width(sortWidth)
                     .height(48.dp)
                     .clipToBounds(),
                 contentAlignment = Alignment.CenterEnd,
@@ -850,8 +865,7 @@ private fun MusicToolbar(
                         CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
                     }
 
-                    mode == MusicToolbarMode.NORMAL && vm.source == MusicSource.LOCAL &&
-                        !showPlaylists && vm.searchQuery.isBlank() -> IconButton(
+                    mode == MusicToolbarMode.NORMAL && sortVisible -> IconButton(
                         onClick = { mode = MusicToolbarMode.SORT },
                     ) {
                         Icon(
@@ -861,15 +875,23 @@ private fun MusicToolbar(
                         )
                     }
 
-                    else -> Spacer(modifier = Modifier.width(0.dp)) // 让位：仅宽度归零，纯水平推动
+                    else -> {}
                 }
             }
 
-
-            // —— 视图区：常态=视图图标；VIEW=整行视图选项；其他模式=0宽让位 ——
+            // —— 视图区：宽度动画 ——
+            val viewWidth by animateDpAsState(
+                targetValue = when {
+                    mode == MusicToolbarMode.VIEW -> toolbarWidth
+                    mode == MusicToolbarMode.NORMAL && viewVisible -> 48.dp
+                    else -> 0.dp
+                },
+                animationSpec = zoneSpring,
+                label = "viewWidth",
+            )
             Box(
                 modifier = Modifier
-                    .animateBounds(this@LookaheadScope)
+                    .width(viewWidth)
                     .height(48.dp)
                     .clipToBounds(),
                 contentAlignment = Alignment.CenterEnd,
@@ -893,7 +915,7 @@ private fun MusicToolbar(
                         CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
                     }
 
-                    mode == MusicToolbarMode.NORMAL && vm.searchQuery.isBlank() -> IconButton(
+                    mode == MusicToolbarMode.NORMAL && viewVisible -> IconButton(
                         onClick = { mode = MusicToolbarMode.VIEW },
                     ) {
                         Icon(
@@ -903,15 +925,23 @@ private fun MusicToolbar(
                         )
                     }
 
-                    else -> Spacer(modifier = Modifier.width(0.dp)) // 让位：仅宽度归零，纯水平推动
+                    else -> {}
                 }
             }
 
-
-            // —— 搜索区：常态=放大镜；SEARCH=整行搜索框；其他模式=0宽让位 ——
+            // —— 搜索区：宽度动画 ——
+            val searchWidth by animateDpAsState(
+                targetValue = when {
+                    mode == MusicToolbarMode.SEARCH -> toolbarWidth
+                    mode == MusicToolbarMode.NORMAL -> 48.dp
+                    else -> 0.dp
+                },
+                animationSpec = zoneSpring,
+                label = "searchWidth",
+            )
             Box(
                 modifier = Modifier
-                    .animateBounds(this@LookaheadScope)
+                    .width(searchWidth)
                     .height(48.dp)
                     .clipToBounds(),
                 contentAlignment = Alignment.CenterEnd,
@@ -939,7 +969,7 @@ private fun MusicToolbar(
                         )
                     }
 
-                    else -> Spacer(modifier = Modifier.width(0.dp)) // 让位：仅宽度归零，纯水平推动
+                    else -> {}
                 }
             }
         }
