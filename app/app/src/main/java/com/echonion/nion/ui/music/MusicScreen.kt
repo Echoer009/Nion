@@ -48,6 +48,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.ui.layout.LookaheadScope
 import androidx.compose.animation.animateBounds
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -818,145 +819,127 @@ private fun MusicToolbar(
             // 左弹簧：常态把三组图标推到右端；任一区域展开时被压缩到 0
             Spacer(modifier = Modifier.weight(1f))
 
-            // —— 排序区：常态=排序图标；SORT=整行排序选项；其他模式=被推扁(0宽) ——
+            // —— 排序区：常态=排序图标；SORT=整行排序选项；其他模式=0宽让位 ——
+            // 只有 animateBounds 一套动画（无内层 AnimatedContent，避免双尺寸动画打架抽搐）；
+            // 让位=仅宽度归零（高度不变）→ 兄弟被纯水平推动，不会斜向缩走；
+            // clipToBounds 防止展开内容在 bounds 动画期间溢出盖人
             Box(
                 modifier = Modifier
                     .animateBounds(this@LookaheadScope)
-                    .height(48.dp),
-                contentAlignment = Alignment.Center,
+                    .height(48.dp)
+                    .clipToBounds(),
+                contentAlignment = Alignment.CenterEnd,
             ) {
-                AnimatedContent(
-                    targetState = mode,
-                    transitionSpec = {
-                        fadeIn(tween(200)) togetherWith fadeOut(tween(150)) using SizeTransform(clip = false)
-                    },
-                    label = "sortZone",
-                ) { m ->
-                    val sortVisible = vm.source == MusicSource.LOCAL && !showPlaylists &&
-                        vm.searchQuery.isBlank()
-                    when {
-                        m == MusicToolbarMode.SORT -> Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            sortOptions.forEach { opt ->
-                                SelectorCell(
-                                    option = opt,
-                                    selected = (vm.localAlbumSort == LocalAlbumSort.TITLE) == (opt.key == "title"),
-                                    onClick = {
-                                        vm.localAlbumSort =
-                                            if (opt.key == "title") LocalAlbumSort.TITLE else LocalAlbumSort.NEWEST
-                                        mode = MusicToolbarMode.NORMAL
-                                    },
-                                )
-                            }
-                            Spacer(modifier = Modifier.weight(1f))
-                            CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
-                        }
-
-                        m == MusicToolbarMode.NORMAL && sortVisible -> IconButton(
-                            onClick = { mode = MusicToolbarMode.SORT },
-                        ) {
-                            Icon(
-                                if (vm.localAlbumSort == LocalAlbumSort.TITLE) sortOptions[0].icon else sortOptions[1].icon,
-                                contentDescription = "排序方式",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                when {
+                    mode == MusicToolbarMode.SORT -> Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        sortOptions.forEach { opt ->
+                            SelectorCell(
+                                option = opt,
+                                selected = (vm.localAlbumSort == LocalAlbumSort.TITLE) == (opt.key == "title"),
+                                onClick = {
+                                    vm.localAlbumSort =
+                                        if (opt.key == "title") LocalAlbumSort.TITLE else LocalAlbumSort.NEWEST
+                                    mode = MusicToolbarMode.NORMAL
+                                },
                             )
                         }
-
-                        else -> Box(modifier = Modifier.size(0.dp)) // 让位：被推动的区域
+                        Spacer(modifier = Modifier.weight(1f))
+                        CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
                     }
+
+                    mode == MusicToolbarMode.NORMAL && vm.source == MusicSource.LOCAL &&
+                        !showPlaylists && vm.searchQuery.isBlank() -> IconButton(
+                        onClick = { mode = MusicToolbarMode.SORT },
+                    ) {
+                        Icon(
+                            if (vm.localAlbumSort == LocalAlbumSort.TITLE) sortOptions[0].icon else sortOptions[1].icon,
+                            contentDescription = "排序方式",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    else -> Spacer(modifier = Modifier.width(0.dp)) // 让位：仅宽度归零，纯水平推动
                 }
             }
 
-            // —— 视图区：常态=视图图标；VIEW=整行视图选项；其他模式=被推扁 ——
+
+            // —— 视图区：常态=视图图标；VIEW=整行视图选项；其他模式=0宽让位 ——
             Box(
                 modifier = Modifier
                     .animateBounds(this@LookaheadScope)
-                    .height(48.dp),
-                contentAlignment = Alignment.Center,
+                    .height(48.dp)
+                    .clipToBounds(),
+                contentAlignment = Alignment.CenterEnd,
             ) {
-                AnimatedContent(
-                    targetState = mode,
-                    transitionSpec = {
-                        fadeIn(tween(200)) togetherWith fadeOut(tween(150)) using SizeTransform(clip = false)
-                    },
-                    label = "viewZone",
-                ) { m ->
-                    val viewVisible = vm.searchQuery.isBlank()
-                    when {
-                        m == MusicToolbarMode.VIEW -> Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            viewOptions.forEach { opt ->
-                                SelectorCell(
-                                    option = opt,
-                                    selected = showPlaylists == (opt.key == "playlist"),
-                                    onClick = {
-                                        onSelectView(opt.key == "playlist")
-                                        mode = MusicToolbarMode.NORMAL
-                                    },
-                                )
-                            }
-                            Spacer(modifier = Modifier.weight(1f))
-                            CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
-                        }
-
-                        m == MusicToolbarMode.NORMAL && viewVisible -> IconButton(
-                            onClick = { mode = MusicToolbarMode.VIEW },
-                        ) {
-                            Icon(
-                                if (showPlaylists) viewOptions[1].icon else viewOptions[0].icon,
-                                contentDescription = "曲库视图",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                when {
+                    mode == MusicToolbarMode.VIEW -> Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        viewOptions.forEach { opt ->
+                            SelectorCell(
+                                option = opt,
+                                selected = showPlaylists == (opt.key == "playlist"),
+                                onClick = {
+                                    onSelectView(opt.key == "playlist")
+                                    mode = MusicToolbarMode.NORMAL
+                                },
                             )
                         }
-
-                        else -> Box(modifier = Modifier.size(0.dp)) // 让位：被推动的区域
+                        Spacer(modifier = Modifier.weight(1f))
+                        CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
                     }
+
+                    mode == MusicToolbarMode.NORMAL && vm.searchQuery.isBlank() -> IconButton(
+                        onClick = { mode = MusicToolbarMode.VIEW },
+                    ) {
+                        Icon(
+                            if (showPlaylists) viewOptions[1].icon else viewOptions[0].icon,
+                            contentDescription = "曲库视图",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    else -> Spacer(modifier = Modifier.width(0.dp)) // 让位：仅宽度归零，纯水平推动
                 }
             }
 
-            // —— 搜索区：常态=放大镜；SEARCH=整行搜索框；其他模式=被推扁 ——
+
+            // —— 搜索区：常态=放大镜；SEARCH=整行搜索框；其他模式=0宽让位 ——
             Box(
                 modifier = Modifier
                     .animateBounds(this@LookaheadScope)
-                    .height(48.dp),
-                contentAlignment = Alignment.Center,
+                    .height(48.dp)
+                    .clipToBounds(),
+                contentAlignment = Alignment.CenterEnd,
             ) {
-                AnimatedContent(
-                    targetState = mode,
-                    transitionSpec = {
-                        fadeIn(tween(200)) togetherWith fadeOut(tween(150)) using SizeTransform(clip = false)
-                    },
-                    label = "searchZone",
-                ) { m ->
-                    when {
-                        m == MusicToolbarMode.SEARCH -> Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            SearchFieldRectangle(vm = vm, modifier = Modifier.weight(1f))
-                            CloseToolbarButton {
-                                // 退出搜索即清空查询词（视图自动回落专辑列表）
-                                vm.searchQuery = ""
-                                mode = MusicToolbarMode.NORMAL
-                            }
+                when {
+                    mode == MusicToolbarMode.SEARCH -> Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        SearchFieldRectangle(vm = vm, modifier = Modifier.weight(1f))
+                        CloseToolbarButton {
+                            // 退出搜索即清空查询词（视图自动回落专辑列表）
+                            vm.searchQuery = ""
+                            mode = MusicToolbarMode.NORMAL
                         }
-
-                        m == MusicToolbarMode.NORMAL -> IconButton(
-                            onClick = { mode = MusicToolbarMode.SEARCH },
-                        ) {
-                            Icon(
-                                LucideIcons.Search,
-                                contentDescription = "搜索音乐",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-
-                        else -> Box(modifier = Modifier.size(0.dp)) // 让位：被推动的区域
                     }
+
+                    mode == MusicToolbarMode.NORMAL -> IconButton(
+                        onClick = { mode = MusicToolbarMode.SEARCH },
+                    ) {
+                        Icon(
+                            LucideIcons.Search,
+                            contentDescription = "搜索音乐",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    else -> Spacer(modifier = Modifier.width(0.dp)) // 让位：仅宽度归零，纯水平推动
                 }
             }
         }
