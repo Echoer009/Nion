@@ -44,6 +44,7 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.unit.Dp
@@ -928,7 +929,9 @@ private fun MusicToolbar(
                         Icon(
                             if (vm.localAlbumSort == LocalAlbumSort.TITLE) sortOptions[0].icon else sortOptions[1].icon,
                             contentDescription = "排序方式",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            // 收起态图标代表当前选中项 → 主色，与展开态选中格图标
+                            // 同色一致（点开前后同一颗图标同色，morph 连续）
+                            tint = MaterialTheme.colorScheme.primary,
                         )
                     }
 
@@ -983,7 +986,9 @@ private fun MusicToolbar(
                         Icon(
                             if (showPlaylists) viewOptions[1].icon else viewOptions[0].icon,
                             contentDescription = "曲库视图",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            // 收起态图标代表当前选中项 → 主色，与展开态选中格图标
+                            // 同色一致（点开前后同一颗图标同色，morph 连续）
+                            tint = MaterialTheme.colorScheme.primary,
                         )
                     }
 
@@ -1073,10 +1078,21 @@ private fun SelectorCell(
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
     ) {
+        // 图标颜色跟随选中态（选中=主色）：animateColorAsState 平滑渐变，
+        // 与收起态图标（代表当前选中，同为主色）跨态一致，无硬跳变
+        val iconTint by animateColorAsState(
+            targetValue = if (selected) {
+                MaterialTheme.colorScheme.primary
+            } else {
+                MaterialTheme.colorScheme.onSurfaceVariant
+            },
+            animationSpec = tween(180),
+            label = "cellIconTint",
+        )
         Icon(
             option.icon,
             contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            tint = iconTint,
             modifier = Modifier.size(24.dp),
         )
         Spacer(modifier = Modifier.width(6.dp))
