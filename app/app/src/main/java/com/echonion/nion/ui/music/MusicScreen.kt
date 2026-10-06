@@ -792,6 +792,19 @@ private fun MusicToolbar(
 ) {
     var mode by remember { mutableStateOf(MusicToolbarMode.NORMAL) }
 
+    // 内容显示模式：展开立即切换；收起延迟到宽度动画收尾再换回图标——
+    // 否则小图标锚在仍在滑动的 zone 右缘上跟着横穿一行，收起观感不对称
+    var displayMode by remember { mutableStateOf(MusicToolbarMode.NORMAL) }
+    LaunchedEffect(mode) {
+        if (mode != MusicToolbarMode.NORMAL) {
+            displayMode = mode
+        } else {
+            // 收起：等弹簧基本到位（MediumLow ~600ms）后再显示图标，图标落在原位
+            kotlinx.coroutines.delay(420)
+            displayMode = MusicToolbarMode.NORMAL
+        }
+    }
+
     // 排序/视图的选项集合（未来加选项 = 加一项，控件栏占位不变）
     val sortOptions = remember {
         listOf(
@@ -848,7 +861,7 @@ private fun MusicToolbar(
                 // 展开内容按最终整栏宽度一次性固定布局（不随动画宽度逐帧重排），
                 // zone 只是揭示窗口：展开从图标两侧露出、收起两侧收回，文字全程静止
                 when {
-                    mode == MusicToolbarMode.SORT -> {
+                    displayMode == MusicToolbarMode.SORT -> {
                         // 文字小淡入：窗口先撑开(80ms)后标签渐显；收起时快速淡出
                         val labelAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
                         androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -907,7 +920,7 @@ private fun MusicToolbar(
                 contentAlignment = Alignment.CenterEnd,
             ) {
                 when {
-                    mode == MusicToolbarMode.VIEW -> {
+                    displayMode == MusicToolbarMode.VIEW -> {
                         // 同排序区：固定宽度 + 文字小淡入
                         val labelAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
                         androidx.compose.runtime.LaunchedEffect(Unit) {
@@ -965,7 +978,7 @@ private fun MusicToolbar(
                 contentAlignment = Alignment.CenterEnd,
             ) {
                 when {
-                    mode == MusicToolbarMode.SEARCH -> Row(
+                    displayMode == MusicToolbarMode.SEARCH -> Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier.width(toolbarWidth),
                     ) {
