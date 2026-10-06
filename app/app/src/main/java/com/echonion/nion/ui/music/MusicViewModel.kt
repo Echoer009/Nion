@@ -298,6 +298,23 @@ class MusicViewModel(
     }
 
     /**
+     * 应用注册深链回传的类脑娘账密（nion://musicauth?u=..&p=..，
+     * 由 MainActivity 解析后经 pendingMusicAuthXxx 传入音乐界面）。
+     *
+     * 等价于"表单填好账密 + 保存并进入"：更新状态并持久化（MainActivity 已先落库，
+     * 此处再写一次保证内存与 DB 一致），把音源切到类脑娘服务器，
+     * 并立即触发连接拉取专辑列表，不等用户手动刷新。
+     */
+    fun applyBraingirlAuth(username: String, password: String) {
+        saveBraingirlConfig(username, password)
+        if (source != MusicSource.BRAINGIRL) {
+            selectSource(MusicSource.BRAINGIRL)
+        }
+        // 自动触发连接：buildClient 读取的是刚同步的账密状态，立即发起请求
+        loadAlbums()
+    }
+
+    /**
      * 保存自己的服务器配置（URL + 账密）并持久化。
      * URL 会先规范化（补协议前缀、去尾斜杠）再存储。
      */
@@ -571,6 +588,10 @@ class MusicViewModel(
     companion object {
         /** 类脑娘服务器预置地址 —— Navidrome（Subsonic 协议）挂载在主站 /music 路径下 */
         const val BRAINGIRL_SERVER_URL = "https://echonion.org/music"
+
+        /** 类脑娘服务器网页注册入口 —— 配置引导表单「注册账号」按钮用 ACTION_VIEW 打开；
+         *  注册完成后网页重定向 nion://musicauth 深链回传账密，App 自动完成配置 */
+        const val BRAINGIRL_REGISTER_URL = "https://echonion.org/music/reg/start"
 
         /**
          * 查询 MediaStore 全部音频，转换为统一的 [PlayableTrack] 列表。

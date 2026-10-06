@@ -3,6 +3,7 @@ package com.echonion.nion.ui.music
 import android.Manifest
 import android.app.Application
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -10,6 +11,7 @@ import android.graphics.BitmapFactory
 import android.os.Build
 import android.util.LruCache
 import android.util.Size
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -110,6 +112,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.echonion.nion.MainActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
@@ -152,6 +155,17 @@ fun MusicScreen(
     onOpenCompanion: () -> Unit = {},
 ) {
     val vm = musicViewModel()
+
+    // ── 消费注册深链（nion://musicauth?u=..&p=..）──
+    // MainActivity 已把账密落库并暂存在 pendingMusicAuthXxx（照通知 Intent 的模式），
+    // 音乐界面组合时同步 ViewModel 内存状态并自动触发连接；消费完立即清除防重复执行
+    val mainActivity = LocalContext.current as? MainActivity
+    LaunchedEffect(mainActivity?.pendingMusicAuthUsername) {
+        val u = mainActivity?.pendingMusicAuthUsername ?: return@LaunchedEffect
+        val p = mainActivity.pendingMusicAuthPassword ?: return@LaunchedEffect
+        vm.applyBraingirlAuth(u, p)
+        mainActivity.clearPendingMusicAuth()
+    }
 
     // 完整播放页是否展开（纯 UI 状态，留在 Composable 内）
     var showFullPlayer by remember { mutableStateOf(false) }
@@ -896,6 +910,31 @@ private fun ServerConfigForm(vm: MusicViewModel, isCustom: Boolean) {
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
             )
+        }
+
+        // 类脑娘音源专属：注册账号入口 —— 未配置（引导态）即可见，
+        // 点击用系统浏览器打开网页注册页；注册完成后网页重定向
+        // nion://musicauth?u=..&p=.. 深链，App 接住后自动完成配置（见 MainActivity）
+        if (!isCustom) {
+            item(key = "register") {
+                val context = LocalContext.current
+                OutlinedButton(
+                    onClick = {
+                        Log.d("MusicScreen", "注册账号：发出浏览器 Intent ${MusicViewModel.BRAINGIRL_REGISTER_URL}")
+                        runCatching {
+                            context.startActivity(
+                                Intent(Intent.ACTION_VIEW, Uri.parse(MusicViewModel.BRAINGIRL_REGISTER_URL)),
+                            )
+                        }.onFailure {
+                            // 设备上没有浏览器等能处理 https 链接的应用时走到这里，仅记录不崩溃
+                            Log.w("MusicScreen", "打开注册页面失败", it)
+                        }
+                    },
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text("注册账号")
+                }
+            }
         }
 
         item(key = "buttons") {

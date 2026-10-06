@@ -19,7 +19,7 @@ import java.util.concurrent.TimeUnit
  * - getAlbum.view          专辑详情 + 曲目列表
  * - search3.view           三维度搜索（艺术家/专辑/歌曲）
  * - getCoverArt.view       封面图 URL 拼接（UI 侧 OkHttp 下载解码）
- * - stream.view            音频流（maxBitRate=192kbps，URL 直接交给 ExoPlayer 播放）
+ * - stream.view            音频流（不压缩，按原始音质返回，URL 直接交给 ExoPlayer 播放）
  *
  * 认证方式：Subsonic 1.13+ 推荐的 token 认证 ——
  *   u=用户名, s=随机盐, t=md5(密码+盐), v=1.16.1, c=nion, f=json
@@ -175,12 +175,12 @@ class SubsonicClient(
 
     /**
      * 构造音频流 URL —— ExoPlayer 直接加载该 URL 播放。
-     * 固定 maxBitRate=192（192kbps 对移动端音质/流量平衡较好）。
+     * 不传 maxBitRate 参数，让服务器按原始音质返回（不转码、不压缩）。
      *
      * @param songId 歌曲 ID
      */
     fun streamUrl(songId: String): String =
-        buildUrl("stream.view", "id" to songId, "maxBitRate" to "192")
+        buildUrl("stream.view", "id" to songId)
 
 
     // ──────────────────────────────────────────────────────
@@ -265,7 +265,7 @@ class SubsonicClient(
 
     /**
      * 解析单个歌曲 JSON 对象为统一的 [PlayableTrack]。
-     * 播放地址走 stream 接口（maxBitRate=192），封面取歌曲自身 coverArt（缺省回退专辑封面）。
+     * 播放地址走 stream 接口（原始音质），封面取歌曲自身 coverArt（缺省回退专辑封面）。
      */
     private fun parseSong(json: JSONObject): PlayableTrack {
         val songId = json.getString("id")

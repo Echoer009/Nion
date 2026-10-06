@@ -5,12 +5,18 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.lifecycleScope
 import com.echonion.nion.ui.NionApp
+import com.echonion.nion.ui.music.MusicSettings
+import com.echonion.nion.ui.music.MusicSource
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * 应用主 Activity。
@@ -41,6 +47,14 @@ class MainActivity : ComponentActivity() {
 
     /** 待处理的任务标题（从通知 intent 传入） */
     var pendingTaskTitle: String? = null
+        private set
+
+    /** 待处理的音乐注册深链用户名（nion://musicauth?u=..&p=.. 回传）；null 表示无待处理注册 */
+    var pendingMusicAuthUsername: String? = null
+        private set
+
+    /** 待处理的音乐注册深链密码（与 [pendingMusicAuthUsername] 成对出现） */
+    var pendingMusicAuthPassword: String? = null
         private set
 
     /**
@@ -94,6 +108,10 @@ class MainActivity : ComponentActivity() {
     private fun parseIntentExtras(intent: Intent?) {
         if (intent == null) return
 
+        // 音乐注册深链与通知 extras 互不干扰：先尝试深链（ACTION_VIEW + data），
+        // 匹配到 nion://musicauth 就落库并交给 Compose 层，否则走原通知解析
+        handleMusicAuthDeepLink(intent)
+
         val reminderAction = intent.getStringExtra("reminder_action")
         val reminderTaskId = intent.getStringExtra("reminder_task_id")
         val openCompanion = intent.getBooleanExtra("open_companion", false)
@@ -118,6 +136,44 @@ class MainActivity : ComponentActivity() {
     }
 
     /**
+     * 处理音乐模块注册深链。
+     *
+     * 流程：配置引导表单「注册账号」按钮 → 系统浏览器打开网页注册页
+     * （https://echonion.org/music/reg/start）→ 注册完成网页重定向
+     * nion://musicauth?u=用户名&p=密码 → 本方法解析：
+     * 1. 账密立即写入 settings 表（键名与配置表单保存共用，见 [MusicSettings]），
+     *    同时把音源切到类脑娘服务器 —— 直接落库保证 Compose 层未组合音乐页也不丢数据
+     * 2. 存入 pendingMusicAuthXxx 字段，由音乐界面的 LaunchedEffect 消费，
+     *    同步 ViewModel 内存状态并自动触发连接（照通知 Intent 的处理模式）
+     * 3. Toast 提示注册成功
+     */
+    private fun handleMusicAuthDeepLink(intent: Intent) {
+        // 只认 ACTION_VIEW + nion://musicauth，其他 intent（通知等）原样放过
+        if (intent.action != Intent.ACTION_VIEW) return
+        val data = intent.data ?: return
+        if (data.scheme != "nion" || data.host != "musicauth") return
+        val username = data.getQueryParameter("u")?.trim().orEmpty()
+        val password = data.getQueryParameter("p").orEmpty()
+        Log.d("MainActivity", "解析注册深链: u=$username, 携带密码=${password.isNotEmpty()}")
+        // 参数不完整视为非法回调，静默忽略（不覆盖已有配置）
+        if (username.isEmpty() || password.isEmpty()) return
+        // 落库（同步 DB 调用切到 IO 线程执行，与 MusicViewModel 的写法一致）
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching {
+                application.core().apply {
+                    setSetting(MusicSettings.KEY_BRAINGIRL_USERNAME, username)
+                    setSetting(MusicSettings.KEY_BRAINGIRL_PASSWORD, password)
+                    setSetting(MusicSettings.KEY_SOURCE, MusicSource.BRAINGIRL.key)
+                }
+            }.onFailure { Log.e("MainActivity", "注册深链配置落库失败", it) }
+        }
+        // 交给音乐界面消费：同步 ViewModel 状态 + 自动触发连接
+        pendingMusicAuthUsername = username
+        pendingMusicAuthPassword = password
+        Toast.makeText(this, "注册成功，已自动配置类脑娘音源", Toast.LENGTH_SHORT).show()
+    }
+
+    /**
      * 清除待处理的 Intent 数据。
      * Compose 层读取完 pendingXxx 后必须调用，避免重复执行。
      */
@@ -125,6 +181,15 @@ class MainActivity : ComponentActivity() {
         pendingIntentAction = null
         pendingTaskId = null
         pendingTaskTitle = null
+    }
+
+    /**
+     * 清除待处理的音乐注册深链数据。
+     * 音乐界面 LaunchedEffect 读完 pendingMusicAuthXxx 后必须调用，避免重复执行。
+     */
+    fun clearPendingMusicAuth() {
+        pendingMusicAuthUsername = null
+        pendingMusicAuthPassword = null
     }
 
     /**

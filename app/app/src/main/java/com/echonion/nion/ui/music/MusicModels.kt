@@ -59,7 +59,7 @@ enum class MusicSource {
  * @property album 专辑名
  * @property durationSeconds 时长（秒）；本地 MediaStore 可能返回 0 表示未知
  * @property playbackUri ExoPlayer 实际加载的 URI：
- *   - 服务器曲目 → Subsonic stream 接口 URL（认证参数已拼在 query 中，maxBitRate=192）
+ *   - 服务器曲目 → Subsonic stream 接口 URL（认证参数已拼在 query 中，按原始音质返回不压缩）
  *   - 本地曲目 → MediaStore 的 content:// URI
  * @property coverArtUrl 封面图 URL（Subsonic getCoverArt 接口）；服务器曲目专用，本地曲目为 null
  * @property albumArtUri 本地专辑封面 URI（content://media/external/audio/albums/{albumId}），

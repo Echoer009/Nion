@@ -45,6 +45,14 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+            <!-- 音乐模块注册深链：网页端注册完成后重定向 nion://musicauth?u=..&p=..，
+                 MainActivity 解析账密写入音乐配置并自动连接类脑娘服务器 -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="nion" android:host="musicauth" />
+            </intent-filter>
         </activity>
 
         <!-- 提醒闹钟触发接收器，处理 AlarmManager 到点触发 -->
