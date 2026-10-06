@@ -625,7 +625,7 @@ private fun TaskScreenContent(
                             if (dualState.isLeftOpen) dualState.closeLeft()
                             dualState.toggleRight()
                         }) {
-                            Icon(LucideIcons.Bot, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
+                            Icon(LucideIcons.MessageCircle, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
                         }
                     },
                     title = {

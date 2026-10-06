@@ -418,7 +418,7 @@ fun FocusScreen(
                     actions = {
                         IconButton(onClick = onOpenCompanion) {
                             Icon(
-                                LucideIcons.Bot,
+                                LucideIcons.MessageCircle,
                                 contentDescription = "伙伴",
                                 tint = MaterialTheme.colorScheme.onSurface,
                             )

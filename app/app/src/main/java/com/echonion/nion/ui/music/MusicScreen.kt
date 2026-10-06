@@ -259,7 +259,7 @@ fun MusicScreen(
                                 // 右上角伙伴入口，与专注页/日程页保持一致
                                 IconButton(onClick = onOpenCompanion) {
                                     Icon(
-                                        LucideIcons.Bot,
+                                        LucideIcons.MessageCircle,
                                         contentDescription = "打开伙伴",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -802,39 +802,23 @@ private fun MusicToolbar(
         )
     }
 
-    // 注意：这里不能套 SharedTransitionLayout/sharedElement——shared-element 机制会在
-    // 过渡期接管元素绘制、把内容钉在匹配 bounds 上，吃掉 AnimatedContent 的滑移动画
-    //（行高恒定时 bounds 全等，sharedElement 本就无视觉贡献）。
-    AnimatedContent(
+    // share-element morph：收起态的触发图标（48dp 小 bounds）与对应展开行（整行 bounds）
+    // 通过 sharedBounds 配对（toolbar_sort / toolbar_view / toolbar_search 三把钥匙），
+    // 过渡时容器 bounds 从图标位置放大/缩回成整行——真·share element 位移 morph。
+    // AnimatedContent 只负责其余元素交叉淡化（slide 会与 bounds morph 打架，不用）。
+    SharedTransitionLayout(modifier = Modifier.fillMaxWidth()) {
+        AnimatedContent(
             targetState = mode,
             transitionSpec = {
-                // 带位移的 morph：展开时选项行从右缘滑入+微放大，图标行让位滑出；
-                // 收回时反向。不再是纯交叉淡化（用户要求可见的移动动画）。
-                if (targetState != MusicToolbarMode.NORMAL) {
-                    (
-                        slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 2 } +
-                            fadeIn(tween(280)) +
-                            scaleIn(initialScale = 0.92f, animationSpec = tween(280))
-                        ) togetherWith (
-                        slideOutHorizontally(tween(280, easing = FastOutSlowInEasing)) { -it / 3 } +
-                            fadeOut(tween(160))
-                    )
-                } else {
-                    (
-                        slideInHorizontally(tween(280, easing = FastOutSlowInEasing)) { -it / 3 } +
-                            fadeIn(tween(280))
-                        ) togetherWith (
-                        slideOutHorizontally(tween(280, easing = FastOutSlowInEasing)) { it / 2 } +
-                            fadeOut(tween(160)) +
-                            scaleOut(targetScale = 0.92f, animationSpec = tween(280))
-                    )
-                } using SizeTransform(clip = false)
+                fadeIn(tween(220)) togetherWith fadeOut(tween(160)) using SizeTransform(clip = false)
             },
             label = "musicToolbar",
             modifier = Modifier
                 .fillMaxWidth()
                 .height(48.dp),
         ) { m ->
+            // captured 共享作用域：sharedBounds 是 SharedTransitionScope 的扩展
+            val sts = this@SharedTransitionLayout
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -843,7 +827,8 @@ private fun MusicToolbar(
             ) {
                 when (m) {
                     MusicToolbarMode.NORMAL -> {
-                        // 左侧留空把图标推到右端（标题在页面 TopAppBar）
+                        // 左侧留空把图标推到右端（标题在页面 TopAppBar）；
+                        // 三个入口图标各自挂 sharedBounds，与对应展开行配对 morph
                         Spacer(modifier = Modifier.weight(1f))
                         // 排序入口：仅本地音源 + 专辑视图 + 未搜索
                         if (vm.source == MusicSource.LOCAL && !showPlaylists && vm.searchQuery.isBlank()) {
@@ -852,70 +837,139 @@ private fun MusicToolbar(
                             } else {
                                 sortOptions[1]
                             }
-                            IconButton(onClick = { mode = MusicToolbarMode.SORT }) {
-                                Icon(
-                                    current.icon,
-                                    contentDescription = "排序方式",
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
+                            Box(
+                                modifier = with(sts) {
+                                    Modifier.sharedBounds(
+                                        rememberSharedContentState("toolbar_sort"),
+                                        this@AnimatedContent,
+                                        enter = fadeIn(tween(180)),
+                                        exit = fadeOut(tween(120)),
+                                    )
+                                },
+                            ) {
+                                IconButton(onClick = { mode = MusicToolbarMode.SORT }) {
+                                    Icon(
+                                        current.icon,
+                                        contentDescription = "排序方式",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
                             }
                         }
                         // 视图入口：搜索激活时隐藏（搜索结果在专辑视图内展示）
                         if (vm.searchQuery.isBlank()) {
                             val current = if (showPlaylists) viewOptions[1] else viewOptions[0]
-                            IconButton(onClick = { mode = MusicToolbarMode.VIEW }) {
+                            Box(
+                                modifier = with(sts) {
+                                    Modifier.sharedBounds(
+                                        rememberSharedContentState("toolbar_view"),
+                                        this@AnimatedContent,
+                                        enter = fadeIn(tween(180)),
+                                        exit = fadeOut(tween(120)),
+                                    )
+                                },
+                            ) {
+                                IconButton(onClick = { mode = MusicToolbarMode.VIEW }) {
+                                    Icon(
+                                        current.icon,
+                                        contentDescription = "曲库视图",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                            }
+                        }
+                        // 搜索入口：进入整行搜索态
+                        Box(
+                            modifier = with(sts) {
+                                Modifier.sharedBounds(
+                                    rememberSharedContentState("toolbar_search"),
+                                    this@AnimatedContent,
+                                    enter = fadeIn(tween(180)),
+                                    exit = fadeOut(tween(120)),
+                                )
+                            },
+                        ) {
+                            IconButton(onClick = { mode = MusicToolbarMode.SEARCH }) {
                                 Icon(
-                                    current.icon,
-                                    contentDescription = "曲库视图",
+                                    LucideIcons.Search,
+                                    contentDescription = "搜索音乐",
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
                         }
-                        // 搜索入口：进入整行搜索态
-                        IconButton(onClick = { mode = MusicToolbarMode.SEARCH }) {
-                            Icon(
-                                LucideIcons.Search,
-                                contentDescription = "搜索音乐",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
                     }
 
                     MusicToolbarMode.SORT -> {
-                        // 整行只剩排序选项（横排等高格子），其余控件被挤开
-                        sortOptions.forEach { opt ->
-                            SelectorCell(
-                                option = opt,
-                                selected = (vm.localAlbumSort == LocalAlbumSort.TITLE) == (opt.key == "title"),
-                                onClick = {
-                                    vm.localAlbumSort =
-                                        if (opt.key == "title") LocalAlbumSort.TITLE else LocalAlbumSort.NEWEST
-                                    mode = MusicToolbarMode.NORMAL
-                                },
-                            )
-                        }
-                        Spacer(modifier = Modifier.weight(1f))
-                        CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
+                        // 整行只剩排序选项；行容器与收起态排序图标 sharedBounds 配对：
+                        // 展开时从图标位置放大成整行，收回时缩回图标
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = with(sts) {
+                                Modifier.sharedBounds(
+                                    rememberSharedContentState("toolbar_sort"),
+                                    this@AnimatedContent,
+                                    enter = fadeIn(tween(180)),
+                                    exit = fadeOut(tween(120)),
+                                )
+                            },
+                        ) {
+                            sortOptions.forEach { opt ->
+                                SelectorCell(
+                                    option = opt,
+                                    selected = (vm.localAlbumSort == LocalAlbumSort.TITLE) == (opt.key == "title"),
+                                    onClick = {
+                                        vm.localAlbumSort =
+                                            if (opt.key == "title") LocalAlbumSort.TITLE else LocalAlbumSort.NEWEST
+                                        mode = MusicToolbarMode.NORMAL
+                                    },
+                                )
+                            }
+                            Spacer(modifier = Modifier.weight(1f))
+                            CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
+                        } // sharedBounds Row（toolbar_sort）结束
                     }
 
                     MusicToolbarMode.VIEW -> {
-                        // 整行只剩视图选项
-                        viewOptions.forEach { opt ->
-                            SelectorCell(
-                                option = opt,
-                                selected = showPlaylists == (opt.key == "playlist"),
-                                onClick = {
-                                    onSelectView(opt.key == "playlist")
-                                    mode = MusicToolbarMode.NORMAL
-                                },
-                            )
-                        }
-                        Spacer(modifier = Modifier.weight(1f))
-                        CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
+                        // 整行只剩视图选项；行容器与收起态视图图标 sharedBounds 配对 morph
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = with(sts) {
+                                Modifier.sharedBounds(
+                                    rememberSharedContentState("toolbar_view"),
+                                    this@AnimatedContent,
+                                    enter = fadeIn(tween(180)),
+                                    exit = fadeOut(tween(120)),
+                                )
+                            },
+                        ) {
+                            viewOptions.forEach { opt ->
+                                SelectorCell(
+                                    option = opt,
+                                    selected = showPlaylists == (opt.key == "playlist"),
+                                    onClick = {
+                                        onSelectView(opt.key == "playlist")
+                                        mode = MusicToolbarMode.NORMAL
+                                    },
+                                )
+                            }
+                            Spacer(modifier = Modifier.weight(1f))
+                            CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
+                        } // sharedBounds Row（toolbar_view）结束
                     }
 
                     MusicToolbarMode.SEARCH -> {
-                        // 整行 = 搜索输入框（矩形样式，BasicTextField 保证 48dp 行内不截断文字）
+                        // 整行 = 搜索输入框；外层与收起态搜索图标 sharedBounds 配对 morph
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = with(sts) {
+                                Modifier.sharedBounds(
+                                    rememberSharedContentState("toolbar_search"),
+                                    this@AnimatedContent,
+                                    enter = fadeIn(tween(180)),
+                                    exit = fadeOut(tween(120)),
+                                )
+                            },
+                        ) {
                         Surface(
                             shape = RoundedCornerShape(6.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
@@ -968,10 +1022,12 @@ private fun MusicToolbar(
                             vm.searchQuery = ""
                             mode = MusicToolbarMode.NORMAL
                         }
+                        } // sharedBounds Row（toolbar_search）结束
                     }
                 }
-            }
+    } // SharedTransitionLayout 结束
         }
+}
 }
 
 /**

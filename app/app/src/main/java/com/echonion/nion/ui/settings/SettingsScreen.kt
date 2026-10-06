@@ -202,7 +202,7 @@ fun SettingsScreen(
                 ),
                 actions = {
                     IconButton(onClick = onOpenCompanion) {
-                        Icon(LucideIcons.Bot, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
+                        Icon(LucideIcons.MessageCircle, contentDescription = "伙伴", tint = MaterialTheme.colorScheme.onSurface)
                     }
                 },
             )
