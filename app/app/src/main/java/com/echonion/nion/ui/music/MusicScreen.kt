@@ -845,14 +845,23 @@ private fun MusicToolbar(
                     .clipToBounds(),
                 contentAlignment = Alignment.CenterEnd,
             ) {
+                // 展开内容按最终整栏宽度一次性固定布局（不随动画宽度逐帧重排），
+                // zone 只是揭示窗口：展开从图标两侧露出、收起两侧收回，文字全程静止
                 when {
-                    mode == MusicToolbarMode.SORT -> Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
+                    mode == MusicToolbarMode.SORT -> {
+                        // 文字小淡入：窗口先撑开(80ms)后标签渐显；收起时快速淡出
+                        val labelAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
+                        androidx.compose.runtime.LaunchedEffect(Unit) {
+                            labelAlpha.animateTo(1f, tween(durationMillis = 150, delayMillis = 80))
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.width(toolbarWidth),
+                        ) {
                         sortOptions.forEach { opt ->
                             SelectorCell(
                                 option = opt,
+                                textAlpha = labelAlpha.value,
                                 selected = (vm.localAlbumSort == LocalAlbumSort.TITLE) == (opt.key == "title"),
                                 onClick = {
                                     vm.localAlbumSort =
@@ -861,8 +870,9 @@ private fun MusicToolbar(
                                 },
                             )
                         }
-                        Spacer(modifier = Modifier.weight(1f))
-                        CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
+                            Spacer(modifier = Modifier.weight(1f))
+                            CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
+                        }
                     }
 
                     mode == MusicToolbarMode.NORMAL && sortVisible -> IconButton(
@@ -897,13 +907,20 @@ private fun MusicToolbar(
                 contentAlignment = Alignment.CenterEnd,
             ) {
                 when {
-                    mode == MusicToolbarMode.VIEW -> Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
+                    mode == MusicToolbarMode.VIEW -> {
+                        // 同排序区：固定宽度 + 文字小淡入
+                        val labelAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
+                        androidx.compose.runtime.LaunchedEffect(Unit) {
+                            labelAlpha.animateTo(1f, tween(durationMillis = 150, delayMillis = 80))
+                        }
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.width(toolbarWidth),
+                        ) {
                         viewOptions.forEach { opt ->
                             SelectorCell(
                                 option = opt,
+                                textAlpha = labelAlpha.value,
                                 selected = showPlaylists == (opt.key == "playlist"),
                                 onClick = {
                                     onSelectView(opt.key == "playlist")
@@ -911,8 +928,9 @@ private fun MusicToolbar(
                                 },
                             )
                         }
-                        Spacer(modifier = Modifier.weight(1f))
-                        CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
+                            Spacer(modifier = Modifier.weight(1f))
+                            CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
+                        }
                     }
 
                     mode == MusicToolbarMode.NORMAL && viewVisible -> IconButton(
@@ -949,7 +967,7 @@ private fun MusicToolbar(
                 when {
                     mode == MusicToolbarMode.SEARCH -> Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier.width(toolbarWidth),
                     ) {
                         SearchFieldRectangle(vm = vm, modifier = Modifier.weight(1f))
                         CloseToolbarButton {
@@ -983,6 +1001,8 @@ private fun MusicToolbar(
 @Composable
 private fun SelectorCell(
     option: SelectorOption,
+    // 标签文字透明度：展开时小淡入避免文字闪现（图标不淡出，保持推动观感）
+    textAlpha: Float = 1f,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
@@ -1004,7 +1024,7 @@ private fun SelectorCell(
         Text(
             option.label,
             style = MaterialTheme.typography.labelLarge,
-            color = tint,
+            color = tint.copy(alpha = textAlpha),
         )
     }
 }
