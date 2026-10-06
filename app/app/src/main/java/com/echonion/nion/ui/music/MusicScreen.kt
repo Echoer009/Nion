@@ -923,15 +923,17 @@ private fun MusicToolbar(
                         }
                     }
 
-                    mode == MusicToolbarMode.NORMAL && sortVisible -> IconButton(
+                    // 回归条件用 mode 而非 displayMode：别的区收起时本区图标立即显示
+                    // （跟着窗口一起被露出）；仅当本区是"正在收起的那区"
+                    // （displayMode 还停在本区模式）时才延迟到落位再换图标
+                    mode == MusicToolbarMode.NORMAL && displayMode != MusicToolbarMode.SORT &&
+                        sortVisible -> IconButton(
                         onClick = { mode = MusicToolbarMode.SORT },
                     ) {
                         Icon(
                             if (vm.localAlbumSort == LocalAlbumSort.TITLE) sortOptions[0].icon else sortOptions[1].icon,
                             contentDescription = "排序方式",
-                            // 收起态图标代表当前选中项 → 主色，与展开态选中格图标
-                            // 同色一致（点开前后同一颗图标同色，morph 连续）
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
 
@@ -980,15 +982,14 @@ private fun MusicToolbar(
                         }
                     }
 
-                    mode == MusicToolbarMode.NORMAL && viewVisible -> IconButton(
+                    mode == MusicToolbarMode.NORMAL && displayMode != MusicToolbarMode.VIEW &&
+                        viewVisible -> IconButton(
                         onClick = { mode = MusicToolbarMode.VIEW },
                     ) {
                         Icon(
                             if (showPlaylists) viewOptions[1].icon else viewOptions[0].icon,
                             contentDescription = "曲库视图",
-                            // 收起态图标代表当前选中项 → 主色，与展开态选中格图标
-                            // 同色一致（点开前后同一颗图标同色，morph 连续）
-                            tint = MaterialTheme.colorScheme.primary,
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
 
@@ -1031,7 +1032,7 @@ private fun MusicToolbar(
                         }
                     }
 
-                    mode == MusicToolbarMode.NORMAL -> IconButton(
+                    mode == MusicToolbarMode.NORMAL && displayMode != MusicToolbarMode.SEARCH -> IconButton(
                         onClick = { mode = MusicToolbarMode.SEARCH },
                     ) {
                         Icon(
