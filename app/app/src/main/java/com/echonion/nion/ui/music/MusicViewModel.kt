@@ -564,6 +564,9 @@ class MusicViewModel(
                 MediaStore.Audio.Media.TITLE,
                 MediaStore.Audio.Media.ARTIST,
                 MediaStore.Audio.Media.ALBUM,
+                // 专辑 ID：用于拼出专辑封面 URI（content://media/external/audio/albums/{id}），
+                // 供 CoverArt 通过 loadThumbnail 提取 FLAC/MP3 内嵌封面
+                MediaStore.Audio.Media.ALBUM_ID,
                 MediaStore.Audio.Media.DURATION,
             )
             val result = mutableListOf<PlayableTrack>()
@@ -580,6 +583,7 @@ class MusicViewModel(
                     val titleCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.TITLE)
                     val artistCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ARTIST)
                     val albumCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM)
+                    val albumIdCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.ALBUM_ID)
                     val durationCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
                     while (cursor.moveToNext()) {
                         val id = cursor.getLong(idCol)
@@ -587,6 +591,14 @@ class MusicViewModel(
                             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
                             id,
                         )
+                        // 专辑封面 URI：albums 表的 content URI + albumId，
+                        // loadThumbnail 会解析音频文件的内嵌封面（FLAC metadata block 等）
+                        val albumId = cursor.getLong(albumIdCol)
+                        val albumArtUri =
+                            if (albumId > 0) android.content.ContentUris.withAppendedId(
+                                MediaStore.Audio.Albums.EXTERNAL_CONTENT_URI,
+                                albumId,
+                            ).toString() else null
                         result.add(
                             PlayableTrack(
                                 id = "local:$id",
@@ -599,6 +611,7 @@ class MusicViewModel(
                                     ?: "未知专辑",
                                 durationSeconds = cursor.getLong(durationCol) / 1000,
                                 playbackUri = uri.toString(),
+                                albumArtUri = albumArtUri,
                                 isLocal = true,
                             ),
                         )

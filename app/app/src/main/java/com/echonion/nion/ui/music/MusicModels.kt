@@ -61,7 +61,10 @@ enum class MusicSource {
  * @property playbackUri ExoPlayer 实际加载的 URI：
  *   - 服务器曲目 → Subsonic stream 接口 URL（认证参数已拼在 query 中，maxBitRate=192）
  *   - 本地曲目 → MediaStore 的 content:// URI
- * @property coverArtUrl 封面图 URL（Subsonic getCoverArt 接口）；本地曲目暂无封面，为 null
+ * @property coverArtUrl 封面图 URL（Subsonic getCoverArt 接口）；服务器曲目专用，本地曲目为 null
+ * @property albumArtUri 本地专辑封面 URI（content://media/external/audio/albums/{albumId}），
+ *   由 MediaStore 的 ALBUM_ID 拼出，可用 ContentResolver.loadThumbnail 提取内嵌封面；
+ *   服务器曲目为 null
  * @property isLocal 是否本地曲目，用于 UI 上区分图标展示
  */
 data class PlayableTrack(
@@ -72,6 +75,7 @@ data class PlayableTrack(
     val durationSeconds: Long,
     val playbackUri: String,
     val coverArtUrl: String? = null,
+    val albumArtUri: String? = null,
     val isLocal: Boolean = false,
 )
 
