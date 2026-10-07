@@ -67,6 +67,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -2190,6 +2191,8 @@ private fun FullPlayerOverlay(
     // 切歌时颜色 600ms 平滑过渡 —— 汽水音乐式沉浸播放面
     val backdrop = rememberPlayerBackdrop(track)
     val playerScheme = rememberPlayerColorScheme(backdrop)
+    // 播放队列默认收起：顶部按钮呼出（常驻列表会挤占沉浸滑切区）
+    var queueVisible by remember { mutableStateOf(false) }
     Surface(
         // 容器 sharedBounds：与迷你播放条配对，展开时迷你条生长为全屏页
         modifier = Modifier
@@ -2223,11 +2226,20 @@ private fun FullPlayerOverlay(
                         .statusBarsPadding(),
                 ) {
                     // ===== 顶部收起按钮 =====
-                    Row(modifier = Modifier.fillMaxWidth()) {
+                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onClose) {
                             Icon(
                                 LucideIcons.ChevronDown,
                                 contentDescription = "收起播放页",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(modifier = Modifier.weight(1f))
+                        // 队列入口：点开底部队列面板
+                        IconButton(onClick = { queueVisible = !queueVisible }) {
+                            Icon(
+                                LucideIcons.ListMusic,
+                                contentDescription = "播放队列",
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
@@ -2262,14 +2274,18 @@ private fun FullPlayerOverlay(
                                     if (page != vm.currentIndex) vm.playQueueIndex(page)
                                 }
                             }
-                            // 外部切歌（迷你条/队列行/控制按钮）→ 滚到对应页；
-                            // 用户正在拖动时不抢位（松手后由上面的落定逻辑接管）
-                            LaunchedEffect(vm.currentIndex, pagerState) {
-                                if (vm.currentIndex >= 0 &&
-                                    vm.currentIndex != pagerState.currentPage &&
-                                    !pagerState.isScrollInProgress
-                                ) {
-                                    pagerState.animateScrollToPage(vm.currentIndex)
+                            // 外部切歌（迷你条/队列行/控制按钮）→ 滚到对应页。
+                            // 只在 pager 完全落定后接管：用户拖拽中途 currentPage 已
+                            // 变而 currentIndex 未变，此时抢跑 animateScrollToPage
+                            // 会把页面拽回旧曲，表现为"滑不动/被弹回"
+                            LaunchedEffect(pagerState) {
+                                snapshotFlow { vm.currentIndex }.collect { idx ->
+                                    if (idx >= 0 &&
+                                        idx != pagerState.settledPage &&
+                                        !pagerState.isScrollInProgress
+                                    ) {
+                                        pagerState.animateScrollToPage(idx)
+                                    }
                                 }
                             }
 
@@ -2441,44 +2457,83 @@ private fun FullPlayerOverlay(
                             }
                         }
 
-                        // ===== 播放队列 =====
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(top = 8.dp, bottom = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
+                    }
+                }
+                    // ===== 播放队列面板（入口：右上角按钮；底部滑入） =====
+                    AnimatedVisibility(
+                        visible = queueVisible,
+                        enter = fadeIn() + slideInVertically { it / 2 },
+                        exit = fadeOut() + slideOutVertically { it / 2 },
+                        modifier = Modifier.fillMaxSize(),
+                    ) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.BottomCenter,
                         ) {
-                            Icon(
-                                LucideIcons.Headphones,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp),
+                            // 半透明遮罩：点按关闭
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black.copy(alpha = 0.4f))
+                                    .clickable { queueVisible = false },
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                "播放队列（${vm.queue.size} 首）",
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.SemiBold,
-                                color = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                        LazyColumn(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .weight(0.8f),
-                            verticalArrangement = Arrangement.spacedBy(2.dp),
-                        ) {
-                            itemsIndexed(vm.queue) { index, item ->
-                                QueueRow(
-                                    track = item,
-                                    index = index,
-                                    isCurrent = index == vm.currentIndex,
-                                    onClick = { vm.playQueueIndex(index) },
-                                )
+                            Surface(
+                                shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .fillMaxHeight(0.62f),
+                            ) {
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                                ) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Icon(
+                                            LucideIcons.Headphones,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Text(
+                                            "播放队列（${vm.queue.size} 首）",
+                                            style = MaterialTheme.typography.titleSmall,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                        )
+                                        Spacer(modifier = Modifier.weight(1f))
+                                        IconButton(onClick = { queueVisible = false }) {
+                                            Icon(
+                                                LucideIcons.X,
+                                                contentDescription = "关闭队列",
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            )
+                                        }
+                                    }
+                                    LazyColumn(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                                    ) {
+                                        itemsIndexed(vm.queue) { index, item ->
+                                            QueueRow(
+                                                track = item,
+                                                index = index,
+                                                isCurrent = index == vm.currentIndex,
+                                                onClick = { vm.playQueueIndex(index) },
+                                            )
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
-                }
             }
         }
     }
