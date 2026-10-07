@@ -60,6 +60,7 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -76,6 +77,8 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.pager.VerticalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -99,6 +102,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.key
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.getValue
@@ -220,10 +225,9 @@ fun MusicScreen(
                     },
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedVisibilityScope = this@AnimatedContent,
-                    // 封面 sharedElement key：点歌打开 → 与行内小封面配对；
-                    // 迷你条展开 → 与迷你条封面配对
-                    coverSharedKey = openedFromTrackId?.let { "music_track_cover_$it" }
-                        ?: "music_player_cover",
+                    // 打开来源：非空 = 从曲目行点开（行内封面 morph），
+                    // null = 从迷你条展开（迷你条封面 morph）
+                    openedFromTrackId = openedFromTrackId,
                 )
             } else {
                 // ===== 音乐主界面分支（音源内容 + 迷你播放条）=====
@@ -2177,12 +2181,15 @@ private fun FullPlayerOverlay(
     // 迷你条/曲目行 ↔ 播放页 morph：容器 sharedBounds + 封面 sharedElement 均需这两个作用域
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
-    // 大封面的 sharedElement key：
-    // - 点歌打开 = "music_track_cover_<trackId>"（与被点行内小封面配对）
-    // - 迷你条展开 = "music_player_cover"（与迷你条封面配对）
-    coverSharedKey: String,
+    // 打开来源：非空 = 从曲目行点开（值为该行 trackId），null = 从迷你条展开。
+    // 决定各页封面 sharedElement 的配对 key（见 Pager 内注释）
+    openedFromTrackId: String?,
 ) {
     val track = vm.currentTrack
+    // 封面取色：渐变背景 + 播放页专用深色配色（嵌套 MaterialTheme 生效），
+    // 切歌时颜色 600ms 平滑过渡 —— 汽水音乐式沉浸播放面
+    val backdrop = rememberPlayerBackdrop(track)
+    val playerScheme = rememberPlayerColorScheme(backdrop)
     Surface(
         // 容器 sharedBounds：与迷你播放条配对，展开时迷你条生长为全屏页
         modifier = Modifier
@@ -2198,224 +2205,279 @@ private fun FullPlayerOverlay(
                     )
                 },
             ),
-        color = MaterialTheme.colorScheme.background,
+        // 背景交给下层渐变 Box 绘制；Surface 本体透明以承载 sharedBounds 形变
+        color = Color.Transparent,
     ) {
-        Column(
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 24.dp)
-                .statusBarsPadding(),
+                .background(
+                    Brush.verticalGradient(listOf(backdrop.top, backdrop.bottom)),
+                ),
         ) {
-            // ===== 顶部收起按钮 =====
-            Row(modifier = Modifier.fillMaxWidth()) {
-                IconButton(onClick = onClose) {
-                    Icon(
-                        LucideIcons.ChevronDown,
-                        contentDescription = "收起播放页",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-
-            if (track == null) {
-                // 队列被清空的极端情况：提示并允许收起
-                Box(
+            MaterialTheme(colorScheme = playerScheme) {
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .weight(1f),
-                    contentAlignment = Alignment.Center,
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp)
+                        .statusBarsPadding(),
                 ) {
-                    Text(
-                        "没有正在播放的曲目",
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-                return@Surface
-            }
+                    // ===== 顶部收起按钮 =====
+                    Row(modifier = Modifier.fillMaxWidth()) {
+                        IconButton(onClick = onClose) {
+                            Icon(
+                                LucideIcons.ChevronDown,
+                                contentDescription = "收起播放页",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
 
-            // ===== 大封面 =====
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 8.dp),
-                contentAlignment = Alignment.Center,
-            ) {
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    tonalElevation = 2.dp,
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                ) {
-                    CoverArt(
-                        coverUrl = track.coverArtUrl,
-                        albumArtUri = track.albumArtUri,
-                        modifier = Modifier
-                            .size(280.dp)
-                            .then(
-                                with(sharedTransitionScope) {
-                                    // 大封面 sharedElement：key 由打开方式决定 ——
-                                    // 点歌打开与被点行内小封面配对，迷你条展开与迷你条封面配对
-                                    Modifier.sharedElement(
-                                        sharedContentState = rememberSharedContentState(coverSharedKey),
-                                        animatedVisibilityScope = animatedVisibilityScope,
-                                        boundsTransform = { _, _ ->
-                                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
-                                        },
-                                    )
-                                },
-                            ),
-                        placeHolderSize = 96.dp,
-                    )
-                }
-            }
+                    if (track == null) {
+                        // 队列被清空的极端情况：提示并允许收起
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(1f),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(
+                                "没有正在播放的曲目",
+                                style = MaterialTheme.typography.bodyLarge,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        // ===== 沉浸式上下滑切歌（一页一首，滑动即切） =====
+                        // key 绑定队列实例：换专辑/歌单重新开播时重建 pager 并
+                        // 落位新 currentIndex；原队列内切歌不重建（保住滚动状态）
+                        key(vm.queue) {
+                            val pagerState = rememberPagerState(
+                                initialPage = vm.currentIndex.coerceAtLeast(0),
+                            ) { vm.queue.size }
 
-            // ===== 曲名 / 艺术家 / 专辑 =====
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 16.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Text(
-                    track.title,
-                    style = MaterialTheme.typography.titleLarge,
-                    fontWeight = FontWeight.Bold,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    track.artist,
-                    style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                if (track.album.isNotBlank()) {
-                    Text(
-                        track.album,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-            }
+                            // 用户滑动落定 → 播放落定页曲目
+                            LaunchedEffect(pagerState) {
+                                snapshotFlow { pagerState.settledPage }.collect { page ->
+                                    if (page != vm.currentIndex) vm.playQueueIndex(page)
+                                }
+                            }
+                            // 外部切歌（迷你条/队列行/控制按钮）→ 滚到对应页；
+                            // 用户正在拖动时不抢位（松手后由上面的落定逻辑接管）
+                            LaunchedEffect(vm.currentIndex, pagerState) {
+                                if (vm.currentIndex >= 0 &&
+                                    vm.currentIndex != pagerState.currentPage &&
+                                    !pagerState.isScrollInProgress
+                                ) {
+                                    pagerState.animateScrollToPage(vm.currentIndex)
+                                }
+                            }
 
-            // ===== 进度条 =====
-            // 拖动期间非空；null=跟随播放进度。key 绑定曲目 id，切歌重置拖动态
-            var dragPosition by remember(track.id) { mutableStateOf<Float?>(null) }
-            // 拖动中显示 dragPosition；总时长未知时滑块不可交互（duration=0）
-            val sliderValue = dragPosition ?: vm.positionMs.toFloat()
-            val sliderMax = vm.durationMs.toFloat().coerceAtLeast(1f)
-            Slider(
-                value = sliderValue.coerceIn(0f, sliderMax),
-                onValueChange = { dragPosition = it },
-                onValueChangeFinished = {
-                    // 松手：seek 到拖动位置并恢复跟随播放进度
-                    dragPosition?.let { vm.seekTo(it.toLong()) }
-                    dragPosition = null
-                },
-                valueRange = 0f..sliderMax,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
-                enabled = vm.durationMs > 0,
-            )
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 8.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Text(
-                    formatTrackDuration((dragPosition?.toLong() ?: vm.positionMs) / 1000),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    formatTrackDuration(vm.durationMs / 1000),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
+                            VerticalPager(
+                                state = pagerState,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .weight(1.2f),
+                            ) { page ->
+                                val pageTrack = vm.queue.getOrNull(page)
+                                    ?: return@VerticalPager
+                                Column(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .padding(vertical = 8.dp),
+                                    horizontalAlignment = Alignment.CenterHorizontally,
+                                    verticalArrangement = Arrangement.Center,
+                                ) {
+                                    // 每页封面 sharedElement key：
+                                    // - 迷你条展开：仅当前页用 "music_player_cover"
+                                    //   与迷你条封面配对；
+                                    // - 曲目行点开：各页用自己的
+                                    //   "music_track_cover_<id>"，打开瞬间只有被点行
+                                    //   的 key 存在可见配对方，morph 自然成立
+                                    val coverKey =
+                                        if (openedFromTrackId == null && page == pagerState.currentPage) {
+                                            "music_player_cover"
+                                        } else {
+                                            "music_track_cover_${pageTrack.id}"
+                                        }
+                                    Surface(
+                                        shape = RoundedCornerShape(24.dp),
+                                        tonalElevation = 2.dp,
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    ) {
+                                        CoverArt(
+                                            coverUrl = pageTrack.coverArtUrl,
+                                            albumArtUri = pageTrack.albumArtUri,
+                                            modifier = Modifier
+                                                .size(280.dp)
+                                                .then(
+                                                    with(sharedTransitionScope) {
+                                                        Modifier.sharedElement(
+                                                            sharedContentState = rememberSharedContentState(coverKey),
+                                                            animatedVisibilityScope = animatedVisibilityScope,
+                                                            boundsTransform = { _, _ ->
+                                                                spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                                                            },
+                                                        )
+                                                    },
+                                                ),
+                                            placeHolderSize = 96.dp,
+                                        )
+                                    }
 
-            // ===== 播放控制 =====
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(vertical = 12.dp),
-                horizontalArrangement = Arrangement.Center,
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                IconButton(onClick = { vm.skipToPrevious() }) {
-                    Icon(
-                        LucideIcons.SkipBack,
-                        contentDescription = "上一首",
-                        modifier = Modifier.size(36.dp),
-                        tint = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-                Spacer(modifier = Modifier.width(24.dp))
-                // 主按钮：实心圆形，视觉上作为播放页的核心操作
-                FilledIconButton(
-                    onClick = { vm.togglePlayPause() },
-                    modifier = Modifier.size(72.dp),
-                    colors = IconButtonDefaults.filledIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.primary,
-                    ),
-                ) {
-                    // ▶↔⏸ 切换过渡（缩放+旋转+淡入淡出），与迷你条共用同一组件
-                    AnimatedPlayPauseIcon(
-                        isPlaying = vm.isPlaying,
-                        modifier = Modifier.size(36.dp),
-                    )
-                }
-                Spacer(modifier = Modifier.width(24.dp))
-                IconButton(onClick = { vm.skipToNext() }) {
-                    Icon(
-                        LucideIcons.SkipForward,
-                        contentDescription = "下一首",
-                        modifier = Modifier.size(36.dp),
-                        tint = MaterialTheme.colorScheme.onSurface,
-                    )
-                }
-            }
+                                    // ===== 曲名 / 艺术家 / 专辑（跟随页面曲目） =====
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(top = 16.dp),
+                                        horizontalAlignment = Alignment.CenterHorizontally,
+                                    ) {
+                                        Text(
+                                            pageTrack.title,
+                                            style = MaterialTheme.typography.titleLarge,
+                                            fontWeight = FontWeight.Bold,
+                                            textAlign = TextAlign.Center,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        Text(
+                                            pageTrack.artist,
+                                            style = MaterialTheme.typography.bodyLarge,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis,
+                                        )
+                                        if (pageTrack.album.isNotBlank()) {
+                                            Text(
+                                                pageTrack.album,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
 
-            // ===== 播放队列 =====
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 8.dp, bottom = 4.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(
-                    LucideIcons.Headphones,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(16.dp),
-                )
-                Spacer(modifier = Modifier.width(6.dp))
-                Text(
-                    "播放队列（${vm.queue.size} 首）",
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-            }
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(1f),
-                verticalArrangement = Arrangement.spacedBy(2.dp),
-            ) {
-                itemsIndexed(vm.queue) { index, item ->
-                    QueueRow(
-                        track = item,
-                        index = index,
-                        isCurrent = index == vm.currentIndex,
-                        onClick = { vm.playQueueIndex(index) },
-                    )
+                        // ===== 进度条 =====
+                        // 拖动期间非空；null=跟随播放进度。key 绑定曲目 id，切歌重置拖动态
+                        var dragPosition by remember(track.id) { mutableStateOf<Float?>(null) }
+                        // 拖动中显示 dragPosition；总时长未知时滑块不可交互（duration=0）
+                        val sliderValue = dragPosition ?: vm.positionMs.toFloat()
+                        val sliderMax = vm.durationMs.toFloat().coerceAtLeast(1f)
+                        Slider(
+                            value = sliderValue.coerceIn(0f, sliderMax),
+                            onValueChange = { dragPosition = it },
+                            onValueChangeFinished = {
+                                // 松手：seek 到拖动位置并恢复跟随播放进度
+                                dragPosition?.let { vm.seekTo(it.toLong()) }
+                                dragPosition = null
+                            },
+                            valueRange = 0f..sliderMax,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp),
+                            enabled = vm.durationMs > 0,
+                        )
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Text(
+                                formatTrackDuration((dragPosition?.toLong() ?: vm.positionMs) / 1000),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Text(
+                                formatTrackDuration(vm.durationMs / 1000),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+
+                        // ===== 播放控制 =====
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            IconButton(onClick = { vm.skipToPrevious() }) {
+                                Icon(
+                                    LucideIcons.SkipBack,
+                                    contentDescription = "上一首",
+                                    modifier = Modifier.size(36.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(24.dp))
+                            // 主按钮：实心圆形，视觉上作为播放页的核心操作
+                            FilledIconButton(
+                                onClick = { vm.togglePlayPause() },
+                                modifier = Modifier.size(72.dp),
+                                colors = IconButtonDefaults.filledIconButtonColors(
+                                    containerColor = MaterialTheme.colorScheme.primary,
+                                ),
+                            ) {
+                                // ▶↔⏸ 切换过渡（缩放+旋转+淡入淡出），与迷你条共用同一组件
+                                AnimatedPlayPauseIcon(
+                                    isPlaying = vm.isPlaying,
+                                    modifier = Modifier.size(36.dp),
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(24.dp))
+                            IconButton(onClick = { vm.skipToNext() }) {
+                                Icon(
+                                    LucideIcons.SkipForward,
+                                    contentDescription = "下一首",
+                                    modifier = Modifier.size(36.dp),
+                                    tint = MaterialTheme.colorScheme.onSurface,
+                                )
+                            }
+                        }
+
+                        // ===== 播放队列 =====
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 8.dp, bottom = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Icon(
+                                LucideIcons.Headphones,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(16.dp),
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                "播放队列（${vm.queue.size} 首）",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurface,
+                            )
+                        }
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .weight(0.8f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                        ) {
+                            itemsIndexed(vm.queue) { index, item ->
+                                QueueRow(
+                                    track = item,
+                                    index = index,
+                                    isCurrent = index == vm.currentIndex,
+                                    onClick = { vm.playQueueIndex(index) },
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -2825,7 +2887,7 @@ private fun EmptyHint(
  * 进程内封面缓存 —— URL → Bitmap 的 LruCache（24 张），
  * 滚动列表时重复项直接命中内存，避免重复下载。
  */
-private object CoverArtCache {
+internal object CoverArtCache {
     private val cache = object : LruCache<String, Bitmap>(24) {}
 
     /** 查缓存；未命中返回 null */
@@ -2931,7 +2993,7 @@ private fun CoverArt(
  * @param albumArtUri 本地专辑封面 URI；null=不加载本地封面
  * @return 解码成功返回 Bitmap，任何失败返回 null（UI 显示占位图标）
  */
-private fun loadCoverBitmap(
+internal fun loadCoverBitmap(
     context: Context,
     coverUrl: String?,
     albumArtUri: String?,

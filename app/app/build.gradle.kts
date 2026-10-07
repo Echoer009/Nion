@@ -109,6 +109,9 @@ dependencies {
     implementation("androidx.navigation:navigation-compose:2.9.8")
     implementation("sh.calvin.reorderable:reorderable:3.1.0")
 
+    // Palette —— 播放页从封面位图提取主色，生成动态渐变背景（汽水音乐式取色）
+    implementation("androidx.palette:palette-ktx:1.0.0")
+
     // OkHttp —— HTTP 客户端，用于 SSE 流式聊天
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 
