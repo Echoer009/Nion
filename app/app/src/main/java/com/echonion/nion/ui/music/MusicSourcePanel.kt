@@ -42,11 +42,8 @@ import com.echonion.nion.ui.icons.LucideIcons
  * - Surface 使用 RoundedCornerShape(topEnd, bottomEnd) 匹配左侧面板圆角
  * - 内部 LazyColumn 展示三个音源项
  *
- * 内容三项（点击切换主界面音源，选中项高亮）：
- * 1. 本地曲目 —— MediaStore 全机音频
- * 2. 类脑娘服务器 —— 预置 https://echonion.org/music
- * 3. 自己的服务器 —— 用户自填 URL + 账密
- * 未配置账密的服务器项右侧显示"未配置"角标，提示用户去主界面补全配置。
+ * 内容三项（本地曲目 / 类脑娘服务器 / 自己的服务器），
+ * 点击切换主界面音源，选中项高亮。
  *
  * @param onSidebarDrag 拖拽回调，传递给 DualPanelLayout 的 handleDrag
  * @param onSidebarDragStopped 拖拽结束回调，传递给 DualPanelLayout 的 settle
@@ -64,9 +61,9 @@ fun MusicSourcePanel(
 
     // 音源项配置列表：顺序固定 本地→类脑娘→自定义，与主界面切换动画的方向计算一致
     val items = listOf(
-        SourceItem(MusicSource.LOCAL, "本地曲目", "扫描本机全部音频", LucideIcons.AudioLines),
-        SourceItem(MusicSource.BRAINGIRL, "类脑娘服务器", "预置音源，用网页端注册的账号登录", LucideIcons.Cloud),
-        SourceItem(MusicSource.CUSTOM, "自己的服务器", "连接你自己的 Navidrome", LucideIcons.Server),
+        SourceItem(MusicSource.LOCAL, "本地曲目", LucideIcons.AudioLines),
+        SourceItem(MusicSource.BRAINGIRL, "类脑娘服务器", LucideIcons.Cloud),
+        SourceItem(MusicSource.CUSTOM, "自己的服务器", LucideIcons.Server),
     )
 
     Surface(
@@ -101,17 +98,10 @@ fun MusicSourcePanel(
             ) {
                 items(items.size) { index ->
                     val item = items[index]
-                    // 引导态标注：服务器账密未填写时该项显示"未配置"角标
-                    val unconfigured = when (item.source) {
-                        MusicSource.LOCAL -> false
-                        MusicSource.BRAINGIRL -> !vm.isBraingirlConfigured
-                        MusicSource.CUSTOM -> !vm.isCustomConfigured
-                    }
+                    // 点击切换音源：主界面 AnimatedContent 按新 source 切换三态
                     SourceRow(
                         item = item,
                         isSelected = vm.source == item.source,
-                        unconfigured = unconfigured,
-                        // 点击切换音源：主界面 AnimatedContent 按新 source 切换三态
                         onSelect = { vm.selectSource(item.source) },
                     )
                 }
@@ -125,13 +115,11 @@ fun MusicSourcePanel(
  *
  * @property source 对应的音源枚举
  * @property label 显示名称
- * @property description 副标题说明（类脑娘项显示预置地址）
  * @property icon 左侧图标
  */
 private data class SourceItem(
     val source: MusicSource,
     val label: String,
-    val description: String,
     val icon: ImageVector,
 )
 
@@ -142,18 +130,16 @@ private data class SourceItem(
  *   primary 竖条（选中时起始内距 10dp，未选 14dp），标题 SemiBold；
  * - 未选 = surfaceContainer 背景 + onSurfaceVariant 内容；
  * - 12dp 圆角 Surface，颜色 animateColorAsState 200ms 平滑过渡；
- * - 图标 18dp 淡透明（与清单项同款），说明为 labelSmall 副标题。
+ * - 图标 18dp 淡透明（与清单项同款），行内仅保留图标与名称。
  *
  * @param item 音源配置
  * @param isSelected 是否为当前选中音源（高亮显示）
- * @param unconfigured 账密是否未配置（显示"未配置"角标）
  * @param onSelect 点击回调，切换到该音源
  */
 @Composable
 private fun SourceRow(
     item: SourceItem,
     isSelected: Boolean,
-    unconfigured: Boolean,
     onSelect: () -> Unit,
 ) {
     // 与 SidebarChecklistItem 同款配色逻辑（secondaryContainer ≠ 主操作 primary）
@@ -206,39 +192,16 @@ private fun SourceRow(
                 modifier = Modifier.size(18.dp),
             )
             Spacer(modifier = Modifier.width(8.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    item.label,
-                    style = MaterialTheme.typography.bodyLarge,
-                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                    color = contentColor,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-                Text(
-                    item.description,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = contentColor.copy(alpha = com.echonion.nion.ui.theme.NionAlpha.TEXT_SECONDARY),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
-            }
+            Text(
+                item.label,
+                style = MaterialTheme.typography.bodyLarge,
+                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                color = contentColor,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
 
-            // 未配置角标：引导用户进入主界面补全账密/URL
-            if (unconfigured) {
-                Spacer(modifier = Modifier.width(8.dp))
-                Surface(
-                    shape = RoundedCornerShape(8.dp),
-                    color = MaterialTheme.colorScheme.errorContainer,
-                ) {
-                    Text(
-                        "未配置",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onErrorContainer,
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                    )
-                }
-            }
         }
     }
 }
