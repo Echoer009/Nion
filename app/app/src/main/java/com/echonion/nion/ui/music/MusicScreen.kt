@@ -91,7 +91,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -1363,6 +1362,113 @@ private fun AlbumListContent(
     }
 }
 
+/** 详情页曲目排序模式：原序 → 名称 → 时长 循环切换（sortedBy 稳定，同名保持原序） */
+private enum class DetailSortMode(val label: String) {
+    ORIGINAL("原序"),
+    TITLE("名称"),
+    DURATION("时长"),
+    ;
+
+    fun next(): DetailSortMode = entries[(ordinal + 1) % entries.size]
+}
+
+/**
+ * 构建详情页展示列表：按过滤词（标题/艺术家包含，忽略大小写）过滤当前曲目，
+ * 再按排序模式稳定排序；携带原始下标，歌单移除/队列起播均用原始下标定位。
+ */
+private fun filterSortDetailTracks(
+    tracks: List<PlayableTrack>,
+    query: String,
+    mode: DetailSortMode,
+): List<IndexedValue<PlayableTrack>> {
+    val q = query.trim()
+    val filtered = tracks.withIndex().filter { ( _, track) ->
+        q.isEmpty() || track.title.contains(q, ignoreCase = true) ||
+            track.artist.contains(q, ignoreCase = true)
+    }
+    return when (mode) {
+        DetailSortMode.ORIGINAL -> filtered
+        DetailSortMode.TITLE -> filtered.sortedBy { it.value.title.lowercase() }
+        DetailSortMode.DURATION -> filtered.sortedBy { it.value.durationSeconds }
+    }
+}
+
+/**
+ * 详情页工具行 —— 头部与曲目列表之间的过滤/排序控件。
+ * 右对齐 20dp 灰色小图标：搜索（展开/收起下方过滤输入框）、
+ * 排序（原序→名称→时长循环），排序图标旁 labelSmall 显示当前模式中文。
+ */
+@Composable
+private fun DetailToolsBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    searchOpen: Boolean,
+    onSearchToggle: () -> Unit,
+    sortMode: DetailSortMode,
+    onSortClick: () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                sortMode.label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Spacer(modifier = Modifier.width(4.dp))
+            Icon(
+                LucideIcons.Search,
+                contentDescription = "过滤当前列表",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(20.dp)
+                    .clickable(onClick = onSearchToggle),
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Icon(
+                LucideIcons.ArrowDownAZ,
+                contentDescription = "切换排序",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(20.dp)
+                    .clickable(onClick = onSortClick),
+            )
+        }
+        if (searchOpen) {
+            OutlinedTextField(
+                value = query,
+                onValueChange = onQueryChange,
+                modifier = Modifier.fillMaxWidth(),
+                placeholder = { Text("过滤当前列表") },
+                leadingIcon = {
+                    Icon(
+                        LucideIcons.Search,
+                        contentDescription = null,
+                        modifier = Modifier.size(18.dp),
+                    )
+                },
+                trailingIcon = {
+                    // X：清空过滤词并收起输入框
+                    Icon(
+                        LucideIcons.X,
+                        contentDescription = "清空并收起",
+                        modifier = Modifier
+                            .size(18.dp)
+                            .clickable {
+                                onQueryChange("")
+                                onSearchToggle()
+                            },
+                    )
+                },
+                singleLine = true,
+            )
+        }
+    }
+}
+
 /**
  * 专辑详情内容 —— 专辑头部信息 + 曲目列表；点击曲目以该专辑全部曲目为队列起播。
  * 本地/服务器共用：曲目读 [MusicViewModel.albumSongs]（服务器=getAlbum 结果，
@@ -1387,6 +1493,14 @@ private fun AlbumDetailContent(
             CircularProgressIndicator()
         }
         return
+    }
+    // 详情页局部过滤/排序状态：仅作用于当前列表，切换专辑即重置；
+    // 刻意不写 vm.searchQuery（那是顶部全局搜索，语义不同）
+    var filterQuery by remember(album.id) { mutableStateOf("") }
+    var searchOpen by remember(album.id) { mutableStateOf(false) }
+    var sortMode by remember(album.id) { mutableStateOf(DetailSortMode.ORIGINAL) }
+    val displaySongs = remember(vm.albumSongs, filterQuery, sortMode) {
+        filterSortDetailTracks(vm.albumSongs, filterQuery, sortMode)
     }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
@@ -1459,20 +1573,43 @@ private fun AlbumDetailContent(
                 }
             }
         }
-        // 曲目列表：点击即以专辑全部曲目为队列，从该曲开始播放
-        itemsIndexed(vm.albumSongs) { index, track ->
-            TrackRow(
-                track = track,
-                index = index,
-                isCurrent = vm.currentTrack?.id == track.id,
-                isPlaying = vm.isPlaying,
-                coverModifier = trackCoverModifier,
-                onClick = {
-                    vm.playQueue(vm.albumSongs, index)
-                    // 点歌后展开播放页，该行小封面飞成播放页大封面
-                    onPlayFromList(track.id)
-                },
+        // 工具行：过滤输入 + 排序切换（仅作用于下方展示列表）
+        item(key = "detail_tools") {
+            DetailToolsBar(
+                query = filterQuery,
+                onQueryChange = { filterQuery = it },
+                searchOpen = searchOpen,
+                onSearchToggle = { searchOpen = !searchOpen },
+                sortMode = sortMode,
+                onSortClick = { sortMode = sortMode.next() },
             )
+        }
+        // 曲目列表：点击即以专辑全部曲目为队列，从该曲开始播放；
+        // 展示列表携带原始下标，起播仍按原始队列位置定位
+        if (displaySongs.isEmpty()) {
+            item(key = "album_no_match") {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "无匹配曲目",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        } else {
+            itemsIndexed(displaySongs, key = { _, entry -> "al-track-${entry.index}-${entry.value.id}" }) { _, entry ->
+                TrackRow(
+                    track = entry.value,
+                    index = entry.index,
+                    isCurrent = vm.currentTrack?.id == entry.value.id,
+                    coverModifier = trackCoverModifier,
+                    onClick = {
+                        vm.playQueue(vm.albumSongs, entry.index)
+                        // 点歌后展开播放页，该行小封面飞成播放页大封面
+                        onPlayFromList(entry.value.id)
+                    },
+                )
+            }
         }
     }
 }
@@ -1514,7 +1651,6 @@ private fun SearchResultContent(
                     track = track,
                     index = index,
                     isCurrent = vm.currentTrack?.id == track.id,
-                    isPlaying = vm.isPlaying,
                     coverModifier = trackCoverModifier,
                     // 搜索结果播放队列 = 搜索到的歌曲列表
                     onClick = {
@@ -1742,19 +1878,21 @@ private fun PlaylistDetailContent(
         }
         return
     }
+    // 详情页局部过滤/排序状态：仅作用于当前列表，切换歌单即重置；
+    // 刻意不写 vm.searchQuery（那是顶部全局搜索，语义不同）
+    var filterQuery by remember(playlist.id) { mutableStateOf("") }
+    var searchOpen by remember(playlist.id) { mutableStateOf(false) }
+    var sortMode by remember(playlist.id) { mutableStateOf(DetailSortMode.ORIGINAL) }
+    val displayTracks = remember(vm.playlistTracks, filterQuery, sortMode) {
+        filterSortDetailTracks(vm.playlistTracks, filterQuery, sortMode)
+    }
     LazyColumn(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
         // 歌单头部：容器 morph（与列表歌单行配对）+ 96dp 封面块 + 名称/说明/统计
         item(key = "playlist_header") {
-            // 候选封面：前 8 首中不同封面 key（本地 albumArtUri / 服务器 coverArtUrl）去重后的曲目
-            val coverCandidates = remember(vm.playlistTracks) {
-                vm.playlistTracks.take(8).distinctBy {
-                    it.albumArtUri?.let { uri -> "local:$uri" } ?: it.coverArtUrl
-                }
-            }
-            val coverIndex = vm.playlistCoverIndex(playlist.id, coverCandidates.size)
+            // 封面固定取第一首曲目（Navidrome 无封面写入 API，不再提供切换交互）
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1772,9 +1910,9 @@ private fun PlaylistDetailContent(
                     .padding(top = 8.dp, bottom = 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                // 96dp 封面块：空歌单用占位图标，否则显示当前选中候选曲目封面；
-                // 点击（候选 > 1 时）循环切换下一个候选封面
-                if (coverCandidates.isEmpty()) {
+                // 96dp 封面块：固定显示第一首曲目封面；空歌单用占位图标
+                val firstTrack = vm.playlistTracks.firstOrNull()
+                if (firstTrack == null) {
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -1793,21 +1931,11 @@ private fun PlaylistDetailContent(
                     Box(
                         modifier = Modifier
                             .size(96.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .then(
-                                if (coverCandidates.size > 1) {
-                                    Modifier.clickable {
-                                        vm.cyclePlaylistCover(playlist.id, coverCandidates.size)
-                                    }
-                                } else {
-                                    Modifier
-                                },
-                            ),
+                            .clip(RoundedCornerShape(16.dp)),
                     ) {
-                        val selectedCover = coverCandidates[coverIndex]
                         CoverArt(
-                            coverUrl = selectedCover.coverArtUrl,
-                            albumArtUri = selectedCover.albumArtUri,
+                            coverUrl = firstTrack.coverArtUrl,
+                            albumArtUri = firstTrack.albumArtUri,
                             modifier = Modifier.size(96.dp),
                             placeHolderSize = 40.dp,
                             cornerRadius = 16.dp,
@@ -1844,20 +1972,43 @@ private fun PlaylistDetailContent(
                 }
             }
         }
-        // 曲目列表：点击以歌单为队列起播，行尾可单首移除
-        itemsIndexed(vm.playlistTracks, key = { i, t -> "pl-track-$i-${t.id}" }) { index, track ->
-            TrackRow(
-                track = track,
-                index = index,
-                isCurrent = vm.currentTrack?.id == track.id,
-                isPlaying = vm.isPlaying,
-                coverModifier = trackCoverModifier,
-                onClick = {
-                    vm.playQueue(vm.playlistTracks, index)
-                    onPlayFromList(track.id)
-                },
-                onRemove = { vm.removePlaylistTrack(playlist.id, index) },
+        // 工具行：过滤输入 + 排序切换（仅作用于下方展示列表）
+        item(key = "detail_tools") {
+            DetailToolsBar(
+                query = filterQuery,
+                onQueryChange = { filterQuery = it },
+                searchOpen = searchOpen,
+                onSearchToggle = { searchOpen = !searchOpen },
+                sortMode = sortMode,
+                onSortClick = { sortMode = sortMode.next() },
             )
+        }
+        // 曲目列表：点击以歌单为队列起播，行尾可单首移除；
+        // 展示列表携带原始下标，移除/起播仍按原始下标定位，删的永远是列表里那首
+        if (displayTracks.isEmpty() && vm.playlistTracks.isNotEmpty()) {
+            item(key = "playlist_no_match") {
+                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+                    Text(
+                        "无匹配曲目",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        } else {
+            itemsIndexed(displayTracks, key = { _, entry -> "pl-track-${entry.index}-${entry.value.id}" }) { _, entry ->
+                TrackRow(
+                    track = entry.value,
+                    index = entry.index,
+                    isCurrent = vm.currentTrack?.id == entry.value.id,
+                    coverModifier = trackCoverModifier,
+                    onClick = {
+                        vm.playQueue(vm.playlistTracks, entry.index)
+                        onPlayFromList(entry.value.id)
+                    },
+                    onRemove = { vm.removePlaylistTrack(playlist.id, entry.index) },
+                )
+            }
         }
         if (vm.playlistTracks.isEmpty()) {
             item(key = "playlist_tracks_empty") {
@@ -2134,16 +2285,10 @@ private fun MiniPlayerBar(
         color = MaterialTheme.colorScheme.surfaceContainer,
     ) {
         Column(modifier = Modifier.clickable(onClick = onExpand)) {
-            // 细进度条：宽度按 position/duration 比例；时长未知时隐藏
+            // 底边进度：宽度按 position/duration 比例；时长未知时透明占位保持行高稳定
             val progress = if (vm.durationMs > 0) {
                 (vm.positionMs.toFloat() / vm.durationMs).coerceIn(0f, 1f)
             } else null
-            if (progress != null) {
-                LinearProgressIndicator(
-                    progress = { progress },
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -2201,6 +2346,17 @@ private fun MiniPlayerBar(
                         LucideIcons.SkipForward,
                         contentDescription = "下一首",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+            // 自绘底边进度条：直角贴底全宽，不会被顶部圆角裁切
+            Box(modifier = Modifier.fillMaxWidth().height(2.dp)) {
+                if (progress != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(progress)
+                            .height(2.dp)
+                            .background(MaterialTheme.colorScheme.primary),
                     )
                 }
             }
@@ -2319,6 +2475,11 @@ private fun FullPlayerOverlay(
                             val pagerState = rememberPagerState(
                                 initialPage = vm.currentIndex.coerceAtLeast(0),
                             ) { vm.queue.size }
+                            // 拖拽锚点页：手势开始时记录，用于把长拖限制在相邻一页内
+                            var anchorPage by remember { mutableStateOf(-1) }
+                            // 程序化滚动标记：外部切歌的 animateScrollToPage 允许多页，
+                            // 不应被"限一页"逻辑拦截
+                            var programmaticJump by remember { mutableStateOf(false) }
 
                             // 用户滑动落定 → 播放落定页曲目
                             LaunchedEffect(pagerState) {
@@ -2334,7 +2495,33 @@ private fun FullPlayerOverlay(
                                         idx != pagerState.settledPage &&
                                         !pagerState.isScrollInProgress
                                     ) {
+                                        programmaticJump = true
                                         pagerState.animateScrollToPage(idx)
+                                        programmaticJump = false
+                                    }
+                                }
+                            }
+                            // 手势开始（非程序化滚动）→ 记录锚点页
+                            LaunchedEffect(pagerState) {
+                                snapshotFlow { pagerState.isScrollInProgress }.collect { scrolling ->
+                                    if (scrolling && !programmaticJump) {
+                                        anchorPage = pagerState.settledPage
+                                    }
+                                }
+                            }
+                            // 长拖限一页：PagerSnapDistance.atMost(1) 只管松手惯性，
+                            // 手指不松连续拖可一次跨多页；这里发现 currentPage 越过
+                            // 锚点 ±1 时立即攔回到相邻页
+                            LaunchedEffect(pagerState) {
+                                snapshotFlow { pagerState.currentPage }.collect { page ->
+                                    if (pagerState.isScrollInProgress &&
+                                        !programmaticJump &&
+                                        anchorPage >= 0 &&
+                                        (page > anchorPage + 1 || page < anchorPage - 1)
+                                    ) {
+                                        pagerState.scrollToPage(
+                                            anchorPage + if (page > anchorPage) 1 else -1
+                                        )
                                     }
                                 }
                             }
@@ -2659,7 +2846,6 @@ private fun AnimatedPlayPauseIcon(
  * @param track 曲目数据
  * @param index 序号（仅用于点击回调时的队列下标）
  * @param isCurrent 是否为当前播放曲目（高亮标题 + 封面角标音符图标）
- * @param isPlaying 是否正在播放
  * @param coverModifier 行内小封面的 sharedElement 工厂（传入曲目 id 生成 key）
  * @param onClick 点击整行时触发（开始播放该曲）
  */
@@ -2668,7 +2854,6 @@ private fun TrackRow(
     track: PlayableTrack,
     index: Int,
     isCurrent: Boolean,
-    isPlaying: Boolean,
     coverModifier: @Composable (String) -> Modifier = { Modifier },
     // 行尾移除按钮回调；null（默认）不显示 —— 歌单详情传入以支持单首移除
     onRemove: (() -> Unit)? = null,
@@ -2738,15 +2923,6 @@ private fun TrackRow(
             if (track.durationSeconds > 0) formatTrackDuration(track.durationSeconds) else "--:--",
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-        // 引导播放入口的视觉提示（isPlaying 参数保留给未来"跳动音符"动效用）
-        Icon(
-            LucideIcons.Play,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = if (isPlaying && isCurrent) 1f else 0.4f),
-            modifier = Modifier
-                .size(20.dp)
-                .padding(start = 4.dp),
         )
         // 单首移除按钮（仅歌单详情传入 onRemove 时显示）
         if (onRemove != null) {
