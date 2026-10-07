@@ -215,9 +215,12 @@ fun NionApp() {
                     MaterialTheme.colorScheme.background
                 },
                 bottomBar = {
-                    // 导航栏即"铺开"起点：沉浸期间整套切换播放页取色配色，
-                    // 渐变底端色与导航栏容器色同值，交界无缝（无截断）
-                    PlayerImmersiveWrap(backdrop = if (musicImmersive) musicVm.playerBackdrop else null) {
+                    // 导航栏即"铺开"起点：沉浸期间整套切换播放页取色配色；
+                    // navLevel 取比面板亮一档的容器色，对照米色主题的层级关系
+                    PlayerImmersiveWrap(
+                        backdrop = if (musicImmersive) musicVm.playerBackdrop else null,
+                        navLevel = true,
+                    ) {
                         NionBottomNavBar(
                             currentDestination = currentDestination,
                             onItemClick = { item ->
@@ -344,18 +347,29 @@ fun NionApp() {
 /**
  * 音乐沉浸包裹层：播放页打开期间给底部导航栏/左右侧滑面板整套套上
  * 播放页取色配色（深色系）。铺开动画自导航栏自下而上扫过整个界面时，
- * 导航栏即颜色起点，与播放页渐变底端同色无缝衔接；收起过渡结束还原。
+ * 导航栏即颜色起点，与播放页渐变底端无缝衔接；收起过渡结束还原。
+ *
+ * 容器分层对照米色主题层级（主页面最沉/侧边栏略亮/底部导航再亮一档）：
+ * 面板取 surfaceContainer 档（提亮 5%），导航栏经 [navLevel] 取
+ * surfaceContainerHigh 档（提亮 10%），窗口底色最沉 = 渐变底端。
  *
  * @param backdrop 播放页取色（null = 非沉浸态，原样组合内容）
+ * @param navLevel true = 底部导航档容器色（比面板档亮一档）
  */
 @Composable
 private fun PlayerImmersiveWrap(
     backdrop: com.echonion.nion.ui.music.PlayerBackdropColors?,
+    navLevel: Boolean = false,
     content: @Composable () -> Unit,
 ) {
     if (backdrop != null) {
+        val scheme = com.echonion.nion.ui.music.rememberPlayerColorScheme(backdrop)
         MaterialTheme(
-            colorScheme = com.echonion.nion.ui.music.rememberPlayerColorScheme(backdrop),
+            colorScheme = if (navLevel) {
+                scheme.copy(surfaceContainer = scheme.surfaceContainerHigh)
+            } else {
+                scheme
+            },
         ) {
             content()
         }
@@ -363,6 +377,7 @@ private fun PlayerImmersiveWrap(
         content()
     }
 }
+
 
 /**
  * 底部导航栏。

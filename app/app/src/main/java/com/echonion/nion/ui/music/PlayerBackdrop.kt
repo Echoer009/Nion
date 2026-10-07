@@ -125,13 +125,18 @@ internal suspend fun prewarmBackdrop(context: android.content.Context, track: Pl
  * 播放页专用深色配色：accent（取色）作 primary，背景容器色贴近渐变两端，
  * 其余沿用 Material 深色默认值。播放页内部所有 MaterialTheme.colorScheme
  * 引用（滑块/图标/队列行…）经嵌套 MaterialTheme 自动切换，无需逐处改色。
+ *
+ * 容器分层对照米色主题的层级（主页面最沉 / 侧边栏略亮 / 底部导航再亮一档）：
+ * 窗口底色 = 渐变底端，面板容器提亮 5%，导航容器提亮 10% —— 沉浸态依旧
+ * 有层级，不是一张平板色。
  */
 @Composable
 internal fun rememberPlayerColorScheme(backdrop: PlayerBackdropColors) = darkColorScheme(
     primary = backdrop.accent ?: Color(0xFFD0BCFF),
     background = backdrop.top,
     surface = backdrop.top,
-    surfaceContainer = backdrop.bottom,
-    surfaceContainerHigh = backdrop.bottom,
+    surfaceContainer = lerp(backdrop.bottom, Color.White, 0.05f),
+    surfaceContainerHigh = lerp(backdrop.bottom, Color.White, 0.10f),
+    surfaceContainerHighest = lerp(backdrop.bottom, Color.White, 0.10f),
 )
 

@@ -2321,10 +2321,17 @@ private fun FullPlayerOverlay(
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose { vm.playerBackdrop = null }
     }
-    // 铺开揭示进度：与容器 morph 同一条临界弹簧曲线（0=收起 1=全开），
-    // 驱动渐变自下而上（从导航栏）铺满/退下 —— NionApp 侧导航栏即颜色起点
+    // 铺开揭示进度：临界弹簧（0=收起 1=全开），驱动渐变自下而上（从导航栏）
+    // 铺满/退下 —— NionApp 侧导航栏即颜色起点；收起方向用更硬的弹簧快速
+    // 退下，避免揭示尾巴拖长导致导航栏还原"慢半拍"
     val reveal by animatedVisibilityScope.transition.animateFloat(
-        transitionSpec = { spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow) },
+        transitionSpec = {
+            if (targetState == EnterExitState.PostExit) {
+                spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMedium)
+            } else {
+                spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+            }
+        },
         label = "playerReveal",
     ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
 
