@@ -18,8 +18,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
-import androidx.compose.animation.EnterExitState
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
@@ -56,8 +54,6 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInRoot
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.requiredSize
@@ -218,11 +214,10 @@ fun MusicScreen(
         AnimatedContent(
             targetState = showFullPlayer,
             transitionSpec = {
-                // 展开色"自下而上铺满"由播放页揭示裁剪完成（见 FullPlayerOverlay
-                // 的 reveal）：进入侧不做淡入（保持不透明，让色块边缘干净），
-                // 主界面淡出让位；容器与封面 morph 照旧
+                // 展开/收起均为交叉淡入淡出：位移交由 sharedElement/sharedBounds 的
+                // 弹簧 boundsTransform 完成，避免容器滑动干扰封面飞行轨迹
                 (
-                    EnterTransition.None togetherWith
+                    fadeIn(tween(200, easing = FastOutSlowInEasing)) togetherWith
                         fadeOut(tween(250, easing = FastOutSlowInEasing))
                     ) using SizeTransform(clip = false)
             },
@@ -2200,9 +2195,18 @@ private fun MiniPlayerBar(
     animatedVisibilityScope: AnimatedVisibilityScope,
 ) {
     Surface(
-        // 容器不参与 morph（旧"迷你条生长成全屏页"起步时播放页被压缩在条形
-        // 小矩形内，缩放过程中底缘抬离导航栏、露出米色）；铺开改由播放页揭示
-        // 裁剪自下而上完成，此处仅保留封面 sharedElement 飞行
+        // 容器 sharedBounds：迷你条整体与播放页全屏容器配对，展开时条"生长"成全屏页，
+        // 收起时全屏页缩回条 —— 参照 TaskScreen FAB↔表单的 sharedBounds 模式
+        modifier = with(sharedTransitionScope) {
+            Modifier.sharedBounds(
+                sharedContentState = rememberSharedContentState("music_player_bar"),
+                animatedVisibilityScope = animatedVisibilityScope,
+                // 临界弹簧：柔和无过冲，与项目统一曲线一致
+                boundsTransform = { _, _ ->
+                    spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                },
+            )
+        },
         tonalElevation = 4.dp,
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -2321,43 +2325,31 @@ private fun FullPlayerOverlay(
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose { vm.playerBackdrop = null }
     }
-    // 铺开揭示进度：临界弹簧（0=收起 1=全开），驱动渐变自下而上（从导航栏）
-    // 铺满/退下 —— NionApp 侧导航栏即颜色起点；收起方向用更硬的弹簧快速
-    // 退下，避免揭示尾巴拖长导致导航栏还原"慢半拍"
-    val reveal by animatedVisibilityScope.transition.animateFloat(
-        transitionSpec = {
-            if (targetState == EnterExitState.PostExit) {
-                spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMedium)
-            } else {
-                spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
-            }
-        },
-        label = "playerReveal",
-    ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
-
     // 播放队列默认收起：顶部按钮呼出（常驻列表会挤占沉浸滑切区）
     var queueVisible by remember { mutableStateOf(false) }
     Surface(
-        // 容器不参与 morph（迷你条↔全屏的 bounds 缩放会抬离底缘露米色）：
-        // 全屏组合 + 揭示裁剪自下而上铺开，封面飞行仍由 sharedElement 完成
-        modifier = Modifier.fillMaxSize(),
-        // 背景交给下层渐变 Box 绘制；Surface 本体透明
+        // 容器 sharedBounds：与迷你播放条配对，展开时迷你条生长为全屏页。
+        // 底缘离开导航栏露出的缝由 NionApp 沉浸态把窗口底色染成渐变底端色
+        // 兜住（露出的也是歌曲色，不再是米色）
+        modifier = Modifier
+            .fillMaxSize()
+            .then(
+                with(sharedTransitionScope) {
+                    Modifier.sharedBounds(
+                        sharedContentState = rememberSharedContentState("music_player_bar"),
+                        animatedVisibilityScope = animatedVisibilityScope,
+                        boundsTransform = { _, _ ->
+                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                        },
+                    )
+                },
+            ),
+        // 背景交给下层渐变 Box 绘制；Surface 本体透明以承载 sharedBounds 形变
         color = Color.Transparent,
     ) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .drawWithContent {
-                    // 揭示裁剪：仅绘制底部 reveal 比例区域（顶缘随进度上移），
-                    // 全开后零开销直绘；渐变底端与已染色的导航栏同色衔接
-                    if (reveal >= 1f) {
-                        drawContent()
-                    } else {
-                        clipRect(top = size.height * (1f - reveal)) {
-                            this@drawWithContent.drawContent()
-                        }
-                    }
-                }
                 .background(
                     Brush.verticalGradient(listOf(backdrop.top, backdrop.bottom)),
                 ),
