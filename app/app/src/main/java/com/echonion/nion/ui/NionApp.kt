@@ -190,6 +190,11 @@ fun NionApp() {
         Box {
             val navBackStackEntry by navController.currentBackStackEntryAsState()
             val currentDestination = navBackStackEntry?.destination
+            val musicVm = com.echonion.nion.ui.music.musicViewModel()
+            val currentRoute = currentDestination?.route
+            // 音乐播放页展开时，底部导航栏保留但染成沉浸取色（深色配色，
+            // 图标/指示自动白化），与播放页渐变无缝衔接
+
 
             // 侧边栏返回拦截：任一侧边栏打开时，系统返回手势关闭侧边栏而非退出页面
             BackHandler(enabled = dualState.isOpen) {
@@ -199,19 +204,38 @@ fun NionApp() {
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
                 bottomBar = {
-                    NionBottomNavBar(
-                        currentDestination = currentDestination,
-                        onItemClick = { item ->
-                            /* 点击底部导航时，先收起已打开的侧边面板，再执行跳转 */
-                            coroutineScope.launch {
-                                dualState.closePanel()
-                                navigateToRoute(navController, item.route)
-                            }
-                        },
-                    )
+                    val playerImmersive = currentRoute == "music" &&
+                        musicVm.isFullPlayerOpen &&
+                        musicVm.playerBackdrop != null
+                    if (playerImmersive) {
+                        MaterialTheme(
+                            colorScheme = com.echonion.nion.ui.music.rememberPlayerColorScheme(
+                                musicVm.playerBackdrop!!,
+                            ),
+                        ) {
+                            NionBottomNavBar(
+                                currentDestination = currentDestination,
+                                onItemClick = { item ->
+                                    coroutineScope.launch {
+                                        dualState.closePanel()
+                                        navigateToRoute(navController, item.route)
+                                    }
+                                },
+                            )
+                        }
+                    } else {
+                        NionBottomNavBar(
+                            currentDestination = currentDestination,
+                            onItemClick = { item ->
+                                coroutineScope.launch {
+                                    dualState.closePanel()
+                                    navigateToRoute(navController, item.route)
+                                }
+                            },
+                        )
+                    }
                 },
             ) { innerPadding ->
-                val currentRoute = currentDestination?.route
                 DualPanelLayout(
                     leftPanelWidth = if (currentRoute == "pomodoro") 300.dp else 260.dp,
                     rightPanelWidth = 320.dp,

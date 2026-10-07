@@ -73,13 +73,12 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.pager.VerticalPager
-import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -105,6 +104,8 @@ import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.key
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.foundation.pager.VerticalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.getValue
@@ -183,8 +184,9 @@ fun MusicScreen(
         mainActivity.clearPendingMusicAuth()
     }
 
-    // 完整播放页是否展开（纯 UI 状态，留在 Composable 内）
-    var showFullPlayer by remember { mutableStateOf(false) }
+    // 完整播放页是否展开：挂在 VM 上，NionApp 据此在播放页展开时隐藏底部
+    // 导航栏（沉浸色铺满全屏）；跨路由记忆（回音乐页仍在播放页）
+    var showFullPlayer by vm::isFullPlayerOpen
 
     // 记录"从列表点歌"打开播放页时的曲目 id：
     // 非空时播放页大封面使用 "music_track_cover_<trackId>" 作为 sharedElement key，
@@ -2191,6 +2193,11 @@ private fun FullPlayerOverlay(
     // 切歌时颜色 600ms 平滑过渡 —— 汽水音乐式沉浸播放面
     val backdrop = rememberPlayerBackdrop(track)
     val playerScheme = rememberPlayerColorScheme(backdrop)
+    // 发布沉浸色给 NionApp（底部导航栏染色）；播放页离开组合时清空
+    LaunchedEffect(backdrop) { vm.playerBackdrop = backdrop }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose { vm.playerBackdrop = null }
+    }
     // 播放队列默认收起：顶部按钮呼出（常驻列表会挤占沉浸滑切区）
     var queueVisible by remember { mutableStateOf(false) }
     Surface(
@@ -2223,7 +2230,8 @@ private fun FullPlayerOverlay(
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 24.dp)
-                        .statusBarsPadding(),
+                        .statusBarsPadding()
+                        .navigationBarsPadding(),
                 ) {
                     // ===== 顶部收起按钮 =====
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -2260,7 +2268,7 @@ private fun FullPlayerOverlay(
                             )
                         }
                     } else {
-                        // ===== 沉浸式上下滑切歌（一页一首，滑动即切） =====
+                        // ===== 沉浸式上下滑切歌（原生 VerticalPager） =====
                         // key 绑定队列实例：换专辑/歌单重新开播时重建 pager 并
                         // 落位新 currentIndex；原队列内切歌不重建（保住滚动状态）
                         key(vm.queue) {
@@ -2274,10 +2282,8 @@ private fun FullPlayerOverlay(
                                     if (page != vm.currentIndex) vm.playQueueIndex(page)
                                 }
                             }
-                            // 外部切歌（迷你条/队列行/控制按钮）→ 滚到对应页。
-                            // 只在 pager 完全落定后接管：用户拖拽中途 currentPage 已
-                            // 变而 currentIndex 未变，此时抢跑 animateScrollToPage
-                            // 会把页面拽回旧曲，表现为"滑不动/被弹回"
+                            // 外部切歌（迷你条/队列行/按钮）→ 滚到对应页。
+                            // 仅在 pager 完全落定后接管，避免拽回用户拖拽
                             LaunchedEffect(pagerState) {
                                 snapshotFlow { vm.currentIndex }.collect { idx ->
                                     if (idx >= 0 &&
@@ -2289,11 +2295,20 @@ private fun FullPlayerOverlay(
                                 }
                             }
 
+                            // 一次 fling 最多翻一页：使劲甩也只前进/后退一首，
+                            // 不会从第一首直接飞到最后
+                            val flingBehavior = androidx.compose.foundation.pager.PagerDefaults.flingBehavior(
+                                pagerState,
+                                androidx.compose.foundation.pager.PagerSnapDistance.atMost(1),
+                            )
+
+
                             VerticalPager(
                                 state = pagerState,
+                                flingBehavior = flingBehavior,
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .weight(1.2f),
+                                    .weight(1f)
                             ) { page ->
                                 val pageTrack = vm.queue.getOrNull(page)
                                     ?: return@VerticalPager
@@ -2376,7 +2391,6 @@ private fun FullPlayerOverlay(
                                 }
                             }
                         }
-
                         // ===== 进度条 =====
                         // 拖动期间非空；null=跟随播放进度。key 绑定曲目 id，切歌重置拖动态
                         var dragPosition by remember(track.id) { mutableStateOf<Float?>(null) }
@@ -2462,21 +2476,14 @@ private fun FullPlayerOverlay(
                     // ===== 播放队列面板（入口：右上角按钮；底部滑入） =====
                     AnimatedVisibility(
                         visible = queueVisible,
-                        enter = fadeIn() + slideInVertically { it / 2 },
-                        exit = fadeOut() + slideOutVertically { it / 2 },
+                        enter = fadeIn(tween(280)) + slideInVertically(tween(280)) { it / 3 },
+                        exit = fadeOut(tween(200)) + slideOutVertically(tween(200)) { it / 3 },
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         Box(
                             modifier = Modifier.fillMaxSize(),
                             contentAlignment = Alignment.BottomCenter,
                         ) {
-                            // 半透明遮罩：点按关闭
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black.copy(alpha = 0.4f))
-                                    .clickable { queueVisible = false },
-                            )
                             Surface(
                                 shape = RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp),
                                 color = MaterialTheme.colorScheme.surfaceContainerHigh,
@@ -2487,7 +2494,8 @@ private fun FullPlayerOverlay(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .padding(horizontal = 20.dp, vertical = 12.dp),
+                                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                                        .navigationBarsPadding(),
                                 ) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),

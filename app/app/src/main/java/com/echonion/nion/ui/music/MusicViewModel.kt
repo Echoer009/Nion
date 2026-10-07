@@ -194,6 +194,12 @@ class MusicViewModel(
     var currentIndex by mutableIntStateOf(-1)
         private set
 
+    /** 完整播放页是否展开（跨组件共享：MusicScreen 读写，NionApp 据此隐藏底部导航） */
+    var isFullPlayerOpen by mutableStateOf(false)
+
+    /** 播放页当前沉浸背景色（封面取色结果）；NionApp 据此给底部导航栏染色。播放页关闭时置 null */
+    var playerBackdrop by mutableStateOf<PlayerBackdropColors?>(null)
+
     /**
      * 是否处于"播放中"的视觉状态（含缓冲）。
      * 不直接采用 player.isPlaying：seek 时 ExoPlayer 会短暂进入 BUFFERING，
