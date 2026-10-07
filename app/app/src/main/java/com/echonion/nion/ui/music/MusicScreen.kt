@@ -253,23 +253,18 @@ fun MusicScreen(
                 val sharedScope = this@SharedTransitionLayout
                 val playerAnimatedScope = this@AnimatedContent
 
-                // 曲目行小封面 sharedElement：只挂在"被点开的那一行"上。
-                // 若所有行都挂，收起过渡中全部封面会被送进过渡层、盖在 morph
-                // 动画之上（实测只有封面浮起、文字不会）——限定单行后，
-                // 过渡层里只有正在飞回的那一个封面
+                // 曲目行小封面 sharedElement：常驻挂载（不能点开时才挂——
+                // 过渡首帧配对方"迟到"会导致整个 morph 渲染直接跳终态，实测
+                // 点歌打开无任何动画；常驻时点击前配对已就绪，动画正常渲染）
                 val trackCoverModifier: @Composable (String) -> Modifier = { trackId ->
-                    if (trackId == openedFromTrackId) {
-                        with(sharedScope) {
-                            Modifier.sharedElement(
-                                sharedContentState = rememberSharedContentState("music_track_cover_$trackId"),
-                                animatedVisibilityScope = playerAnimatedScope,
-                                boundsTransform = { _, _ ->
-                                    androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
-                                },
-                            )
-                        }
-                    } else {
-                        Modifier
+                    with(sharedScope) {
+                        Modifier.sharedElement(
+                            sharedContentState = rememberSharedContentState("music_track_cover_$trackId"),
+                            animatedVisibilityScope = playerAnimatedScope,
+                            boundsTransform = { _, _ ->
+                                androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
+                            },
+                        )
                     }
                 }
 
@@ -2380,6 +2375,9 @@ private fun FullPlayerOverlay(
         transitionSpec = { tween(1200) },
         label = "playerContentAlpha",
     ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
+    LaunchedEffect(contentAlpha) {
+        android.util.Log.d("MorphLog", "contentAlpha=" + "%.3f".format(contentAlpha))
+    }
     // 真 sharedElement：迷你条 ↔ 播放页容器配对，过渡时只有播放页内容
     // 在 morph（bounds 条形→全屏）；颜色由一体色体系保证
     // 结构去嵌套（与迷你条对称）：sharedElement 只挂在渐变背景层，控件
