@@ -108,6 +108,22 @@ internal fun rememberPlayerBackdrop(track: PlayableTrack?): PlayerBackdropColors
 }
 
 /**
+ * 播放条/导航栏共用的"一体色"：唯一颜色源 [rememberPlayerBackdrop] 的底端色。
+ * 沉浸激活瞬间直接取歌曲色（定义：t=0 播放条与导航栏作为整体变歌曲色），
+ * 退出沉浸时从当前值 250ms 淡回调用方的主题色 —— 两处调用同一状态同一曲线，
+ * 淡回严格同步。
+ */
+@Composable
+internal fun immersiveUnitColor(active: Boolean, song: Color, fallback: Color): Color {
+    val faded by animateColorAsState(
+        targetValue = if (active) song else fallback,
+        animationSpec = tween(250),
+        label = "immersiveUnit",
+    )
+    return if (active) song else faded
+}
+
+/**
  * 取色预热：开始播放/切歌时（迷你条在场即调用）提前提取封面色入缓存，
  * 使"点开播放页"时目标色即时可用——铺开动画一起步就是歌曲色，
  * 不会先落在米色兜底再慢半拍变绿。无封面/加载失败不写缓存（保持兜底路径）。

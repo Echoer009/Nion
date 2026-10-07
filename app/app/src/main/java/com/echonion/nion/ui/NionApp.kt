@@ -201,36 +201,25 @@ fun NionApp() {
                 coroutineScope.launch { dualState.closePanel() }
             }
 
-            // 音乐沉浸态判定（导航栏/左右面板/窗口底色共用）：绑 playerBackdrop
-            // —— 播放页组合期间（含收起退场动画全程）保持沉浸，过渡结束后
-            // 三处颜色一起 250ms 淡回主题色（"然后颜色渐变消失"）
+            // 音乐沉浸态唯一权威：playerBackdrop（播放页组合期间非空，含收起
+            // 退场全程）。染色的只有播放条与底部导航栏（同一来源同一曲线，
+            // immersiveUnitColor），其余界面一律不参与染色
             val musicImmersive = currentRoute == "music" && musicVm.playerBackdrop != null
             val appScheme = MaterialTheme.colorScheme
 
             Scaffold(
-                // 窗口底色随沉浸态在 主题底色↔渐变底端色 间过渡：morph 期间一切
-                // 露底区域（inset 留缝、面板下方、主界面透明容器之下）都是歌曲色
-                containerColor = if (musicImmersive) {
-                    musicVm.playerBackdrop!!.bottom
-                } else {
-                    appScheme.background
-                },
+                containerColor = MaterialTheme.colorScheme.background,
                 bottomBar = {
-                    // 导航栏与播放条作为一个整体取歌曲色：容器色=渐变底端切片
-                    //（导航栏位于渐变最底端，切片即底端色）；三色 250ms 动画，
-                    // 与播放条颜色、窗口底色同步淡入淡出
-                    val navContainer by androidx.compose.animation.animateColorAsState(
-                        targetValue = if (musicImmersive) {
-                            musicVm.playerBackdrop!!.bottom
-                        } else {
-                            appScheme.surfaceContainer
-                        },
-                        animationSpec = androidx.compose.animation.core.tween(250),
-                        label = "navContainer",
+                    // 导航栏与播放条作为整体取歌曲渐变底端色：激活瞬时切换，
+                    // 退出 250ms 淡回；选中图标取 accent，未选中取深色主题中性灰
+                    val navContainer = com.echonion.nion.ui.music.immersiveUnitColor(
+                        active = musicImmersive,
+                        song = musicVm.playerBackdrop?.bottom ?: Color.Transparent,
+                        fallback = appScheme.surfaceContainer,
                     )
                     val navPrimary by androidx.compose.animation.animateColorAsState(
                         targetValue = if (musicImmersive) {
-                            musicVm.playerBackdrop!!.accent ?: appScheme.primary
+                            musicVm.playerBackdrop?.accent ?: appScheme.primary
                         } else {
                             appScheme.primary
                         },
@@ -238,12 +227,7 @@ fun NionApp() {
                         label = "navPrimary",
                     )
                     val navUnselected by androidx.compose.animation.animateColorAsState(
-                        targetValue = if (musicImmersive) {
-                            // 沉浸态导航底是深色歌曲色，未选中图标用深色主题中性灰
-                            Color(0xFFCAC4D0)
-                        } else {
-                            appScheme.onSurfaceVariant
-                        },
+                        targetValue = if (musicImmersive) Color(0xFFCAC4D0) else appScheme.onSurfaceVariant,
                         animationSpec = androidx.compose.animation.core.tween(250),
                         label = "navUnselected",
                     )

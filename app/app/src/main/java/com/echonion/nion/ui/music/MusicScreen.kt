@@ -48,7 +48,6 @@ import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.ui.unit.Dp
@@ -279,9 +278,6 @@ fun MusicScreen(
                 var viewExpanded by remember { mutableStateOf(false) }
 
                 Scaffold(
-                    // 容器透明：morph 期间主界面不再有整片米色底垫（正下方是沉浸
-                    // 染色的窗口底/镜像收回中的渐变）；稳态观感不变（窗口底=background）
-                    containerColor = Color.Transparent,
                     contentWindowInsets = WindowInsets.statusBars,
                     topBar = {
                         TopAppBar(
@@ -2220,13 +2216,13 @@ private fun MiniPlayerBar(
         },
         tonalElevation = 4.dp,
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-        // 沉浸期间迷你条与导航栏作为一个整体取歌曲色（渐变底端切片，条贴着
-        // 渐变最底端，切片≈底端色），过渡结束后 250ms 淡回主题色
-        color = animateColorAsState(
-            targetValue = vm.playerBackdrop?.bottom ?: MaterialTheme.colorScheme.surfaceContainer,
-            animationSpec = tween(250),
-            label = "miniBarColor",
-        ).value,
+        // 播放条与导航栏作为整体取歌曲色（immersiveUnitColor：同一来源同一
+        // 曲线，激活瞬时切换、退出 250ms 淡回，与导航栏严格同步）
+        color = immersiveUnitColor(
+            active = vm.playerBackdrop != null,
+            song = vm.playerBackdrop?.bottom ?: Color.Transparent,
+            fallback = MaterialTheme.colorScheme.surfaceContainer,
+        ),
     ) {
         Column(modifier = Modifier.clickable(onClick = onExpand)) {
             // 底边进度：宽度按 position/duration 比例；时长未知时透明占位保持行高稳定
