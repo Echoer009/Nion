@@ -667,7 +667,13 @@ class MusicViewModel(
         playlistError = null
         viewModelScope.launch {
             runCatching { client.getPlaylists() }
-                .onSuccess { playlists = it.map { p -> p.toLibraryPlaylist() } }
+                .onSuccess {
+                    playlists = it.map { p ->
+                        p.toLibraryPlaylist().let { lib ->
+                            lib.copy(coverArtUrl = client.coverArtUrl("pl-${lib.id}"))
+                        }
+                    }
+                }
                 .onFailure { playlistError = it.message ?: "加载歌单失败" }
             isLoadingPlaylists = false
         }

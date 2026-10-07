@@ -239,6 +239,9 @@ data class LibraryPlaylist(
     val songCount: Int,
     val durationSeconds: Int,
     val isLocal: Boolean,
+    // 歌单封面：服务器歌单 = getCoverArt?pl-<id>（Navidrome 服务端拼贴）；
+    // 本地歌单无服务端封面 → null，UI 用与专辑行同款占位块
+    val coverArtUrl: String? = null,
 )
 
 /**

@@ -361,6 +361,7 @@ fun MusicScreen(
                                     visible = viewExpanded,
                                     onIconClick = { viewExpanded = false },
                                     onClose = { viewExpanded = false },
+                                    showClose = false,
                                 ) {
                                     SelectorCell(
                                         option = SelectorOption("album", LucideIcons.Disc3, "专辑"),
@@ -1337,7 +1338,6 @@ private fun DetailToolsBar(
                 DetailFilterField(
                     query = query,
                     onQueryChange = onQueryChange,
-                    onClose = onSearchToggle,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -1347,14 +1347,13 @@ private fun DetailToolsBar(
 
 /**
  * 详情页过滤输入框（搜索区展开态的整行内容主体）—— 仿搜索框矩形样式：
- * Surface + BasicTextField，头部留空图标位（搜索图标钉在区右端角落槽），
- * 尾部 ✕ 清空并收起；仅读写调用方本地过滤词，不碰 vm.searchQuery。
+ * Surface + BasicTextField，头部留空图标位（搜索图标钉在区右端角落槽）；
+ * 仅读写调用方本地过滤词，不碰 vm.searchQuery。
  */
 @Composable
 private fun DetailFilterField(
     query: String,
     onQueryChange: (String) -> Unit,
-    onClose: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Surface(
@@ -1395,19 +1394,7 @@ private fun DetailFilterField(
                     modifier = Modifier.fillMaxWidth(),
                 )
             }
-            Spacer(modifier = Modifier.width(8.dp))
-            // X：清空过滤词并收起输入框
-            Icon(
-                LucideIcons.X,
-                contentDescription = "清空并收起",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .size(18.dp)
-                    .clickable {
-                        onQueryChange("")
-                        onClose()
-                    },
-            )
+            Spacer(modifier = Modifier.width(12.dp))
         }
     }
 }
@@ -1705,7 +1692,6 @@ private fun PlaylistListContent(
             PlaylistRow(
                 playlist = playlist,
                 onClick = { vm.openPlaylist(playlist.id) },
-                onDelete = { vm.deletePlaylist(playlist.id) },
                 sharedTransitionScope = sharedTransitionScope,
                 animatedVisibilityScope = animatedVisibilityScope,
             )
@@ -1725,14 +1711,14 @@ private fun PlaylistListContent(
 }
 
 /**
- * 歌单行：图标 + 名称/曲数/说明摘要 + 删除按钮。本地/服务器共用（统一模型）。
+ * 歌单行：与专辑行完全同构 —— 52dp 封面块（服务器歌单=服务端拼贴封面，
+ * 本地/空=与专辑行同款灰底占位）+ 名称/曲数/说明摘要。本地/服务器共用。
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun PlaylistRow(
     playlist: LibraryPlaylist,
     onClick: () -> Unit,
-    onDelete: () -> Unit,
     // 行容器 morph：与歌单详情头部配对（key "music_playlist_<id>"）
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
@@ -1756,11 +1742,10 @@ private fun PlaylistRow(
             .padding(horizontal = 8.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Icon(
-            LucideIcons.ListMusic,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(28.dp),
+        CoverArt(
+            coverUrl = playlist.coverArtUrl,
+            modifier = Modifier.size(52.dp),
+            cornerRadius = 10.dp,
         )
         Spacer(modifier = Modifier.width(12.dp))
         Column(modifier = Modifier.weight(1f)) {
@@ -1786,14 +1771,6 @@ private fun PlaylistRow(
                     overflow = TextOverflow.Ellipsis,
                 )
             }
-        }
-        // 删除按钮（IconButton 自行消费点击事件，不触发整行 onClick）
-        IconButton(onClick = onDelete) {
-            Icon(
-                LucideIcons.Trash2,
-                contentDescription = "删除歌单",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
