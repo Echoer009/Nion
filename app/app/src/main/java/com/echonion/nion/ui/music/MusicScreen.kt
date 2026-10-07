@@ -259,15 +259,18 @@ fun MusicScreen(
                 }
 
                 // 专辑|歌单视图切换状态（纯 UI 状态）：提升到页面级，由 TopAppBar 标题行
-                // 的分段控件读写；本地与服务器两种音源共用同一状态，搜索态分段隐藏
+                // 的单入口图标 + 下方展开式选择器读写；本地与服务器两种音源共用同一状态，
+                // 搜索态入口隐藏
                 var showPlaylists by remember { mutableStateOf(false) }
+                // 选择器展开态：TopAppBar 下方揭示行（专辑|歌单 两格 + 飞行图标）
+                var viewExpanded by remember { mutableStateOf(false) }
 
                 Scaffold(
                     contentWindowInsets = WindowInsets.statusBars,
                     topBar = {
                         TopAppBar(
                             title = {
-                                // 标题行：音源名 + 专辑|歌单分段切换（搜索态自动隐藏分段）
+                                // 标题行：音源名 + 视图切换单入口图标（搜索态自动隐藏）
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         when (vm.source) {
@@ -280,18 +283,29 @@ fun MusicScreen(
                                     )
                                     if (vm.searchQuery.isBlank()) {
                                         Spacer(modifier = Modifier.width(12.dp))
-                                        LibraryViewSegment(
-                                            icon = LucideIcons.Disc3,
-                                            contentDescription = "专辑视图",
-                                            selected = !showPlaylists,
-                                            onClick = { showPlaylists = false },
-                                        )
-                                        LibraryViewSegment(
-                                            icon = LucideIcons.ListMusic,
-                                            contentDescription = "歌单视图",
-                                            selected = showPlaylists,
-                                            onClick = { showPlaylists = true },
-                                        )
+                                        IconButton(
+                                            onClick = { viewExpanded = !viewExpanded },
+                                            modifier = Modifier.size(40.dp),
+                                        ) {
+                                            // 展开时旋转 90°（> 变 ∨），收起复原
+                                            val chevronRotation by animateFloatAsState(
+                                                targetValue = if (viewExpanded) 90f else 0f,
+                                                animationSpec = tween(180),
+                                                label = "viewChevron",
+                                            )
+                                            Icon(
+                                                LucideIcons.ChevronRight,
+                                                contentDescription = "切换专辑/歌单视图",
+                                                tint = if (viewExpanded) {
+                                                    MaterialTheme.colorScheme.primary
+                                                } else {
+                                                    MaterialTheme.colorScheme.onSurfaceVariant
+                                                },
+                                                modifier = Modifier.graphicsLayer {
+                                                    rotationZ = chevronRotation
+                                                },
+                                            )
+                                        }
                                     }
                                 }
                             },
@@ -316,6 +330,59 @@ fun MusicScreen(
                             .fillMaxSize()
                             .padding(innerPadding),
                     ) {
+                        // ===== 视图切换展开行：高度 0→40dp 揭示，ToolbarZone 宽度
+                        // 0→全宽镜像展开，图标飞行入选中格；收起完全镜像 =====
+                        val viewRowHeight by animateDpAsState(
+                            targetValue = if (viewExpanded) 40.dp else 0.dp,
+                            animationSpec = tween(180),
+                            label = "viewRowH",
+                        )
+                        BoxWithConstraints(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(viewRowHeight)
+                                .clipToBounds(),
+                        ) {
+                            val rowMaxWidth = maxWidth
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(40.dp),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
+                                ToolbarZone(
+                                    expandedWidth = rowMaxWidth,
+                                    collapsedWidth = 0.dp,
+                                    expanded = viewExpanded,
+                                    icon = if (showPlaylists) LucideIcons.ListMusic else LucideIcons.Disc3,
+                                    contentDescription = "切换专辑/歌单视图",
+                                    iconTint = MaterialTheme.colorScheme.primary,
+                                    iconTargetLeft = flightTarget(if (showPlaylists) 1 else 0),
+                                    visible = viewExpanded,
+                                    onIconClick = { viewExpanded = false },
+                                    onClose = { viewExpanded = false },
+                                ) {
+                                    SelectorCell(
+                                        option = SelectorOption("album", LucideIcons.Disc3, "专辑"),
+                                        selected = !showPlaylists,
+                                        showIcon = showPlaylists,
+                                        onClick = {
+                                            showPlaylists = false
+                                            viewExpanded = false
+                                        },
+                                    )
+                                    SelectorCell(
+                                        option = SelectorOption("playlist", LucideIcons.ListMusic, "歌单"),
+                                        selected = showPlaylists,
+                                        showIcon = !showPlaylists,
+                                        onClick = {
+                                            showPlaylists = true
+                                            viewExpanded = false
+                                        },
+                                    )
+                                }
+                            }
+                        }
                         // ===== 音源三态切换主区域 =====
                         AnimatedContent(
                             targetState = vm.source,
@@ -509,14 +576,6 @@ private fun LocalLibraryContent(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        // ===== 控件栏：排序/搜索 两入口（专辑|歌单切换已上移 TopAppBar 分段控件）=====
-        MusicToolbar(
-            vm = vm,
-            showPlaylists = showPlaylists,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
         // ===== 错误提示条（扫描失败，点击强制重查；样式与云端一致）=====
         vm.localError?.let { error ->
             ErrorRetryBar(error = error) { vm.loadLocalTracks(force = true) }
@@ -682,14 +741,6 @@ private fun ServerMusicContent(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        // ===== 控件栏：搜索 入口（专辑|歌单切换已上移 TopAppBar 分段控件）=====
-        MusicToolbar(
-            vm = vm,
-            showPlaylists = showPlaylists,
-        )
-
-        Spacer(modifier = Modifier.height(8.dp))
-
         // ===== 错误提示条（与本地音源共用同一组件，重试走强制刷新）=====
         vm.serverError?.let { error ->
             ErrorRetryBar(error = error) { vm.loadAlbums(force = true) }
@@ -798,15 +849,6 @@ private fun ServerMusicContent(
 }
 
 /**
- * 曲库控件栏 —— 整行单 sharedElement 容器，三态 morph（本地与服务器音源共用）：
- * NORMAL（图标收起态）/ SORT（整行=排序选项）/ SEARCH（整行=搜索框）。
- * 展开某态时其余控件被挤开、行内只剩该态内容；行高恒定 40dp 不跳变；
- * 收起态与任一展开态互为同一 sharedElement（"music_toolbar_container"），
- * 切换即整行容器 morph。标题不在此栏（在页面 TopAppBar，显示音源名）。
- */
-private enum class MusicToolbarMode { NORMAL, SORT, SEARCH }
-
-/**
  * 展开式图标选择器的一个选项（图标 + 两字标签，横排格子用）。
  */
 private data class SelectorOption(
@@ -815,155 +857,10 @@ private data class SelectorOption(
     val label: String,
 )
 
-/**
- * 曲库控件栏 —— 两区（排序/搜索），见 [ToolbarZone] 的飞行图标模型：
- * 点图标 → 该图标飞行到选中项位置并染主色，条占满整栏（兄弟图标被推出场），
- * 角上浮现 ✕；✕ 或点选项收起，收起完全镜像；退出搜索清空查询词。
- */
-@Composable
-private fun MusicToolbar(
-    vm: MusicViewModel,
-    // 当前是否歌单视图：仅用于排序区显隐（专辑|歌单切换入口在 TopAppBar 分段控件）
-    showPlaylists: Boolean,
-) {
-    var mode by remember { mutableStateOf(MusicToolbarMode.NORMAL) }
-
-    // 排序的选项集合（未来加选项 = 加一项 + 调整 ToolbarCellWidth 即可）
-    val sortOptions = remember {
-        listOf(
-            SelectorOption("title", LucideIcons.ArrowDownAZ, "名称"),
-            SelectorOption("newest", LucideIcons.CalendarClock, "最新"),
-        )
-    }
-
-    // 飞行图标颜色：常态灰；展开时 灰→主色 渐变（延迟 80ms 与条的揭示同步），
-    // 收起时渐回灰 —— 图标全程只有位移与变色两种变化
-    val grayColor = MaterialTheme.colorScheme.onSurfaceVariant
-    val priColor = MaterialTheme.colorScheme.primary
-    val sortIconTint by animateColorAsState(
-        targetValue = if (mode == MusicToolbarMode.SORT) priColor else grayColor,
-        animationSpec = tween(180, delayMillis = if (mode == MusicToolbarMode.SORT) 80 else 0),
-        label = "sortIconTint",
-    )
-
-    BoxWithConstraints(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(40.dp),
-    ) {
-        val toolbarWidth = maxWidth
-        // 排序区仅在本地专辑视图显示（歌单视图/搜索态让位隐藏）
-        val sortVisible = vm.source == MusicSource.LOCAL && !showPlaylists && vm.searchQuery.isBlank()
-
-        // 收起态宽度：NORMAL 时本区图标占位 40dp；任一区展开期间兄弟区让位为 0
-        //（整行只保留一个展开区，条才能占满整栏）
-        val sortRest = if (mode == MusicToolbarMode.NORMAL && sortVisible) ToolbarIconWidth else 0.dp
-        val searchRest = if (mode == MusicToolbarMode.NORMAL) ToolbarIconWidth else 0.dp
-
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(40.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            // —— 排序区 ——
-            ToolbarZone(
-                expandedWidth = toolbarWidth,
-                collapsedWidth = sortRest,
-                expanded = mode == MusicToolbarMode.SORT,
-                icon = if (vm.localAlbumSort == LocalAlbumSort.TITLE) sortOptions[0].icon else sortOptions[1].icon,
-                contentDescription = "排序方式",
-                iconTint = sortIconTint,
-                iconTargetLeft = flightTarget(if (vm.localAlbumSort == LocalAlbumSort.TITLE) 0 else 1),
-                visible = sortVisible,
-                onIconClick = { mode = MusicToolbarMode.SORT },
-                onClose = { mode = MusicToolbarMode.NORMAL },
-            ) {
-                sortOptions.forEach { opt ->
-                    val sel = (vm.localAlbumSort == LocalAlbumSort.TITLE) == (opt.key == "title")
-                    SelectorCell(
-                        option = opt,
-                        selected = sel,
-                        showIcon = !sel,
-                        onClick = {
-                            vm.localAlbumSort =
-                                if (opt.key == "title") LocalAlbumSort.TITLE else LocalAlbumSort.NEWEST
-                            mode = MusicToolbarMode.NORMAL
-                        },
-                    )
-                }
-            }
-
-            // —— 搜索区（不套用飞行模型：无选中项概念）——
-            // 图标恒钉在槽位当开关（再点=收起并清词），输入框填满窗口，无 ✕
-            ToolbarZone(
-                expandedWidth = toolbarWidth,
-                collapsedWidth = searchRest,
-                expanded = mode == MusicToolbarMode.SEARCH,
-                icon = LucideIcons.Search,
-                contentDescription = "搜索音乐",
-                iconTint = grayColor,
-                iconTargetLeft = null,
-                visible = true,
-                onIconClick = {
-                    if (mode == MusicToolbarMode.SEARCH) {
-                        // 退出搜索即清空查询词（视图自动回落专辑列表）
-                        vm.searchQuery = ""
-                        mode = MusicToolbarMode.NORMAL
-                    } else {
-                        mode = MusicToolbarMode.SEARCH
-                    }
-                },
-                onClose = { mode = MusicToolbarMode.NORMAL },
-                showClose = false,
-                stripFillsWindow = true,
-            ) {
-                SearchFieldRectangle(vm = vm, modifier = Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-/**
- * TopAppBar 标题行的专辑|歌单分段按钮 —— 选中态主色淡底 + 主色图标，
- * 未选中态透明底 + 灰图标；紧凑 40dp 触达，Surface 只做选中底色衬托。
- */
-@Composable
-private fun LibraryViewSegment(
-    icon: ImageVector,
-    contentDescription: String,
-    selected: Boolean,
-    onClick: () -> Unit,
-) {
-    Surface(
-        shape = RoundedCornerShape(10.dp),
-        color = if (selected) {
-            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
-        } else {
-            Color.Transparent
-        },
-    ) {
-        IconButton(
-            onClick = onClick,
-            modifier = Modifier.size(40.dp),
-        ) {
-            Icon(
-                icon,
-                contentDescription = contentDescription,
-                tint = if (selected) {
-                    MaterialTheme.colorScheme.primary
-                } else {
-                    MaterialTheme.colorScheme.onSurfaceVariant
-                },
-            )
-        }
-    }
-}
 
 /** 控件栏单颗图标的占位宽度 / 选项格定宽 */
 private val ToolbarIconWidth = 40.dp
-private val ToolbarCellWidth = 80.dp
+private val ToolbarCellWidth = 96.dp
 
 /**
  * 飞行终点（条坐标下 IconButton 左缘）：格子左排在条首，格 i 左缘 = i×80，
@@ -1160,55 +1057,6 @@ private fun SelectorCell(
     }
 }
 
-/**
- * 搜索区的矩形输入框（控件栏 SEARCH 态的整行内容主体）。
- * Surface + BasicTextField：40dp 高内文字完整显示，矩形 6dp 圆角非胶囊。
- */
-@Composable
-private fun SearchFieldRectangle(vm: MusicViewModel, modifier: Modifier = Modifier) {
-    Surface(
-        shape = RoundedCornerShape(6.dp),
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
-        modifier = modifier
-            .height(40.dp),
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 12.dp),
-        ) {
-            // 图标位留空：控件栏的恒定搜索图标飞行落在此处
-            Spacer(modifier = Modifier.width(28.dp))
-            Box(
-                contentAlignment = Alignment.CenterStart,
-                modifier = Modifier.weight(1f),
-            ) {
-                // 空文案时显示占位提示
-                if (vm.searchQuery.isBlank()) {
-                    Text(
-                        "搜索歌曲 / 专辑 / 艺术家",
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                    )
-                }
-                BasicTextField(
-                    value = vm.searchQuery,
-                    onValueChange = { vm.searchQuery = it },
-                    singleLine = true,
-                    textStyle = MaterialTheme.typography.bodyMedium.copy(
-                        color = MaterialTheme.colorScheme.onSurface,
-                    ),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            }
-        }
-    }
-}
-
 
 /**
  * 歌单视图（含新建 FAB）—— 歌单列表 ↔ 详情 morph 面板 + 右下角新建按钮。
@@ -1362,14 +1210,11 @@ private fun AlbumListContent(
     }
 }
 
-/** 详情页曲目排序模式：原序 → 名称 → 时长 循环切换（sortedBy 稳定，同名保持原序） */
-private enum class DetailSortMode(val label: String) {
-    ORIGINAL("原序"),
-    TITLE("名称"),
-    DURATION("时长"),
-    ;
-
-    fun next(): DetailSortMode = entries[(ordinal + 1) % entries.size]
+/** 详情页曲目排序模式：原序 / 名称 / 时长（sortedBy 稳定，同名保持原序） */
+private enum class DetailSortMode {
+    ORIGINAL,
+    TITLE,
+    DURATION,
 }
 
 /**
@@ -1395,8 +1240,9 @@ private fun filterSortDetailTracks(
 
 /**
  * 详情页工具行 —— 头部与曲目列表之间的过滤/排序控件。
- * 右对齐 20dp 灰色小图标：搜索（展开/收起下方过滤输入框）、
- * 排序（原序→名称→时长循环），排序图标旁 labelSmall 显示当前模式中文。
+ * 复用控件栏两区飞行模型（右对齐 40dp 恒高）：排序区展开揭示
+ * 原序/名称/时长三选项格（图标飞入当前模式格），搜索区为钉槽变体
+ * （展开揭示本地过滤输入框）；两区互斥，任一展开时兄弟区让位收起。
  */
 @Composable
 private fun DetailToolsBar(
@@ -1405,65 +1251,162 @@ private fun DetailToolsBar(
     searchOpen: Boolean,
     onSearchToggle: () -> Unit,
     sortMode: DetailSortMode,
-    onSortClick: () -> Unit,
+    // 选中即收起：调用方直接落定新模式，不再循环切换
+    onSortSelect: (DetailSortMode) -> Unit,
 ) {
-    Column(modifier = Modifier.fillMaxWidth()) {
+    // 排序条展开态（本行内部）：选中选项或 ✕ 后收起
+    var sortOpen by remember { mutableStateOf(false) }
+
+    // 选项按 DetailSortMode.entries 顺序（原序/名称/时长），定宽保证飞行落点可静态计算
+    val sortOptions = remember {
+        listOf(
+            SelectorOption("original", LucideIcons.ListMusic, "原序"),
+            SelectorOption("title", LucideIcons.ArrowDownAZ, "名称"),
+            SelectorOption("duration", LucideIcons.Timer, "时长"),
+        )
+    }
+
+    val grayColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val priColor = MaterialTheme.colorScheme.primary
+    // 排序图标颜色：展开 灰→主色（延迟与条揭示同步），收起渐回灰
+    val sortIconTint by animateColorAsState(
+        targetValue = if (sortOpen) priColor else grayColor,
+        animationSpec = tween(180, delayMillis = if (sortOpen) 80 else 0),
+        label = "detailSortIconTint",
+    )
+
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(40.dp),
+    ) {
+        val rowWidth = maxWidth
+        // 收起态宽度：全收起时本区图标占位 40dp；任一区展开时兄弟区让位为 0
+        val sortRest = if (searchOpen) 0.dp else ToolbarIconWidth
+        val searchRest = if (sortOpen) 0.dp else ToolbarIconWidth
+
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(40.dp),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                sortMode.label,
-                style = MaterialTheme.typography.labelSmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            Spacer(modifier = Modifier.width(4.dp))
-            Icon(
-                LucideIcons.Search,
+            // —— 排序区：三模式选项格，图标飞入当前模式格图标位 ——
+            ToolbarZone(
+                expandedWidth = rowWidth,
+                collapsedWidth = sortRest,
+                expanded = sortOpen,
+                icon = LucideIcons.ArrowDownAZ,
+                contentDescription = "排序方式",
+                iconTint = sortIconTint,
+                iconTargetLeft = flightTarget(sortMode.ordinal),
+                visible = !searchOpen,
+                onIconClick = { sortOpen = true },
+                onClose = { sortOpen = false },
+            ) {
+                sortOptions.forEachIndexed { index, opt ->
+                    val sel = index == sortMode.ordinal
+                    SelectorCell(
+                        option = opt,
+                        selected = sel,
+                        showIcon = !sel,
+                        onClick = {
+                            onSortSelect(DetailSortMode.entries[index])
+                            sortOpen = false
+                        },
+                    )
+                }
+            }
+
+            // —— 搜索区（钉槽变体）：图标恒钉槽位当开关，展开揭示过滤输入框 ——
+            ToolbarZone(
+                expandedWidth = rowWidth,
+                collapsedWidth = searchRest,
+                expanded = searchOpen,
+                icon = LucideIcons.Search,
                 contentDescription = "过滤当前列表",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .size(20.dp)
-                    .clickable(onClick = onSearchToggle),
-            )
-            Spacer(modifier = Modifier.width(12.dp))
-            Icon(
-                LucideIcons.ArrowDownAZ,
-                contentDescription = "切换排序",
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier
-                    .size(20.dp)
-                    .clickable(onClick = onSortClick),
-            )
+                iconTint = grayColor,
+                iconTargetLeft = null,
+                visible = !sortOpen,
+                onIconClick = onSearchToggle,
+                onClose = onSearchToggle,
+                showClose = false,
+                stripFillsWindow = true,
+            ) {
+                DetailFilterField(
+                    query = query,
+                    onQueryChange = onQueryChange,
+                    onClose = onSearchToggle,
+                    modifier = Modifier.weight(1f),
+                )
+            }
         }
-        if (searchOpen) {
-            OutlinedTextField(
-                value = query,
-                onValueChange = onQueryChange,
-                modifier = Modifier.fillMaxWidth(),
-                placeholder = { Text("过滤当前列表") },
-                leadingIcon = {
-                    Icon(
-                        LucideIcons.Search,
-                        contentDescription = null,
-                        modifier = Modifier.size(18.dp),
+    }
+}
+
+/**
+ * 详情页过滤输入框（搜索区展开态的整行内容主体）—— 仿搜索框矩形样式：
+ * Surface + BasicTextField，头部留空图标位（搜索图标钉在区右端角落槽），
+ * 尾部 ✕ 清空并收起；仅读写调用方本地过滤词，不碰 vm.searchQuery。
+ */
+@Composable
+private fun DetailFilterField(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onClose: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    Surface(
+        shape = RoundedCornerShape(6.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
+        modifier = modifier.height(40.dp),
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 12.dp),
+        ) {
+            // 图标位留空：搜索图标钉在区右端角落槽（钉槽变体，不飞入）
+            Spacer(modifier = Modifier.width(28.dp))
+            Box(
+                contentAlignment = Alignment.CenterStart,
+                modifier = Modifier.weight(1f),
+            ) {
+                // 空文案时显示占位提示
+                if (query.isBlank()) {
+                    Text(
+                        "过滤当前列表",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
-                },
-                trailingIcon = {
-                    // X：清空过滤词并收起输入框
-                    Icon(
-                        LucideIcons.X,
-                        contentDescription = "清空并收起",
-                        modifier = Modifier
-                            .size(18.dp)
-                            .clickable {
-                                onQueryChange("")
-                                onSearchToggle()
-                            },
-                    )
-                },
-                singleLine = true,
+                }
+                BasicTextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    singleLine = true,
+                    textStyle = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onSurface,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            // X：清空过滤词并收起输入框
+            Icon(
+                LucideIcons.X,
+                contentDescription = "清空并收起",
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .size(18.dp)
+                    .clickable {
+                        onQueryChange("")
+                        onClose()
+                    },
             )
         }
     }
@@ -1581,7 +1524,7 @@ private fun AlbumDetailContent(
                 searchOpen = searchOpen,
                 onSearchToggle = { searchOpen = !searchOpen },
                 sortMode = sortMode,
-                onSortClick = { sortMode = sortMode.next() },
+                onSortSelect = { sortMode = it },
             )
         }
         // 曲目列表：点击即以专辑全部曲目为队列，从该曲开始播放；
@@ -1980,7 +1923,7 @@ private fun PlaylistDetailContent(
                 searchOpen = searchOpen,
                 onSearchToggle = { searchOpen = !searchOpen },
                 sortMode = sortMode,
-                onSortClick = { sortMode = sortMode.next() },
+                onSortSelect = { sortMode = it },
             )
         }
         // 曲目列表：点击以歌单为队列起播，行尾可单首移除；
@@ -2475,11 +2418,6 @@ private fun FullPlayerOverlay(
                             val pagerState = rememberPagerState(
                                 initialPage = vm.currentIndex.coerceAtLeast(0),
                             ) { vm.queue.size }
-                            // 拖拽锚点页：手势开始时记录，用于把长拖限制在相邻一页内
-                            var anchorPage by remember { mutableStateOf(-1) }
-                            // 程序化滚动标记：外部切歌的 animateScrollToPage 允许多页，
-                            // 不应被"限一页"逻辑拦截
-                            var programmaticJump by remember { mutableStateOf(false) }
 
                             // 用户滑动落定 → 播放落定页曲目
                             LaunchedEffect(pagerState) {
@@ -2495,33 +2433,7 @@ private fun FullPlayerOverlay(
                                         idx != pagerState.settledPage &&
                                         !pagerState.isScrollInProgress
                                     ) {
-                                        programmaticJump = true
                                         pagerState.animateScrollToPage(idx)
-                                        programmaticJump = false
-                                    }
-                                }
-                            }
-                            // 手势开始（非程序化滚动）→ 记录锚点页
-                            LaunchedEffect(pagerState) {
-                                snapshotFlow { pagerState.isScrollInProgress }.collect { scrolling ->
-                                    if (scrolling && !programmaticJump) {
-                                        anchorPage = pagerState.settledPage
-                                    }
-                                }
-                            }
-                            // 长拖限一页：PagerSnapDistance.atMost(1) 只管松手惯性，
-                            // 手指不松连续拖可一次跨多页；这里发现 currentPage 越过
-                            // 锚点 ±1 时立即攔回到相邻页
-                            LaunchedEffect(pagerState) {
-                                snapshotFlow { pagerState.currentPage }.collect { page ->
-                                    if (pagerState.isScrollInProgress &&
-                                        !programmaticJump &&
-                                        anchorPage >= 0 &&
-                                        (page > anchorPage + 1 || page < anchorPage - 1)
-                                    ) {
-                                        pagerState.scrollToPage(
-                                            anchorPage + if (page > anchorPage) 1 else -1
-                                        )
                                     }
                                 }
                             }
@@ -2868,37 +2780,15 @@ private fun TrackRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 封面缩略图：本地曲目显示专辑内嵌封面，服务器曲目显示服务器封面，
-        // 均无时显示专辑图标占位；当前曲叠加小音符角标标识播放位置
-        Box {
-            CoverArt(
-                coverUrl = track.coverArtUrl,
-                albumArtUri = track.albumArtUri,
-                modifier = Modifier
-                    .size(40.dp)
-                    .then(coverModifier(track.id)),
-                cornerRadius = 12.dp,
-            )
-            if (isCurrent) {
-                // 当前曲角标：primary 色小圆底 + 音符图标，压在封面右下角
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .size(16.dp)
-                        .background(
-                            MaterialTheme.colorScheme.primary,
-                            RoundedCornerShape(8.dp),
-                        ),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        LucideIcons.Music,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onPrimary,
-                        modifier = Modifier.size(10.dp),
-                    )
-                }
-            }
-        }
+        // 均无时显示专辑图标占位（当前曲仅由标题高亮标识，封面不加角标）
+        CoverArt(
+            coverUrl = track.coverArtUrl,
+            albumArtUri = track.albumArtUri,
+            modifier = Modifier
+                .size(40.dp)
+                .then(coverModifier(track.id)),
+            cornerRadius = 12.dp,
+        )
         Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
