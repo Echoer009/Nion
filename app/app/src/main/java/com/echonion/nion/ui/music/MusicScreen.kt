@@ -57,6 +57,7 @@ import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.requiredSize
+import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -864,11 +865,7 @@ private fun MusicToolbar(
                 icon = if (vm.localAlbumSort == LocalAlbumSort.TITLE) sortOptions[0].icon else sortOptions[1].icon,
                 contentDescription = "排序方式",
                 iconTint = sortIconTint,
-                iconTargetLeft = flightTarget(
-                    toolbarWidth,
-                    if (vm.localAlbumSort == LocalAlbumSort.TITLE) 0 else 1,
-                    sortOptions.size,
-                ),
+                iconTargetLeft = flightTarget(if (vm.localAlbumSort == LocalAlbumSort.TITLE) 0 else 1),
                 visible = sortVisible,
                 onIconClick = { mode = MusicToolbarMode.SORT },
                 onClose = { mode = MusicToolbarMode.NORMAL },
@@ -896,11 +893,7 @@ private fun MusicToolbar(
                 icon = if (showPlaylists) viewOptions[1].icon else viewOptions[0].icon,
                 contentDescription = "曲库视图",
                 iconTint = viewIconTint,
-                iconTargetLeft = flightTarget(
-                    toolbarWidth,
-                    if (showPlaylists) 1 else 0,
-                    viewOptions.size,
-                ),
+                iconTargetLeft = flightTarget(if (showPlaylists) 1 else 0),
                 visible = viewVisible,
                 onIconClick = { mode = MusicToolbarMode.VIEW },
                 onClose = { mode = MusicToolbarMode.NORMAL },
@@ -941,6 +934,7 @@ private fun MusicToolbar(
                 },
                 onClose = { mode = MusicToolbarMode.NORMAL },
                 showClose = false,
+                stripFillsWindow = true,
             ) {
                 SearchFieldRectangle(vm = vm, modifier = Modifier.weight(1f))
             }
@@ -953,26 +947,23 @@ private val ToolbarIconWidth = 48.dp
 private val ToolbarCellWidth = 96.dp
 
 /**
- * 飞行终点（窗口坐标下 IconButton 左缘）：条内容右打包为 [选项格…][✕]，
- * 自窗口右缘共占 cellCount×96 + 48dp；格内图标左缘 = 格左 + 14（水平内距），
- * 图标在 48dp 按钮内居中（差 12），故按钮左缘 = 格左 + 2。
+ * 飞行终点（条坐标下 IconButton 左缘）：格子左排在条首，格 i 左缘 = i×96，
+ * 格内图标左缘 = +14（水平内距），图标在 48dp 按钮内居中差 12 → 按钮左缘 = +2。
  */
-private fun flightTarget(expandedWidth: Dp, cellIndex: Int, cellCount: Int): Dp =
-    expandedWidth - ToolbarIconWidth - (ToolbarCellWidth * cellCount + ToolbarIconWidth) +
-        ToolbarCellWidth * cellIndex + 2.dp
+private fun flightTarget(cellIndex: Int): Dp = ToolbarCellWidth * cellIndex + 2.dp
 
 /**
- * 控件栏区域 —— "图标槽 + 揭示窗口 + 飞行图标"统一模型（搜索区为钉槽变体）：
+ * 控件栏区域 —— "揭示窗口 + 角落槽 + 飞行图标"统一模型（搜索区为钉槽变体）：
  *
- * - 区 = [揭示窗口][图标槽]（Row，宽度动画 + 裁切）。收起态窗口宽 = 0：
- *   条内容物理不存在，常态只有图标 —— 不可能有任何条内容残漏；
- * - 展开：窗口 0 → 整栏-48，内容右打包（Arrangement.End），由窗口自右向左
- *   揭示：✕ 先现、选项格从右往左亮出；兄弟区宽度归零（让位），图标随
- *   区边缘滑出被裁走；收起完全镜像；
- * - 图标槽恒 48dp 在区右端（requiredSize 不被压扁）：图标是同一节点贯穿
- *   全程，展开时向左飞入选中格图标位（offset 负向，与窗口同参弹簧锁步），
- *   颜色 灰↔主色 渐变；iconTargetLeft=null 则钉在槽位不动（搜索区）；
- * - ✕ 唯一入场元素（showClose=false 可省）：120ms 淡入淡出。
+ * - 区 = [揭示窗口][角落槽]（Row，宽度动画 + 裁切）。收起态窗口=0：条内容
+ *   物理不存在，常态只有图标，不可能有条内容残漏；
+ * - 条内容左排（选项靠左）、骑窗口左缘从角落滑出/滑回：展开时本区图标锁步
+ *   领先自家格子 2dp —— 图标全程钉在格子图标位上"领格子出场"，不横穿文字；
+ *   收起时条内容 120ms 淡出，避免文字滑过图标产生残影闪烁；
+ * - 角落槽恒 48dp 在区右端：✕ 在此淡入淡出（图标飞走后浮现，最右侧）；
+ *   本区图标同一节点贯穿全程，展开时向左飞入条内选中格图标位（与窗口
+ *   同参弹簧锁步），颜色 灰↔主色 渐变；iconTargetLeft=null 则钉槽（搜索区）；
+ * - 让位（他区展开）：本区整体被推走，图标 150ms 淡出；回位淡入。
  */
 @Composable
 private fun ToolbarZone(
@@ -987,16 +978,18 @@ private fun ToolbarZone(
     onIconClick: () -> Unit,
     onClose: () -> Unit,
     showClose: Boolean = true,
+    // 条内容是否随窗口填充（搜索框=true；选项格=false 用无界测量防钳制换行）
+    stripFillsWindow: Boolean = false,
     stripContent: @Composable RowScope.() -> Unit,
 ) {
-    // 区宽、图标偏移共用同一弹簧：同帧起步、同曲线行进（锁步）
+    // 区宽、图标偏移共用同一弹簧：同帧起步、同曲线行进（与格子滑出锁步）
     val zoneSpring = spring<Dp>(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)
     val zoneWidth by animateDpAsState(
         targetValue = if (expanded) expandedWidth else collapsedWidth,
         animationSpec = zoneSpring,
         label = "zoneWidth",
     )
-    // 图标自槽位的左移量：收起=0（钉槽）；展开=飞到选中格图标位
+    // 图标自角落槽的左移量：收起=0（钉槽）；展开=飞入条内选中格图标位
     val iconPullLeft by animateDpAsState(
         targetValue = if (expanded && iconTargetLeft != null) {
             (expandedWidth - ToolbarIconWidth) - iconTargetLeft
@@ -1006,10 +999,23 @@ private fun ToolbarZone(
         animationSpec = zoneSpring,
         label = "iconPullLeft",
     )
+    // 条内容淡入淡出：收起时快速淡出（文字不滑过图标露残影）
+    val stripAlpha by animateFloatAsState(
+        targetValue = if (expanded) 1f else 0f,
+        animationSpec = tween(120),
+        label = "stripAlpha",
+    )
+    // ✕ 淡入淡出：图标飞离角落后浮现（最右侧收起钮）
     val closeAlpha by animateFloatAsState(
         targetValue = if (expanded) 1f else 0f,
         animationSpec = tween(120),
         label = "closeAlpha",
+    )
+    // 让位淡出：他区展开时本区图标随推动淡出，回位淡入
+    val iconAlpha by animateFloatAsState(
+        targetValue = if (expanded || collapsedWidth > 0.dp) 1f else 0f,
+        animationSpec = tween(150),
+        label = "iconAlpha",
     )
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -1018,40 +1024,56 @@ private fun ToolbarZone(
             .height(48.dp)
             .clipToBounds(),
     ) {
-        // 揭示窗口：收起=0（条不存在）；展开=区宽-图标槽。内容右打包、自右向左揭示
+        // 揭示窗口：收起=0（条不存在）；展开=区宽-角落槽。
+        // 条内容左排、骑窗口左缘（起始=角落）滑出：图标在前领路，格子紧随
         Box(
             modifier = Modifier
                 .width((zoneWidth - ToolbarIconWidth).coerceAtLeast(0.dp))
                 .height(48.dp)
                 .clipToBounds(),
-            contentAlignment = Alignment.CenterEnd,
         ) {
             Row(
-                horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.matchParentSize(),
-            ) {
-                stripContent()
-                if (showClose) {
-                    Box(modifier = Modifier.graphicsLayer { alpha = closeAlpha }) {
-                        CloseToolbarButton(onClose = onClose)
-                    }
+                modifier = Modifier
+                    .then(
+                        if (stripFillsWindow) {
+                            Modifier.matchParentSize()
+                        } else {
+                            // 无界测量：选项格按天然宽度布局，不受窗口动画宽度
+                            // 钳制（软约束会被压到 0 → 文字竖排闪烁）；窗口只裁切
+                            Modifier.wrapContentSize(Alignment.CenterStart, unbounded = true)
+                        },
+                    )
+                    .graphicsLayer { alpha = stripAlpha },
+                content = stripContent,
+            )
+        }
+        // 角落槽：✕（淡入）垫底，恒定图标（飞行）覆盖其上
+        Box(modifier = Modifier.requiredSize(ToolbarIconWidth)) {
+            if (showClose) {
+                Box(
+                    modifier = Modifier
+                        .matchParentSize()
+                        .graphicsLayer { alpha = closeAlpha },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CloseToolbarButton(onClose = onClose)
                 }
             }
-        }
-        // 图标槽：恒定 48dp 硬尺寸；展开时负向 offset 飞入窗口内的选中格
-        if (visible) {
-            IconButton(
-                onClick = onIconClick,
-                modifier = Modifier
-                    .offset(x = -iconPullLeft)
-                    .requiredSize(ToolbarIconWidth),
-            ) {
-                Icon(
-                    icon,
-                    contentDescription = contentDescription,
-                    tint = iconTint,
-                )
+            if (visible) {
+                IconButton(
+                    onClick = onIconClick,
+                    modifier = Modifier
+                        .offset(x = -iconPullLeft)
+                        .requiredSize(ToolbarIconWidth)
+                        .graphicsLayer { alpha = iconAlpha },
+                ) {
+                    Icon(
+                        icon,
+                        contentDescription = contentDescription,
+                        tint = iconTint,
+                    )
+                }
             }
         }
     }
@@ -1113,6 +1135,8 @@ private fun SelectorCell(
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
             },
+            maxLines = 1,
+            softWrap = false,
         )
     }
 }
