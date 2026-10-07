@@ -19,6 +19,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
@@ -2372,6 +2374,12 @@ private fun FullPlayerOverlay(
 
     // 播放队列默认收起：顶部按钮呼出（常驻列表会挤占沉浸滑切区）
     var queueVisible by remember { mutableStateOf(false) }
+    // 播放页 UI 淡入淡出：morph（背景+封面）负责几何，控件层在接近终态时
+    // 淡入/淡出，避免整组控件随矩形缩放变形被长时间看到
+    val contentAlpha by animatedVisibilityScope.transition.animateFloat(
+        transitionSpec = { tween(1200) },
+        label = "playerContentAlpha",
+    ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
     // 真 sharedElement：迷你条 ↔ 播放页容器配对，过渡时只有播放页内容
     // 在 morph（bounds 条形→全屏）；颜色由一体色体系保证
     // 结构去嵌套（与迷你条对称）：sharedElement 只挂在渐变背景层，控件
@@ -2401,6 +2409,7 @@ private fun FullPlayerOverlay(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .graphicsLayer { alpha = contentAlpha }
                     .padding(horizontal = 24.dp)
                     .statusBarsPadding()
                     .navigationBarsPadding(),

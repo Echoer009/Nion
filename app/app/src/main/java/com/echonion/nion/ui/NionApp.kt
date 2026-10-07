@@ -22,6 +22,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
@@ -208,9 +209,12 @@ fun NionApp() {
             val appScheme = MaterialTheme.colorScheme
 
             Scaffold(
+                // insets 归零：bottomBar 本身就在窗口底部，内容区底边=导航栏顶边。
+                // 默认值会额外叠加系统导航 inset，在两者之间留出一条永远盖不住的
+                // 米色带（morph/播放页都止步于内容区底边）—— 实测 y1055-1080
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 containerColor = MaterialTheme.colorScheme.background,
                 bottomBar = {
-                    // 导航栏与播放条作为整体取歌曲渐变底端色：激活瞬时切换，
                     // 退出 250ms 淡回；选中图标取 accent，未选中取深色主题中性灰
                     val navContainer = com.echonion.nion.ui.music.immersiveUnitColor(
                         active = musicImmersive,
