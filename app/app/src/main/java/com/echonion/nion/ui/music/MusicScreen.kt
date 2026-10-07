@@ -2190,19 +2190,18 @@ private fun MiniPlayerBar(
     vm: MusicViewModel,
     track: PlayableTrack,
     onExpand: () -> Unit,
-    // 迷你条 ↔ 播放页 morph：容器 sharedBounds + 封面 sharedElement 均需这两个作用域
+    // 迷你条 ↔ 播放页 morph：容器 sharedElement + 封面 sharedElement 均需这两个作用域
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
 ) {
     Surface(
-        // 容器 sharedBounds：与播放页容器配对（morph 的 bounds 源）。必须保持
-        // 默认进过渡层 —— renderInOverlay=false 会断开配对、bounds 动画不跑。
-        // 收回时它在过渡层的副本也是歌曲色（immersiveUnitColor），不会出米色轮廓
+        // 容器 sharedElement：与播放页容器配对 —— 过渡时只有播放页内容在
+        // morph（bounds 从条形飞到全屏），迷你条随自己分支正常退场，
+        // 不存在"两个副本叠着"的轮廓问题
         modifier = with(sharedTransitionScope) {
-            Modifier.sharedBounds(
+            Modifier.sharedElement(
                 sharedContentState = rememberSharedContentState("music_player_bar"),
                 animatedVisibilityScope = animatedVisibilityScope,
-                // 临界弹簧：柔和无过冲，与项目统一曲线一致
                 boundsTransform = { _, _ ->
                     androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
                 },
@@ -2334,15 +2333,14 @@ private fun FullPlayerOverlay(
     }
     // 播放队列默认收起：顶部按钮呼出（常驻列表会挤占沉浸滑切区）
     var queueVisible by remember { mutableStateOf(false) }
-    // 回归已验证可用的 morph 结构：Surface(sharedBounds) 内含渐变 Box 与控件。
-    // 配对两侧均用默认 overlay 参与，bounds 动画可靠运行；颜色由一体色体系
-    //（immersiveUnitColor）保证 —— 播放条/导航栏 t=0 歌曲色，morph 全程连续
+    // 真 sharedElement：迷你条 ↔ 播放页容器配对，过渡时只有播放页内容
+    // 在 morph（bounds 条形→全屏）；颜色由一体色体系保证
     Surface(
         modifier = Modifier
             .fillMaxSize()
             .then(
                 with(sharedTransitionScope) {
-                    Modifier.sharedBounds(
+                    Modifier.sharedElement(
                         sharedContentState = rememberSharedContentState("music_player_bar"),
                         animatedVisibilityScope = animatedVisibilityScope,
                         boundsTransform = { _, _ ->
