@@ -19,6 +19,10 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.ExitTransition
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.Spring
@@ -56,6 +60,8 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.ui.draw.alpha
@@ -273,6 +279,9 @@ fun MusicScreen(
                 var viewExpanded by remember { mutableStateOf(false) }
 
                 Scaffold(
+                    // 容器透明：morph 期间主界面不再有整片米色底垫（正下方是沉浸
+                    // 染色的窗口底/镜像收回中的渐变）；稳态观感不变（窗口底=background）
+                    containerColor = Color.Transparent,
                     contentWindowInsets = WindowInsets.statusBars,
                     topBar = {
                         TopAppBar(
@@ -2195,12 +2204,14 @@ private fun MiniPlayerBar(
     animatedVisibilityScope: AnimatedVisibilityScope,
 ) {
     Surface(
-        // 容器 sharedBounds：迷你条整体与播放页全屏容器配对，展开时条"生长"成全屏页，
-        // 收起时全屏页缩回条 —— 参照 TaskScreen FAB↔表单的 sharedBounds 模式
+        // 容器 sharedBounds：与播放页全屏容器配对（播放条↔播放页 morph 的
+        // bounds 源），但不进过渡 overlay —— 迷你条留在自己分支里随分支
+        // 淡入淡出，避免它在 overlay 里以"全屏缩回条形"的米色轮廓盖住镜像
         modifier = with(sharedTransitionScope) {
             Modifier.sharedBounds(
                 sharedContentState = rememberSharedContentState("music_player_bar"),
                 animatedVisibilityScope = animatedVisibilityScope,
+                renderInOverlayDuringTransition = false,
                 // 临界弹簧：柔和无过冲，与项目统一曲线一致
                 boundsTransform = { _, _ ->
                     spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
@@ -2209,7 +2220,13 @@ private fun MiniPlayerBar(
         },
         tonalElevation = 4.dp,
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-        color = MaterialTheme.colorScheme.surfaceContainer,
+        // 沉浸期间迷你条与导航栏作为一个整体取歌曲色（渐变底端切片，条贴着
+        // 渐变最底端，切片≈底端色），过渡结束后 250ms 淡回主题色
+        color = animateColorAsState(
+            targetValue = vm.playerBackdrop?.bottom ?: MaterialTheme.colorScheme.surfaceContainer,
+            animationSpec = tween(250),
+            label = "miniBarColor",
+        ).value,
     ) {
         Column(modifier = Modifier.clickable(onClick = onExpand)) {
             // 底边进度：宽度按 position/duration 比例；时长未知时透明占位保持行高稳定
@@ -2325,34 +2342,57 @@ private fun FullPlayerOverlay(
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose { vm.playerBackdrop = null }
     }
+    // 揭示进度：与容器 morph 同参数临界弹簧（0=收起 1=全开），驱动全屏渐变
+    // 自导航栏/播放条整体向上铺开、收回时退下 —— 渐变永远全屏布局不被压扁
+    val reveal by animatedVisibilityScope.transition.animateFloat(
+        transitionSpec = { spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow) },
+        label = "playerReveal",
+    ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
+
     // 播放队列默认收起：顶部按钮呼出（常驻列表会挤占沉浸滑切区）
     var queueVisible by remember { mutableStateOf(false) }
-    Surface(
-        // 容器 sharedBounds：与迷你播放条配对，展开时迷你条生长为全屏页。
-        // 底缘离开导航栏露出的缝由 NionApp 沉浸态把窗口底色染成渐变底端色
-        // 兜住（露出的也是歌曲色，不再是米色）
-        modifier = Modifier
-            .fillMaxSize()
-            .then(
-                with(sharedTransitionScope) {
-                    Modifier.sharedBounds(
-                        sharedContentState = rememberSharedContentState("music_player_bar"),
-                        animatedVisibilityScope = animatedVisibilityScope,
-                        boundsTransform = { _, _ ->
-                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
-                        },
-                    )
-                },
-            ),
-        // 背景交给下层渐变 Box 绘制；Surface 本体透明以承载 sharedBounds 形变
-        color = Color.Transparent,
-    ) {
+
+    // 结构：渐变层在 sharedBounds 之外 —— bounds 缩放只作用于控件层，渐变
+    // 全屏布局 + 底部揭示裁剪：morph 任何时刻矩形里都是全屏渐变对应位置的
+    // 颜色，底缘恒为渐变底端，与同色导航栏/播放条无缝衔接
+    Box(modifier = Modifier.fillMaxSize()) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .drawWithContent {
+                    if (reveal >= 1f) {
+                        drawContent()
+                    } else {
+                        clipRect(top = size.height * (1f - reveal)) {
+                            this@drawWithContent.drawContent()
+                        }
+                    }
+                }
                 .background(
                     Brush.verticalGradient(listOf(backdrop.top, backdrop.bottom)),
                 ),
+        )
+        Surface(
+            // 容器 sharedBounds：与迷你播放条配对，播放条 bounds morph 成全屏页。
+            // 内容级 enter/exit 显式 None：控件层全程不透明，收回时整块跟着
+            // bounds 缩回播放条（真镜像），不提前淡出
+            modifier = Modifier
+                .fillMaxSize()
+                .then(
+                    with(sharedTransitionScope) {
+                        Modifier.sharedBounds(
+                            sharedContentState = rememberSharedContentState("music_player_bar"),
+                            animatedVisibilityScope = animatedVisibilityScope,
+                            enter = EnterTransition.None,
+                            exit = ExitTransition.None,
+                            boundsTransform = { _, _ ->
+                                spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                            },
+                        )
+                    },
+                ),
+            // Surface 本体透明：只承载控件层的 morph，颜色在下方渐变层
+            color = Color.Transparent,
         ) {
             MaterialTheme(colorScheme = playerScheme) {
                 Column(

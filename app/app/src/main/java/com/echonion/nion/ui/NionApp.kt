@@ -201,25 +201,58 @@ fun NionApp() {
                 coroutineScope.launch { dualState.closePanel() }
             }
 
-            // 音乐沉浸态判定（导航栏/左右面板/窗口底色共用）：绑 isFullPlayerOpen
-            // —— 展开与收起的那一帧即生效/还原，不等退场动画结束（旧绑
-            // playerBackdrop 会等退场完全结束才翻回，导航栏绿色多挂约 1s）
-            val musicImmersive = currentRoute == "music" && musicVm.isFullPlayerOpen
+            // 音乐沉浸态判定（导航栏/左右面板/窗口底色共用）：绑 playerBackdrop
+            // —— 播放页组合期间（含收起退场动画全程）保持沉浸，过渡结束后
+            // 三处颜色一起 250ms 淡回主题色（"然后颜色渐变消失"）
+            val musicImmersive = currentRoute == "music" && musicVm.playerBackdrop != null
+            val appScheme = MaterialTheme.colorScheme
 
             Scaffold(
-                // 沉浸态把窗口底色也换成渐变底端色：morph 起步底缘离开导航栏的缝、
-                // inset 留缝、面板下方等一切露底区域都与播放页渐变同色，杜绝米色
-                containerColor = if (musicImmersive && musicVm.playerBackdrop != null) {
+                // 窗口底色随沉浸态在 主题底色↔渐变底端色 间过渡：morph 期间一切
+                // 露底区域（inset 留缝、面板下方、主界面透明容器之下）都是歌曲色
+                containerColor = if (musicImmersive) {
                     musicVm.playerBackdrop!!.bottom
                 } else {
-                    MaterialTheme.colorScheme.background
+                    appScheme.background
                 },
                 bottomBar = {
-                    // 导航栏即"铺开"起点：沉浸期间整套切换播放页取色配色，
-                    // flushNav 容器色 = 渐变底端原色，与播放页下缘无缝同色
-                    PlayerImmersiveWrap(
-                        backdrop = if (musicImmersive) musicVm.playerBackdrop else null,
-                        flushNav = true,
+                    // 导航栏与播放条作为一个整体取歌曲色：容器色=渐变底端切片
+                    //（导航栏位于渐变最底端，切片即底端色）；三色 250ms 动画，
+                    // 与播放条颜色、窗口底色同步淡入淡出
+                    val navContainer by androidx.compose.animation.animateColorAsState(
+                        targetValue = if (musicImmersive) {
+                            musicVm.playerBackdrop!!.bottom
+                        } else {
+                            appScheme.surfaceContainer
+                        },
+                        animationSpec = androidx.compose.animation.core.tween(250),
+                        label = "navContainer",
+                    )
+                    val navPrimary by androidx.compose.animation.animateColorAsState(
+                        targetValue = if (musicImmersive) {
+                            musicVm.playerBackdrop!!.accent ?: appScheme.primary
+                        } else {
+                            appScheme.primary
+                        },
+                        animationSpec = androidx.compose.animation.core.tween(250),
+                        label = "navPrimary",
+                    )
+                    val navUnselected by androidx.compose.animation.animateColorAsState(
+                        targetValue = if (musicImmersive) {
+                            // 沉浸态导航底是深色歌曲色，未选中图标用深色主题中性灰
+                            Color(0xFFCAC4D0)
+                        } else {
+                            appScheme.onSurfaceVariant
+                        },
+                        animationSpec = androidx.compose.animation.core.tween(250),
+                        label = "navUnselected",
+                    )
+                    MaterialTheme(
+                        colorScheme = appScheme.copy(
+                            surfaceContainer = navContainer,
+                            primary = navPrimary,
+                            onSurfaceVariant = navUnselected,
+                        ),
                     ) {
                         NionBottomNavBar(
                             currentDestination = currentDestination,
