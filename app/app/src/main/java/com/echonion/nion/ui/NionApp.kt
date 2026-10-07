@@ -223,12 +223,12 @@ fun NionApp() {
                         } else {
                             appScheme.primary
                         },
-                        animationSpec = androidx.compose.animation.core.tween(250),
+                        animationSpec = androidx.compose.animation.core.tween(2000),
                         label = "navPrimary",
                     )
                     val navUnselected by androidx.compose.animation.animateColorAsState(
                         targetValue = if (musicImmersive) Color(0xFFCAC4D0) else appScheme.onSurfaceVariant,
-                        animationSpec = androidx.compose.animation.core.tween(250),
+                        animationSpec = androidx.compose.animation.core.tween(2000),
                         label = "navUnselected",
                     )
                     MaterialTheme(

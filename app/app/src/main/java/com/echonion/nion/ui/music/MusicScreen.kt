@@ -19,10 +19,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
 import androidx.compose.animation.ExperimentalSharedTransitionApi
-import androidx.compose.animation.EnterExitState
-import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
 import androidx.compose.animation.core.Spring
@@ -217,11 +214,11 @@ fun MusicScreen(
         AnimatedContent(
             targetState = showFullPlayer,
             transitionSpec = {
-                // 展开/收起均为交叉淡入淡出：位移交由 sharedElement/sharedBounds 的
-                // 弹簧 boundsTransform 完成，避免容器滑动干扰封面飞行轨迹
+                // 展开/收起均为交叉淡入淡出：位移交由 sharedBounds 的 bounds
+                // 动画完成（此组合经多轮实测可靠）
                 (
-                    fadeIn(tween(200, easing = FastOutSlowInEasing)) togetherWith
-                        fadeOut(tween(250, easing = FastOutSlowInEasing))
+                    fadeIn(tween(1600, easing = FastOutSlowInEasing)) togetherWith
+                        fadeOut(tween(2000, easing = FastOutSlowInEasing))
                     ) using SizeTransform(clip = false)
             },
             label = "fullPlayer",
@@ -256,7 +253,7 @@ fun MusicScreen(
                             animatedVisibilityScope = playerAnimatedScope,
                             // 阻尼比 1.0 的临界弹簧：柔和无过冲，与项目统一曲线一致
                             boundsTransform = { _, _ ->
-                                spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                                androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
                             },
                         )
                     }
@@ -300,7 +297,7 @@ fun MusicScreen(
                                             // 展开时旋转 90°（> 变 ∨），收起复原
                                             val chevronRotation by animateFloatAsState(
                                                 targetValue = if (viewExpanded) 90f else 0f,
-                                                animationSpec = tween(180),
+                                                animationSpec = tween(1440),
                                                 label = "viewChevron",
                                             )
                                             Icon(
@@ -344,7 +341,7 @@ fun MusicScreen(
                         // 0→全宽镜像展开，图标飞行入选中格；收起完全镜像 =====
                         val viewRowHeight by animateDpAsState(
                             targetValue = if (viewExpanded) 40.dp else 0.dp,
-                            animationSpec = tween(180),
+                            animationSpec = tween(1440),
                             label = "viewRowH",
                         )
                         BoxWithConstraints(
@@ -406,14 +403,14 @@ fun MusicScreen(
                                 val direction = if (targetState.order > initialState.order) 1 else -1
                                 (
                                     slideInHorizontally(
-                                        animationSpec = tween(300, easing = FastOutSlowInEasing),
+                                        animationSpec = tween(2400, easing = FastOutSlowInEasing),
                                         initialOffsetX = { fullWidth -> direction * fullWidth / 3 },
-                                    ) + fadeIn(tween(200, delayMillis = 50))
+                                    ) + fadeIn(tween(1600, delayMillis = 50))
                                     ) togetherWith (
                                     slideOutHorizontally(
-                                        animationSpec = tween(300, easing = FastOutSlowInEasing),
+                                        animationSpec = tween(2400, easing = FastOutSlowInEasing),
                                         targetOffsetX = { fullWidth -> -direction * fullWidth / 3 },
-                                    ) + fadeOut(tween(150))
+                                    ) + fadeOut(tween(1200))
                                     ) using SizeTransform(clip = false)
                             },
                             label = "musicSource",
@@ -602,20 +599,20 @@ private fun LocalLibraryContent(
                 if (targetState) {
                     // 进入歌单视图：歌单从右滑入，专辑向左滑出
                     (
-                        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } +
-                            fadeIn(tween(300))
+                        slideInHorizontally(tween(2400, easing = FastOutSlowInEasing)) { it / 3 } +
+                            fadeIn(tween(2400))
                     ) togetherWith (
-                        slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 3 } +
-                            fadeOut(tween(200))
+                        slideOutHorizontally(tween(2400, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeOut(tween(1600))
                     )
                 } else {
                     // 回到专辑视图：专辑从左滑入，歌单向右滑出
                     (
-                        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 3 } +
-                            fadeIn(tween(300))
+                        slideInHorizontally(tween(2400, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeIn(tween(2400))
                     ) togetherWith (
-                        slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } +
-                            fadeOut(tween(200))
+                        slideOutHorizontally(tween(2400, easing = FastOutSlowInEasing)) { it / 3 } +
+                            fadeOut(tween(1600))
                     )
                 }
             },
@@ -643,13 +640,13 @@ private fun LocalLibraryContent(
                         // 避免 scrim 淡入期间透明导致底层列表透出
                         (
                             EnterTransition.None togetherWith
-                                fadeOut(tween(250, easing = FastOutSlowInEasing))
+                                fadeOut(tween(2000, easing = FastOutSlowInEasing))
                             ) using SizeTransform(clip = false)
                     } else {
                         // 收回：列表快速淡入，详情缓慢淡出
                         (
-                            fadeIn(tween(250, easing = FastOutSlowInEasing)) togetherWith
-                                fadeOut(tween(400, easing = FastOutSlowInEasing))
+                            fadeIn(tween(2000, easing = FastOutSlowInEasing)) togetherWith
+                                fadeOut(tween(2500, easing = FastOutSlowInEasing))
                             ) using SizeTransform(clip = false)
                     }
                 },
@@ -764,19 +761,19 @@ private fun ServerMusicContent(
             transitionSpec = {
                 if (targetState) {
                     (
-                        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } +
-                            fadeIn(tween(300))
+                        slideInHorizontally(tween(2400, easing = FastOutSlowInEasing)) { it / 3 } +
+                            fadeIn(tween(2400))
                     ) togetherWith (
-                        slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 3 } +
-                            fadeOut(tween(200))
+                        slideOutHorizontally(tween(2400, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeOut(tween(1600))
                     )
                 } else {
                     (
-                        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 3 } +
-                            fadeIn(tween(300))
+                        slideInHorizontally(tween(2400, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeIn(tween(2400))
                     ) togetherWith (
-                        slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } +
-                            fadeOut(tween(200))
+                        slideOutHorizontally(tween(2400, easing = FastOutSlowInEasing)) { it / 3 } +
+                            fadeOut(tween(1600))
                     )
                 }
             },
@@ -808,13 +805,13 @@ private fun ServerMusicContent(
                         // 避免 scrim 淡入期间透明导致底层列表透出
                         (
                             EnterTransition.None togetherWith
-                                fadeOut(tween(250, easing = FastOutSlowInEasing))
+                                fadeOut(tween(2000, easing = FastOutSlowInEasing))
                             ) using SizeTransform(clip = false)
                     } else {
                         // 收回：列表快速淡入，详情缓慢淡出
                         (
-                            fadeIn(tween(250, easing = FastOutSlowInEasing)) togetherWith
-                                fadeOut(tween(400, easing = FastOutSlowInEasing))
+                            fadeIn(tween(2000, easing = FastOutSlowInEasing)) togetherWith
+                                fadeOut(tween(2500, easing = FastOutSlowInEasing))
                             ) using SizeTransform(clip = false)
                     }
                 },
@@ -929,19 +926,19 @@ private fun ToolbarZone(
     // 条内容淡入淡出：收起时快速淡出（文字不滑过图标露残影）
     val stripAlpha by animateFloatAsState(
         targetValue = if (expanded) 1f else 0f,
-        animationSpec = tween(120),
+        animationSpec = tween(960),
         label = "stripAlpha",
     )
     // ✕ 淡入淡出：图标飞离角落后浮现（最右侧收起钮）
     val closeAlpha by animateFloatAsState(
         targetValue = if (expanded) 1f else 0f,
-        animationSpec = tween(120),
+        animationSpec = tween(960),
         label = "closeAlpha",
     )
     // 让位淡出：他区展开时本区图标随推动淡出，回位淡入
     val iconAlpha by animateFloatAsState(
         targetValue = if (expanded || collapsedWidth > 0.dp) 1f else 0f,
-        animationSpec = tween(150),
+        animationSpec = tween(1200),
         label = "iconAlpha",
     )
     Row(
@@ -1109,8 +1106,8 @@ private fun PlaylistViewWithFab(
         // 新建歌单 FAB：任务页同款（仅歌单列表态显示，详情态淡出）
         AnimatedVisibility(
             visible = vm.currentPlaylist == null,
-            enter = fadeIn(tween(250, easing = FastOutSlowInEasing)),
-            exit = fadeOut(tween(180, easing = FastOutSlowInEasing)),
+            enter = fadeIn(tween(2000, easing = FastOutSlowInEasing)),
+            exit = fadeOut(tween(1440, easing = FastOutSlowInEasing)),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 8.dp, bottom = 8.dp),
@@ -1282,7 +1279,7 @@ private fun DetailToolsBar(
     // 排序图标颜色：展开 灰→主色（延迟与条揭示同步），收起渐回灰
     val sortIconTint by animateColorAsState(
         targetValue = if (sortOpen) priColor else grayColor,
-        animationSpec = tween(180, delayMillis = if (sortOpen) 80 else 0),
+        animationSpec = tween(1440, delayMillis = if (sortOpen) 80 else 0),
         label = "detailSortIconTint",
     )
 
@@ -1458,7 +1455,7 @@ private fun AlbumDetailContent(
                                 animatedVisibilityScope = animatedVisibilityScope,
                                 // 临界弹簧：柔和无过冲的尺寸/位置过渡
                                 boundsTransform = { _, _ ->
-                                    spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                                    androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
                                 },
                             )
                         },
@@ -1480,7 +1477,7 @@ private fun AlbumDetailContent(
                                     sharedContentState = rememberSharedContentState("music_album_cover_${album.id}"),
                                     animatedVisibilityScope = animatedVisibilityScope,
                                     boundsTransform = { _, _ ->
-                                        spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                                        androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
                                     },
                                 )
                             },
@@ -1643,12 +1640,12 @@ private fun PlaylistPanel(
                 if (targetState != null) {
                     (
                         EnterTransition.None togetherWith
-                            fadeOut(tween(250, easing = FastOutSlowInEasing))
+                            fadeOut(tween(2000, easing = FastOutSlowInEasing))
                         ) using SizeTransform(clip = false)
                 } else {
                     (
-                        fadeIn(tween(250, easing = FastOutSlowInEasing)) togetherWith
-                            fadeOut(tween(400, easing = FastOutSlowInEasing))
+                        fadeIn(tween(2000, easing = FastOutSlowInEasing)) togetherWith
+                            fadeOut(tween(2500, easing = FastOutSlowInEasing))
                         ) using SizeTransform(clip = false)
                 }
             },
@@ -1744,7 +1741,7 @@ private fun PlaylistRow(
                         sharedContentState = rememberSharedContentState("music_playlist_${playlist.id}"),
                         animatedVisibilityScope = animatedVisibilityScope,
                         boundsTransform = { _, _ ->
-                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                            androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
                         },
                     )
                 },
@@ -1832,7 +1829,7 @@ private fun PlaylistDetailContent(
                                 sharedContentState = rememberSharedContentState("music_playlist_${playlist.id}"),
                                 animatedVisibilityScope = animatedVisibilityScope,
                                 boundsTransform = { _, _ ->
-                                    spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                                    androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
                                 },
                             )
                         },
@@ -2198,17 +2195,16 @@ private fun MiniPlayerBar(
     animatedVisibilityScope: AnimatedVisibilityScope,
 ) {
     Surface(
-        // 容器 sharedBounds：与播放页全屏容器配对（播放条↔播放页 morph 的
-        // bounds 源），但不进过渡 overlay —— 迷你条留在自己分支里随分支
-        // 淡入淡出，避免它在 overlay 里以"全屏缩回条形"的米色轮廓盖住镜像
+        // 容器 sharedBounds：与播放页容器配对（morph 的 bounds 源）。必须保持
+        // 默认进过渡层 —— renderInOverlay=false 会断开配对、bounds 动画不跑。
+        // 收回时它在过渡层的副本也是歌曲色（immersiveUnitColor），不会出米色轮廓
         modifier = with(sharedTransitionScope) {
             Modifier.sharedBounds(
                 sharedContentState = rememberSharedContentState("music_player_bar"),
                 animatedVisibilityScope = animatedVisibilityScope,
-                renderInOverlayDuringTransition = false,
                 // 临界弹簧：柔和无过冲，与项目统一曲线一致
                 boundsTransform = { _, _ ->
-                    spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                    androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
                 },
             )
         },
@@ -2247,7 +2243,7 @@ private fun MiniPlayerBar(
                                     sharedContentState = rememberSharedContentState("music_player_cover"),
                                     animatedVisibilityScope = animatedVisibilityScope,
                                     boundsTransform = { _, _ ->
-                                        spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                                        androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
                                     },
                                 )
                             },
@@ -2336,21 +2332,12 @@ private fun FullPlayerOverlay(
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose { vm.playerBackdrop = null }
     }
-    // 控件层内容透明度：morph 由 sharedBounds 的 bounds 动画承载（唯一几何
-    // 机制），控件内容只在矩形接近最终尺寸时淡入/淡出，避免整树缩放变形
-    // 被长时间看到；渐变背景属于 sharedBounds 元素本体，全程参与 morph
-    val contentAlpha by animatedVisibilityScope.transition.animateFloat(
-        transitionSpec = { tween(150) },
-        label = "playerContentAlpha",
-    ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
-
     // 播放队列默认收起：顶部按钮呼出（常驻列表会挤占沉浸滑切区）
     var queueVisible by remember { mutableStateOf(false) }
-
-    // 真 sharedElement 结构：迷你条 Surface ↔ 播放页这个容器（sharedBounds）
-    // —— 渐变是容器自身的背景，随 bounds 一起 morph（起步底色=播放条一体色，
-    // 收尾为全屏渐变）；封面另有 sharedElement 飞行；没有手写裁剪/对齐层
-    Box(
+    // 回归已验证可用的 morph 结构：Surface(sharedBounds) 内含渐变 Box 与控件。
+    // 配对两侧均用默认 overlay 参与，bounds 动画可靠运行；颜色由一体色体系
+    //（immersiveUnitColor）保证 —— 播放条/导航栏 t=0 歌曲色，morph 全程连续
+    Surface(
         modifier = Modifier
             .fillMaxSize()
             .then(
@@ -2358,26 +2345,28 @@ private fun FullPlayerOverlay(
                     Modifier.sharedBounds(
                         sharedContentState = rememberSharedContentState("music_player_bar"),
                         animatedVisibilityScope = animatedVisibilityScope,
-                        enter = EnterTransition.None,
-                        exit = ExitTransition.None,
                         boundsTransform = { _, _ ->
-                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                            androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
                         },
                     )
                 },
-            )
-            .background(
-                Brush.verticalGradient(listOf(backdrop.top, backdrop.bottom)),
             ),
+        color = Color.Transparent,
     ) {
-        MaterialTheme(colorScheme = playerScheme) {
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = contentAlpha }
-                    .padding(horizontal = 24.dp)
-                    .statusBarsPadding()
-                    .navigationBarsPadding(),
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(listOf(backdrop.top, backdrop.bottom)),
+                ),
+        ) {
+            MaterialTheme(colorScheme = playerScheme) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .padding(horizontal = 24.dp)
+                        .statusBarsPadding()
+                        .navigationBarsPadding(),
             ) {
                     // ===== 顶部收起按钮 =====
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
@@ -2490,7 +2479,7 @@ private fun FullPlayerOverlay(
                                                         sharedContentState = rememberSharedContentState(coverKey),
                                                         animatedVisibilityScope = animatedVisibilityScope,
                                                         boundsTransform = { _, _ ->
-                                                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                                                            androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
                                                         },
                                                     )
                                                 },
@@ -2619,8 +2608,8 @@ private fun FullPlayerOverlay(
                     // ===== 播放队列面板（入口：右上角按钮；底部滑入） =====
                     AnimatedVisibility(
                         visible = queueVisible,
-                        enter = fadeIn(tween(280)) + slideInVertically(tween(280)) { it / 3 },
-                        exit = fadeOut(tween(200)) + slideOutVertically(tween(200)) { it / 3 },
+                        enter = fadeIn(tween(2240)) + slideInVertically(tween(2240)) { it / 3 },
+                        exit = fadeOut(tween(1600)) + slideOutVertically(tween(1600)) { it / 3 },
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         Box(
@@ -2688,6 +2677,7 @@ private fun FullPlayerOverlay(
             }
         }
     }
+}
 
 /* ============================================================
  * 播放/暂停切换动画
@@ -2717,7 +2707,7 @@ private fun AnimatedPlayPauseIcon(
     LaunchedEffect(isPlaying) { spin += 360 }
     val rotation by animateFloatAsState(
         targetValue = spin.toFloat(),
-        animationSpec = tween(250, easing = FastOutSlowInEasing),
+        animationSpec = tween(2000, easing = FastOutSlowInEasing),
         label = "playPauseSpin",
     )
     AnimatedContent(
@@ -2727,14 +2717,14 @@ private fun AnimatedPlayPauseIcon(
             // 全部 tween + FastOutSlowInEasing，与全 app 动画语言一致
             (
                 scaleIn(
-                    animationSpec = tween(200, easing = FastOutSlowInEasing),
+                    animationSpec = tween(1600, easing = FastOutSlowInEasing),
                     initialScale = 0.5f,
-                ) + fadeIn(tween(150, easing = FastOutSlowInEasing))
+                ) + fadeIn(tween(1200, easing = FastOutSlowInEasing))
                 ) togetherWith (
                 scaleOut(
-                    animationSpec = tween(150, easing = FastOutSlowInEasing),
+                    animationSpec = tween(1200, easing = FastOutSlowInEasing),
                     targetScale = 0.5f,
-                ) + fadeOut(tween(100, easing = FastOutSlowInEasing))
+                ) + fadeOut(tween(800, easing = FastOutSlowInEasing))
                 )
         },
         label = "playPause",
@@ -2926,7 +2916,7 @@ private fun AlbumRow(
                         animatedVisibilityScope = animatedVisibilityScope,
                         // 临界弹簧：柔和无过冲的尺寸/位置过渡
                         boundsTransform = { _, _ ->
-                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                            androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
                         },
                     )
                 },
@@ -2948,7 +2938,7 @@ private fun AlbumRow(
                             sharedContentState = rememberSharedContentState("music_album_cover_${album.id}"),
                             animatedVisibilityScope = animatedVisibilityScope,
                             boundsTransform = { _, _ ->
-                                spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                                androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
                             },
                         )
                     },

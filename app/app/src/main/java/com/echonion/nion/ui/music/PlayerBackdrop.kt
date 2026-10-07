@@ -102,8 +102,8 @@ internal fun rememberPlayerBackdrop(track: PlayableTrack?): PlayerBackdropColors
     }
 
     // 切歌时背景色平滑过渡，避免硬切
-    val top by animateColorAsState(target.top, tween(600), label = "backdropTop")
-    val bottom by animateColorAsState(target.bottom, tween(600), label = "backdropBottom")
+    val top by animateColorAsState(target.top, tween(2000), label = "backdropTop")
+    val bottom by animateColorAsState(target.bottom, tween(2000), label = "backdropBottom")
     return PlayerBackdropColors(top, bottom, target.accent)
 }
 
@@ -117,7 +117,7 @@ internal fun rememberPlayerBackdrop(track: PlayableTrack?): PlayerBackdropColors
 internal fun immersiveUnitColor(active: Boolean, song: Color, fallback: Color): Color {
     val faded by animateColorAsState(
         targetValue = if (active) song else fallback,
-        animationSpec = tween(250),
+        animationSpec = tween(2000),
         label = "immersiveUnit",
     )
     return if (active) song else faded
