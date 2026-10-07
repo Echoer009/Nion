@@ -204,26 +204,51 @@ fun NionApp() {
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
                 bottomBar = {
-                    val playerImmersive = currentRoute == "music" &&
+                    // 播放页沉浸态：导航栏底色/主色与播放页铺开(morph)动画同步过渡
+                    //（同时长 250ms + 同缓动），绿色扫到哪导航栏渐变到哪，
+                    // 收起反向同步，任何一帧都不存在"绿-米-绿"硬切
+                    val immersive = currentRoute == "music" &&
                         musicVm.isFullPlayerOpen &&
                         musicVm.playerBackdrop != null
-                    if (playerImmersive) {
-                        MaterialTheme(
-                            colorScheme = com.echonion.nion.ui.music.rememberPlayerColorScheme(
-                                musicVm.playerBackdrop!!,
-                            ),
-                        ) {
-                            NionBottomNavBar(
-                                currentDestination = currentDestination,
-                                onItemClick = { item ->
-                                    coroutineScope.launch {
-                                        dualState.closePanel()
-                                        navigateToRoute(navController, item.route)
-                                    }
-                                },
-                            )
-                        }
+                    val appScheme = MaterialTheme.colorScheme
+                    val targetScheme = if (immersive) {
+                        com.echonion.nion.ui.music.rememberPlayerColorScheme(
+                            musicVm.playerBackdrop!!,
+                        )
                     } else {
+                        appScheme
+                    }
+                    val navContainer by androidx.compose.animation.animateColorAsState(
+                        targetValue = targetScheme.surfaceContainer,
+                        animationSpec = androidx.compose.animation.core.tween(
+                            250,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        label = "navContainer",
+                    )
+                    val navPrimary by androidx.compose.animation.animateColorAsState(
+                        targetValue = targetScheme.primary,
+                        animationSpec = androidx.compose.animation.core.tween(
+                            250,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        label = "navPrimary",
+                    )
+                    val navUnselected by androidx.compose.animation.animateColorAsState(
+                        targetValue = targetScheme.onSurfaceVariant,
+                        animationSpec = androidx.compose.animation.core.tween(
+                            250,
+                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
+                        ),
+                        label = "navUnselected",
+                    )
+                    MaterialTheme(
+                        colorScheme = appScheme.copy(
+                            surfaceContainer = navContainer,
+                            primary = navPrimary,
+                            onSurfaceVariant = navUnselected,
+                        ),
+                    ) {
                         NionBottomNavBar(
                             currentDestination = currentDestination,
                             onItemClick = { item ->
