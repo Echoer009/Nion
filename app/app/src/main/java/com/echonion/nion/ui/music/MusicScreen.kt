@@ -52,8 +52,11 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.requiredWidth
+import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -861,7 +864,11 @@ private fun MusicToolbar(
                 icon = if (vm.localAlbumSort == LocalAlbumSort.TITLE) sortOptions[0].icon else sortOptions[1].icon,
                 contentDescription = "排序方式",
                 iconTint = sortIconTint,
-                iconTargetLeft = sortFlight,
+                iconTargetLeft = flightTarget(
+                    toolbarWidth,
+                    if (vm.localAlbumSort == LocalAlbumSort.TITLE) 0 else 1,
+                    sortOptions.size,
+                ),
                 visible = sortVisible,
                 onIconClick = { mode = MusicToolbarMode.SORT },
                 onClose = { mode = MusicToolbarMode.NORMAL },
@@ -879,7 +886,6 @@ private fun MusicToolbar(
                         },
                     )
                 }
-                Spacer(modifier = Modifier.weight(1f))
             }
 
             // —— 视图区 ——
@@ -890,7 +896,11 @@ private fun MusicToolbar(
                 icon = if (showPlaylists) viewOptions[1].icon else viewOptions[0].icon,
                 contentDescription = "曲库视图",
                 iconTint = viewIconTint,
-                iconTargetLeft = viewFlight,
+                iconTargetLeft = flightTarget(
+                    toolbarWidth,
+                    if (showPlaylists) 1 else 0,
+                    viewOptions.size,
+                ),
                 visible = viewVisible,
                 onIconClick = { mode = MusicToolbarMode.VIEW },
                 onClose = { mode = MusicToolbarMode.NORMAL },
@@ -907,10 +917,10 @@ private fun MusicToolbar(
                         },
                     )
                 }
-                Spacer(modifier = Modifier.weight(1f))
             }
 
-            // —— 搜索区 ——
+            // —— 搜索区（不套用飞行模型：无选中项概念）——
+            // 图标恒钉在槽位当开关（再点=收起并清词），输入框填满窗口，无 ✕
             ToolbarZone(
                 expandedWidth = toolbarWidth,
                 collapsedWidth = searchRest,
@@ -918,14 +928,19 @@ private fun MusicToolbar(
                 icon = LucideIcons.Search,
                 contentDescription = "搜索音乐",
                 iconTint = grayColor,
-                iconTargetLeft = 14.dp, // 输入框内置图标槽（12 内距 + 居中差）
+                iconTargetLeft = null,
                 visible = true,
-                onIconClick = { mode = MusicToolbarMode.SEARCH },
-                onClose = {
-                    // 退出搜索即清空查询词（视图自动回落专辑列表）
-                    vm.searchQuery = ""
-                    mode = MusicToolbarMode.NORMAL
+                onIconClick = {
+                    if (mode == MusicToolbarMode.SEARCH) {
+                        // 退出搜索即清空查询词（视图自动回落专辑列表）
+                        vm.searchQuery = ""
+                        mode = MusicToolbarMode.NORMAL
+                    } else {
+                        mode = MusicToolbarMode.SEARCH
+                    }
                 },
+                onClose = { mode = MusicToolbarMode.NORMAL },
+                showClose = false,
             ) {
                 SearchFieldRectangle(vm = vm, modifier = Modifier.weight(1f))
             }
@@ -933,22 +948,31 @@ private fun MusicToolbar(
     }
 }
 
-/** 控件栏单颗图标的占位宽度 / 选项格定宽（飞行落点 = 格序×格宽 + 内距） */
+/** 控件栏单颗图标的占位宽度 / 选项格定宽 */
 private val ToolbarIconWidth = 48.dp
 private val ToolbarCellWidth = 96.dp
 
 /**
- * 控件栏区域 —— "飞行图标 + 揭示窗口"统一模型：
+ * 飞行终点（窗口坐标下 IconButton 左缘）：条内容右打包为 [选项格…][✕]，
+ * 自窗口右缘共占 cellCount×96 + 48dp；格内图标左缘 = 格左 + 14（水平内距），
+ * 图标在 48dp 按钮内居中（差 12），故按钮左缘 = 格左 + 2。
+ */
+private fun flightTarget(expandedWidth: Dp, cellIndex: Int, cellCount: Int): Dp =
+    expandedWidth - ToolbarIconWidth - (ToolbarCellWidth * cellCount + ToolbarIconWidth) +
+        ToolbarCellWidth * cellIndex + 2.dp
+
+/**
+ * 控件栏区域 —— "图标槽 + 揭示窗口 + 飞行图标"统一模型（搜索区为钉槽变体）：
  *
- * - 区 = 一个宽度动画的揭示窗口（收起 48dp / 让位 0 ↔ 展开整栏）+ 裁切。
- *   展开时窗口占满整栏，兄弟区宽度归零——图标随边缘滑出被裁走（真实让位）；
- *   收起镜像：兄弟图标跟着边缘滑回原位，全程位移、无淡入淡出无瞬现；
- * - 条内容 requiredWidth(整栏) 硬约束静止（Modifier.width 是软约束，会被窗口
- *   逐帧钳制导致内容横移/图标压扁），由窗口自右向左揭示：✕ 先现、选项格依次亮出；
- * - 恒定图标（同一节点贯穿展开/收起全程）：offset 在 角落↔选中格图标位 间
- *   飞行，颜色 灰↔主色 渐变。与窗口同参弹簧 → 飞行与揭示同帧同曲线锁步，
- *   图标恰好随条的展开"引路"抵达选中格；
- * - ✕ 是唯一入场元素：占据图标让出的角落，120ms 淡入淡出。
+ * - 区 = [揭示窗口][图标槽]（Row，宽度动画 + 裁切）。收起态窗口宽 = 0：
+ *   条内容物理不存在，常态只有图标 —— 不可能有任何条内容残漏；
+ * - 展开：窗口 0 → 整栏-48，内容右打包（Arrangement.End），由窗口自右向左
+ *   揭示：✕ 先现、选项格从右往左亮出；兄弟区宽度归零（让位），图标随
+ *   区边缘滑出被裁走；收起完全镜像；
+ * - 图标槽恒 48dp 在区右端（requiredSize 不被压扁）：图标是同一节点贯穿
+ *   全程，展开时向左飞入选中格图标位（offset 负向，与窗口同参弹簧锁步），
+ *   颜色 灰↔主色 渐变；iconTargetLeft=null 则钉在槽位不动（搜索区）；
+ * - ✕ 唯一入场元素（showClose=false 可省）：120ms 淡入淡出。
  */
 @Composable
 private fun ToolbarZone(
@@ -958,54 +982,70 @@ private fun ToolbarZone(
     icon: ImageVector,
     contentDescription: String,
     iconTint: androidx.compose.ui.graphics.Color,
-    iconTargetLeft: Dp,
+    iconTargetLeft: Dp?,
     visible: Boolean,
     onIconClick: () -> Unit,
     onClose: () -> Unit,
+    showClose: Boolean = true,
     stripContent: @Composable RowScope.() -> Unit,
 ) {
-    // 窗口宽度与图标偏移共用同一弹簧：同帧起步、同曲线行进（锁步）
+    // 区宽、图标偏移共用同一弹簧：同帧起步、同曲线行进（锁步）
     val zoneSpring = spring<Dp>(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)
     val zoneWidth by animateDpAsState(
         targetValue = if (expanded) expandedWidth else collapsedWidth,
         animationSpec = zoneSpring,
         label = "zoneWidth",
     )
-    val iconLeft by animateDpAsState(
-        targetValue = if (expanded) iconTargetLeft else 0.dp,
+    // 图标自槽位的左移量：收起=0（钉槽）；展开=飞到选中格图标位
+    val iconPullLeft by animateDpAsState(
+        targetValue = if (expanded && iconTargetLeft != null) {
+            (expandedWidth - ToolbarIconWidth) - iconTargetLeft
+        } else {
+            0.dp
+        },
         animationSpec = zoneSpring,
-        label = "iconLeft",
+        label = "iconPullLeft",
     )
     val closeAlpha by animateFloatAsState(
         targetValue = if (expanded) 1f else 0f,
         animationSpec = tween(120),
         label = "closeAlpha",
     )
-    Box(
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .width(zoneWidth)
             .height(48.dp)
             .clipToBounds(),
     ) {
-        // 条内容：整栏硬约束、右缘锚定；✕ 在条尾（= 图标让出的角落）
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
+        // 揭示窗口：收起=0（条不存在）；展开=区宽-图标槽。内容右打包、自右向左揭示
+        Box(
             modifier = Modifier
-                .align(Alignment.CenterEnd)
-                .requiredWidth(expandedWidth),
+                .width((zoneWidth - ToolbarIconWidth).coerceAtLeast(0.dp))
+                .height(48.dp)
+                .clipToBounds(),
+            contentAlignment = Alignment.CenterEnd,
         ) {
-            stripContent()
-            Box(modifier = Modifier.graphicsLayer { alpha = closeAlpha }) {
-                CloseToolbarButton(onClose = onClose)
+            Row(
+                horizontalArrangement = Arrangement.End,
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.matchParentSize(),
+            ) {
+                stripContent()
+                if (showClose) {
+                    Box(modifier = Modifier.graphicsLayer { alpha = closeAlpha }) {
+                        CloseToolbarButton(onClose = onClose)
+                    }
+                }
             }
         }
-        // 恒定飞行图标（覆盖在条之上）：offset 自区左缘计
+        // 图标槽：恒定 48dp 硬尺寸；展开时负向 offset 飞入窗口内的选中格
         if (visible) {
             IconButton(
                 onClick = onIconClick,
                 modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .offset(x = iconLeft),
+                    .offset(x = -iconPullLeft)
+                    .requiredSize(ToolbarIconWidth),
             ) {
                 Icon(
                     icon,
