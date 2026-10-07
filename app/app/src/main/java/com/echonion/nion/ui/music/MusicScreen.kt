@@ -52,6 +52,7 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.background
@@ -783,9 +784,9 @@ private data class SelectorOption(
 )
 
 /**
- * 曲库控件栏 —— 三区（排序/视图/搜索），见 [ToolbarZone] 的统一模型：
- * 图标恒定在右，展开条从图标左侧生长（兄弟被真实推动）；✕ 收起；
- * 点选项即生效并收回；退出搜索清空查询词。
+ * 曲库控件栏 —— 三区（排序/视图/搜索），见 [ToolbarZone] 的飞行图标模型：
+ * 点图标 → 该图标飞行到选中项位置并染主色，条占满整栏（兄弟图标被推出场），
+ * 角上浮现 ✕；✕ 或点选项收起，收起完全镜像；退出搜索清空查询词。
  */
 @Composable
 private fun MusicToolbar(
@@ -795,7 +796,7 @@ private fun MusicToolbar(
 ) {
     var mode by remember { mutableStateOf(MusicToolbarMode.NORMAL) }
 
-    // 排序/视图的选项集合（未来加选项 = 加一项，控件栏占位不变）
+    // 排序/视图的选项集合（未来加选项 = 加一项 + 调整 ToolbarCellWidth 即可）
     val sortOptions = remember {
         listOf(
             SelectorOption("title", LucideIcons.ArrowDownAZ, "名称"),
@@ -809,8 +810,8 @@ private fun MusicToolbar(
         )
     }
 
-    // 图标颜色语义：常态灰；展开时本区图标 灰→主色 渐变（延迟 80ms 与条内容
-    // 揭示同步），收起时渐回灰 —— 展开条选中信号与常态灰图标之间连续过渡
+    // 飞行图标颜色：常态灰；展开时 灰→主色 渐变（延迟 80ms 与条的揭示同步），
+    // 收起时渐回灰 —— 图标全程只有位移与变色两种变化
     val grayColor = MaterialTheme.colorScheme.onSurfaceVariant
     val priColor = MaterialTheme.colorScheme.primary
     val sortIconTint by animateColorAsState(
@@ -834,13 +835,16 @@ private fun MusicToolbar(
         val sortVisible = vm.source == MusicSource.LOCAL && !showPlaylists && vm.searchQuery.isBlank()
         val viewVisible = vm.searchQuery.isBlank()
 
-        // 展开条宽度 = 整栏 - 右侧兄弟图标占位（图标恒定在场，条在图标左侧生长）
-        val siblingCountForSort = (if (viewVisible) 1 else 0) + 1
-        val siblingCountForView = (if (sortVisible) 1 else 0) + 1
-        val siblingCountForSearch = (if (sortVisible) 1 else 0) + (if (viewVisible) 1 else 0)
-        val sortStripWidth = toolbarWidth - ToolbarIconWidth * siblingCountForSort
-        val viewStripWidth = toolbarWidth - ToolbarIconWidth * siblingCountForView
-        val searchStripWidth = toolbarWidth - ToolbarIconWidth * siblingCountForSearch
+        // 收起态宽度：NORMAL 时本区图标占位 48dp；任一区展开期间兄弟区让位为 0
+        //（整行只保留一个展开区，条才能占满整栏）
+        val sortRest = if (mode == MusicToolbarMode.NORMAL && sortVisible) ToolbarIconWidth else 0.dp
+        val viewRest = if (mode == MusicToolbarMode.NORMAL && viewVisible) ToolbarIconWidth else 0.dp
+        val searchRest = if (mode == MusicToolbarMode.NORMAL) ToolbarIconWidth else 0.dp
+
+        // 飞行终点（IconButton 左缘偏移）：图标在 48dp 按钮内居中，
+        // 故 = 目标格图标左缘(格序×96 + 内距14) - 12
+        val sortFlight = ToolbarCellWidth * (if (vm.localAlbumSort == LocalAlbumSort.TITLE) 0 else 1) + 2.dp
+        val viewFlight = ToolbarCellWidth * (if (showPlaylists) 1 else 0) + 2.dp
 
         Row(
             modifier = Modifier
@@ -851,20 +855,23 @@ private fun MusicToolbar(
         ) {
             // —— 排序区 ——
             ToolbarZone(
-                stripExpandedWidth = sortStripWidth,
+                expandedWidth = toolbarWidth,
+                collapsedWidth = sortRest,
                 expanded = mode == MusicToolbarMode.SORT,
                 icon = if (vm.localAlbumSort == LocalAlbumSort.TITLE) sortOptions[0].icon else sortOptions[1].icon,
                 contentDescription = "排序方式",
                 iconTint = sortIconTint,
+                iconTargetLeft = sortFlight,
                 visible = sortVisible,
                 onIconClick = { mode = MusicToolbarMode.SORT },
+                onClose = { mode = MusicToolbarMode.NORMAL },
             ) {
                 sortOptions.forEach { opt ->
                     val sel = (vm.localAlbumSort == LocalAlbumSort.TITLE) == (opt.key == "title")
                     SelectorCell(
                         option = opt,
                         selected = sel,
-                        iconTintOverride = if (sel) sortIconTint else null,
+                        showIcon = !sel,
                         onClick = {
                             vm.localAlbumSort =
                                 if (opt.key == "title") LocalAlbumSort.TITLE else LocalAlbumSort.NEWEST
@@ -873,25 +880,27 @@ private fun MusicToolbar(
                     )
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
             }
 
             // —— 视图区 ——
             ToolbarZone(
-                stripExpandedWidth = viewStripWidth,
+                expandedWidth = toolbarWidth,
+                collapsedWidth = viewRest,
                 expanded = mode == MusicToolbarMode.VIEW,
                 icon = if (showPlaylists) viewOptions[1].icon else viewOptions[0].icon,
                 contentDescription = "曲库视图",
                 iconTint = viewIconTint,
+                iconTargetLeft = viewFlight,
                 visible = viewVisible,
                 onIconClick = { mode = MusicToolbarMode.VIEW },
+                onClose = { mode = MusicToolbarMode.NORMAL },
             ) {
                 viewOptions.forEach { opt ->
                     val sel = showPlaylists == (opt.key == "playlist")
                     SelectorCell(
                         option = opt,
                         selected = sel,
-                        iconTintOverride = if (sel) viewIconTint else null,
+                        showIcon = !sel,
                         onClick = {
                             onSelectView(opt.key == "playlist")
                             mode = MusicToolbarMode.NORMAL
@@ -899,83 +908,105 @@ private fun MusicToolbar(
                     )
                 }
                 Spacer(modifier = Modifier.weight(1f))
-                CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
             }
 
             // —— 搜索区 ——
             ToolbarZone(
-                stripExpandedWidth = searchStripWidth,
+                expandedWidth = toolbarWidth,
+                collapsedWidth = searchRest,
                 expanded = mode == MusicToolbarMode.SEARCH,
                 icon = LucideIcons.Search,
                 contentDescription = "搜索音乐",
                 iconTint = grayColor,
+                iconTargetLeft = 14.dp, // 输入框内置图标槽（12 内距 + 居中差）
                 visible = true,
                 onIconClick = { mode = MusicToolbarMode.SEARCH },
-            ) {
-                SearchFieldRectangle(vm = vm, modifier = Modifier.weight(1f))
-                CloseToolbarButton {
+                onClose = {
                     // 退出搜索即清空查询词（视图自动回落专辑列表）
                     vm.searchQuery = ""
                     mode = MusicToolbarMode.NORMAL
-                }
+                },
+            ) {
+                SearchFieldRectangle(vm = vm, modifier = Modifier.weight(1f))
             }
         }
     }
 }
 
-/** 控件栏单颗图标的占位宽度 */
+/** 控件栏单颗图标的占位宽度 / 选项格定宽（飞行落点 = 格序×格宽 + 内距） */
 private val ToolbarIconWidth = 48.dp
+private val ToolbarCellWidth = 96.dp
 
 /**
- * 控件栏区域 —— "图标在右恒定 + 条在左生长"统一模型：
+ * 控件栏区域 —— "飞行图标 + 揭示窗口"统一模型：
  *
- * - 区 = [揭示窗口(条内容)][图标]。图标是同一个节点贯穿展开/收起全程：
- *   永不消失、永不淡入淡出、自身展开/收起时原位不动；
- * - 揭示窗口宽度 0 ↔ stripExpandedWidth 弹簧动画：窗口是真实占位，
- *   兄弟区被真实推动（本区展开 → 兄弟图标滑出；收起 → 镜像滑回）；
- * - 条内容 requiredWidth(stripExpandedWidth) 硬约束：不被窗口软约束逐帧
- *   钳制（Modifier.width 会被压小导致内容横移/图标压扁的"大小跳"），
- *   内容静止，由窗口 clip 从图标位置向左揭示/收回；
- * - ✕ 在条尾紧挨图标：点 ✕ 收起；点图标（未展开时）展开。
+ * - 区 = 一个宽度动画的揭示窗口（收起 48dp / 让位 0 ↔ 展开整栏）+ 裁切。
+ *   展开时窗口占满整栏，兄弟区宽度归零——图标随边缘滑出被裁走（真实让位）；
+ *   收起镜像：兄弟图标跟着边缘滑回原位，全程位移、无淡入淡出无瞬现；
+ * - 条内容 requiredWidth(整栏) 硬约束静止（Modifier.width 是软约束，会被窗口
+ *   逐帧钳制导致内容横移/图标压扁），由窗口自右向左揭示：✕ 先现、选项格依次亮出；
+ * - 恒定图标（同一节点贯穿展开/收起全程）：offset 在 角落↔选中格图标位 间
+ *   飞行，颜色 灰↔主色 渐变。与窗口同参弹簧 → 飞行与揭示同帧同曲线锁步，
+ *   图标恰好随条的展开"引路"抵达选中格；
+ * - ✕ 是唯一入场元素：占据图标让出的角落，120ms 淡入淡出。
  */
 @Composable
 private fun ToolbarZone(
-    stripExpandedWidth: Dp,
+    expandedWidth: Dp,
+    collapsedWidth: Dp,
     expanded: Boolean,
     icon: ImageVector,
     contentDescription: String,
     iconTint: androidx.compose.ui.graphics.Color,
+    iconTargetLeft: Dp,
     visible: Boolean,
     onIconClick: () -> Unit,
+    onClose: () -> Unit,
     stripContent: @Composable RowScope.() -> Unit,
 ) {
-    // 条内容区宽度动画（单动画值）
-    val stripWidth by animateDpAsState(
-        targetValue = if (expanded) stripExpandedWidth else 0.dp,
-        animationSpec = spring<Dp>(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow),
-        label = "stripWidth",
+    // 窗口宽度与图标偏移共用同一弹簧：同帧起步、同曲线行进（锁步）
+    val zoneSpring = spring<Dp>(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)
+    val zoneWidth by animateDpAsState(
+        targetValue = if (expanded) expandedWidth else collapsedWidth,
+        animationSpec = zoneSpring,
+        label = "zoneWidth",
     )
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        modifier = Modifier.height(48.dp),
+    val iconLeft by animateDpAsState(
+        targetValue = if (expanded) iconTargetLeft else 0.dp,
+        animationSpec = zoneSpring,
+        label = "iconLeft",
+    )
+    val closeAlpha by animateFloatAsState(
+        targetValue = if (expanded) 1f else 0f,
+        animationSpec = tween(120),
+        label = "closeAlpha",
+    )
+    Box(
+        modifier = Modifier
+            .width(zoneWidth)
+            .height(48.dp)
+            .clipToBounds(),
     ) {
-        // 揭示窗口：宽度动画 + 裁切；内容 requiredWidth 静止、右对齐锚在图标左侧
-        Box(
+        // 条内容：整栏硬约束、右缘锚定；✕ 在条尾（= 图标让出的角落）
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .width(stripWidth)
-                .height(48.dp)
-                .clipToBounds(),
-            contentAlignment = Alignment.CenterEnd,
+                .align(Alignment.CenterEnd)
+                .requiredWidth(expandedWidth),
         ) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.requiredWidth(stripExpandedWidth),
-                content = stripContent,
-            )
+            stripContent()
+            Box(modifier = Modifier.graphicsLayer { alpha = closeAlpha }) {
+                CloseToolbarButton(onClose = onClose)
+            }
         }
-        // 恒定图标：永远在场（visible=false 仅用于功能隐藏，如歌单视图下的排序区）
+        // 恒定飞行图标（覆盖在条之上）：offset 自区左缘计
         if (visible) {
-            IconButton(onClick = onIconClick) {
+            IconButton(
+                onClick = onIconClick,
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .offset(x = iconLeft),
+            ) {
                 Icon(
                     icon,
                     contentDescription = contentDescription,
@@ -1001,45 +1032,37 @@ private fun CloseToolbarButton(onClose: () -> Unit) {
 }
 
 /**
- * 展开态的横排选项格 —— 图标 + 两字标签并排、等高 40dp 矩形按钮
- * （小圆角 6dp，非胶囊），当前项染主色。点击由调用方处理（选完收回 NORMAL）。
+ * 展开态的横排选项格 —— 定宽矩形（小圆角 6dp，非胶囊）。未选中格 = 灰图标 +
+ * 常规文字；选中格图标位留空（由控件栏的恒定飞行图标落在此处）+ 主色半粗文字。
+ * 定宽保证飞行图标的落点坐标可静态计算。
  */
 @Composable
 private fun SelectorCell(
     option: SelectorOption,
-    // 选中格图标颜色覆盖：由控件栏区图标颜色动画注入（灰↔主色跨态自然过渡），
-    // null = 使用本格自身的 animateColorAsState
-    iconTintOverride: androidx.compose.ui.graphics.Color? = null,
     selected: Boolean,
+    // 选中格不渲染自己的图标：飞行图标覆盖在此格的图标位上
+    showIcon: Boolean = true,
     onClick: () -> Unit,
 ) {
-    // 图标与收起态完全一致（24dp + onSurfaceVariant）：不随选中态变色变大小，
-    // 避免"点开后碟片和原来长得不一样"；选中信号只由文字（主色+半粗）表达
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
+            .width(ToolbarCellWidth)
             .height(40.dp)
             .clip(RoundedCornerShape(6.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
     ) {
-        // 图标颜色跟随选中态（选中=主色）：animateColorAsState 平滑渐变，
-        // 与收起态图标（代表当前选中，同为主色）跨态一致，无硬跳变
-        val iconTint by animateColorAsState(
-            targetValue = if (selected) {
-                MaterialTheme.colorScheme.primary
-            } else {
-                MaterialTheme.colorScheme.onSurfaceVariant
-            },
-            animationSpec = tween(180),
-            label = "cellIconTint",
-        )
-        Icon(
-            option.icon,
-            contentDescription = null,
-            tint = iconTintOverride ?: iconTint,
-            modifier = Modifier.size(24.dp),
-        )
+        if (showIcon) {
+            Icon(
+                option.icon,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(24.dp),
+            )
+        } else {
+            Spacer(modifier = Modifier.size(24.dp))
+        }
         Spacer(modifier = Modifier.width(6.dp))
         Text(
             option.label,
@@ -1073,13 +1096,8 @@ private fun SearchFieldRectangle(vm: MusicViewModel, modifier: Modifier = Modifi
                 .fillMaxSize()
                 .padding(horizontal = 12.dp),
         ) {
-            Icon(
-                LucideIcons.Search,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
-            )
-            Spacer(modifier = Modifier.width(8.dp))
+            // 图标位留空：控件栏的恒定搜索图标飞行落在此处
+            Spacer(modifier = Modifier.width(28.dp))
             Box(
                 contentAlignment = Alignment.CenterStart,
                 modifier = Modifier.weight(1f),
