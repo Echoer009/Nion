@@ -783,9 +783,9 @@ private data class SelectorOption(
 )
 
 /**
- * 曲库控件栏 —— 推动式三区（排序/视图/搜索），见 [ToolbarZone] 的统一模型。
- * 常态：右对齐三颗灰图标；点任意图标 → 该区展开成整栏条（兄弟被真实挤走），
- * 条尾仍是那颗图标（点击收起）；点选项即生效并收回；退出搜索清空查询词。
+ * 曲库控件栏 —— 三区（排序/视图/搜索），见 [ToolbarZone] 的统一模型：
+ * 图标恒定在右，展开条从图标左侧生长（兄弟被真实推动）；✕ 收起；
+ * 点选项即生效并收回；退出搜索清空查询词。
  */
 @Composable
 private fun MusicToolbar(
@@ -830,41 +830,17 @@ private fun MusicToolbar(
             .height(48.dp),
     ) {
         val toolbarWidth = maxWidth
-        // 三区共用同一弹簧参数：同速率推动/回弹，消除相对抖动
-        val zoneSpring = spring<Dp>(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)
         // 排序区仅在本地专辑视图显示；视图区在搜索态让位
         val sortVisible = vm.source == MusicSource.LOCAL && !showPlaylists && vm.searchQuery.isBlank()
         val viewVisible = vm.searchQuery.isBlank()
 
-        // 三区宽度动画：展开=整栏 / 常态=48dp / 让位=0。
-        // Row 按每帧动画宽度真实重排 → 兄弟被真实推动（非覆盖）
-        val sortWidth by animateDpAsState(
-            targetValue = when {
-                mode == MusicToolbarMode.SORT -> toolbarWidth
-                mode == MusicToolbarMode.NORMAL && sortVisible -> ToolbarRestWidth
-                else -> 0.dp
-            },
-            animationSpec = zoneSpring,
-            label = "sortWidth",
-        )
-        val viewWidth by animateDpAsState(
-            targetValue = when {
-                mode == MusicToolbarMode.VIEW -> toolbarWidth
-                mode == MusicToolbarMode.NORMAL && viewVisible -> ToolbarRestWidth
-                else -> 0.dp
-            },
-            animationSpec = zoneSpring,
-            label = "viewWidth",
-        )
-        val searchWidth by animateDpAsState(
-            targetValue = when {
-                mode == MusicToolbarMode.SEARCH -> toolbarWidth
-                mode == MusicToolbarMode.NORMAL -> ToolbarRestWidth
-                else -> 0.dp
-            },
-            animationSpec = zoneSpring,
-            label = "searchWidth",
-        )
+        // 展开条宽度 = 整栏 - 右侧兄弟图标占位（图标恒定在场，条在图标左侧生长）
+        val siblingCountForSort = (if (viewVisible) 1 else 0) + 1
+        val siblingCountForView = (if (sortVisible) 1 else 0) + 1
+        val siblingCountForSearch = (if (sortVisible) 1 else 0) + (if (viewVisible) 1 else 0)
+        val sortStripWidth = toolbarWidth - ToolbarIconWidth * siblingCountForSort
+        val viewStripWidth = toolbarWidth - ToolbarIconWidth * siblingCountForView
+        val searchStripWidth = toolbarWidth - ToolbarIconWidth * siblingCountForSearch
 
         Row(
             modifier = Modifier
@@ -875,16 +851,13 @@ private fun MusicToolbar(
         ) {
             // —— 排序区 ——
             ToolbarZone(
-                fullWidth = toolbarWidth,
-                width = sortWidth,
+                stripExpandedWidth = sortStripWidth,
+                expanded = mode == MusicToolbarMode.SORT,
                 icon = if (vm.localAlbumSort == LocalAlbumSort.TITLE) sortOptions[0].icon else sortOptions[1].icon,
                 contentDescription = "排序方式",
                 iconTint = sortIconTint,
-                expanded = mode == MusicToolbarMode.SORT,
                 visible = sortVisible,
-                onIconClick = {
-                    mode = if (mode == MusicToolbarMode.SORT) MusicToolbarMode.NORMAL else MusicToolbarMode.SORT
-                },
+                onIconClick = { mode = MusicToolbarMode.SORT },
             ) {
                 sortOptions.forEach { opt ->
                     val sel = (vm.localAlbumSort == LocalAlbumSort.TITLE) == (opt.key == "title")
@@ -899,20 +872,19 @@ private fun MusicToolbar(
                         },
                     )
                 }
+                Spacer(modifier = Modifier.weight(1f))
+                CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
             }
 
             // —— 视图区 ——
             ToolbarZone(
-                fullWidth = toolbarWidth,
-                width = viewWidth,
+                stripExpandedWidth = viewStripWidth,
+                expanded = mode == MusicToolbarMode.VIEW,
                 icon = if (showPlaylists) viewOptions[1].icon else viewOptions[0].icon,
                 contentDescription = "曲库视图",
                 iconTint = viewIconTint,
-                expanded = mode == MusicToolbarMode.VIEW,
                 visible = viewVisible,
-                onIconClick = {
-                    mode = if (mode == MusicToolbarMode.VIEW) MusicToolbarMode.NORMAL else MusicToolbarMode.VIEW
-                },
+                onIconClick = { mode = MusicToolbarMode.VIEW },
             ) {
                 viewOptions.forEach { opt ->
                     val sel = showPlaylists == (opt.key == "playlist")
@@ -926,102 +898,105 @@ private fun MusicToolbar(
                         },
                     )
                 }
+                Spacer(modifier = Modifier.weight(1f))
+                CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
             }
 
             // —— 搜索区 ——
             ToolbarZone(
-                fullWidth = toolbarWidth,
-                width = searchWidth,
+                stripExpandedWidth = searchStripWidth,
+                expanded = mode == MusicToolbarMode.SEARCH,
                 icon = LucideIcons.Search,
                 contentDescription = "搜索音乐",
                 iconTint = grayColor,
-                expanded = mode == MusicToolbarMode.SEARCH,
                 visible = true,
-                onIconClick = {
-                    if (mode == MusicToolbarMode.SEARCH) {
-                        // 退出搜索即清空查询词（视图自动回落专辑列表）
-                        vm.searchQuery = ""
-                    }
-                    mode = if (mode == MusicToolbarMode.SEARCH) MusicToolbarMode.NORMAL else MusicToolbarMode.SEARCH
-                },
+                onIconClick = { mode = MusicToolbarMode.SEARCH },
             ) {
                 SearchFieldRectangle(vm = vm, modifier = Modifier.weight(1f))
+                CloseToolbarButton {
+                    // 退出搜索即清空查询词（视图自动回落专辑列表）
+                    vm.searchQuery = ""
+                    mode = MusicToolbarMode.NORMAL
+                }
             }
         }
     }
 }
 
-/** 控件栏单区的常态宽度（= 一颗 48dp 图标位） */
-private val ToolbarRestWidth = 48.dp
+/** 控件栏单颗图标的占位宽度 */
+private val ToolbarIconWidth = 48.dp
 
 /**
- * 控件栏区域 —— "揭示窗口 + 恒定尾锚图标"统一模型：
+ * 控件栏区域 —— "图标在右恒定 + 条在左生长"统一模型：
  *
- * - 窗口：宽度动画（展开=整栏 / 常态=48dp / 让位=0），Row 级真实重排推动兄弟；
- * - 展开条：[stripContent] + 弹性空隙 + 尾锚图标，`requiredWidth(整栏)` 硬约束
- *   ——不被窗口的软约束逐帧钳制压缩（Modifier.width 会被入参约束压小，导致
- *   内容横移/图标压扁的"大小跳"），内容静止，由窗口 clip 从图标位置向左
- *   揭示/收回：展开从图标原位向左生长，收起镜像收回；
- * - 尾锚图标 = 收起态那颗图标本身（点击=展开/收起切换）：展开期间在条尾
- *   原地待命，收起时随窗口右缘滑回原位 —— 图标全程不消失、不换位、不变尺寸；
- * - 非展开态：仅图标，alpha 随窗口宽度 0↔48dp 淡入淡出（无切片式生长残影）；
- *   收起途中（窗口尚未收回 48dp）保持整条组合，直到收回完成才只剩图标，
- *   切换瞬间两侧图标同位同形，无跳变。
+ * - 区 = [揭示窗口(条内容)][图标]。图标是同一个节点贯穿展开/收起全程：
+ *   永不消失、永不淡入淡出、自身展开/收起时原位不动；
+ * - 揭示窗口宽度 0 ↔ stripExpandedWidth 弹簧动画：窗口是真实占位，
+ *   兄弟区被真实推动（本区展开 → 兄弟图标滑出；收起 → 镜像滑回）；
+ * - 条内容 requiredWidth(stripExpandedWidth) 硬约束：不被窗口软约束逐帧
+ *   钳制（Modifier.width 会被压小导致内容横移/图标压扁的"大小跳"），
+ *   内容静止，由窗口 clip 从图标位置向左揭示/收回；
+ * - ✕ 在条尾紧挨图标：点 ✕ 收起；点图标（未展开时）展开。
  */
 @Composable
 private fun ToolbarZone(
-    fullWidth: Dp,
-    width: Dp,
+    stripExpandedWidth: Dp,
+    expanded: Boolean,
     icon: ImageVector,
     contentDescription: String,
     iconTint: androidx.compose.ui.graphics.Color,
-    expanded: Boolean,
     visible: Boolean,
     onIconClick: () -> Unit,
     stripContent: @Composable RowScope.() -> Unit,
 ) {
-    Box(
-        modifier = Modifier
-            .width(width)
-            .height(48.dp)
-            .clipToBounds(),
-        contentAlignment = Alignment.CenterEnd,
+    // 条内容区宽度动画（单动画值）
+    val stripWidth by animateDpAsState(
+        targetValue = if (expanded) stripExpandedWidth else 0.dp,
+        animationSpec = spring<Dp>(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow),
+        label = "stripWidth",
+    )
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.height(48.dp),
     ) {
-        if (expanded || width > ToolbarRestWidth) {
-            // 展开条（收起动画途中窗口 > 48dp 时同样保留，直至收回完成）
+        // 揭示窗口：宽度动画 + 裁切；内容 requiredWidth 静止、右对齐锚在图标左侧
+        Box(
+            modifier = Modifier
+                .width(stripWidth)
+                .height(48.dp)
+                .clipToBounds(),
+            contentAlignment = Alignment.CenterEnd,
+        ) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.requiredWidth(fullWidth),
-            ) {
-                stripContent()
-                Spacer(modifier = Modifier.weight(1f))
-                IconButton(onClick = onIconClick) {
-                    Icon(
-                        icon,
-                        contentDescription = contentDescription,
-                        tint = iconTint,
-                    )
-                }
-            }
-        } else {
-            // 常态/让位：仅图标，alpha 随窗口宽度淡入淡出（宽=48 全显，宽→0 隐没）
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .alpha((width / ToolbarRestWidth).coerceIn(0f, 1f)),
-                contentAlignment = Alignment.CenterEnd,
-            ) {
-                if (visible) {
-                    IconButton(onClick = onIconClick) {
-                        Icon(
-                            icon,
-                            contentDescription = contentDescription,
-                            tint = iconTint,
-                        )
-                    }
-                }
+                modifier = Modifier.requiredWidth(stripExpandedWidth),
+                content = stripContent,
+            )
+        }
+        // 恒定图标：永远在场（visible=false 仅用于功能隐藏，如歌单视图下的排序区）
+        if (visible) {
+            IconButton(onClick = onIconClick) {
+                Icon(
+                    icon,
+                    contentDescription = contentDescription,
+                    tint = iconTint,
+                )
             }
         }
+    }
+}
+
+/**
+ * 控件栏展开态条尾的 ✕ 收起按钮（紧挨区图标左侧）。
+ */
+@Composable
+private fun CloseToolbarButton(onClose: () -> Unit) {
+    IconButton(onClick = onClose) {
+        Icon(
+            LucideIcons.X,
+            contentDescription = "收起",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
     }
 }
 
