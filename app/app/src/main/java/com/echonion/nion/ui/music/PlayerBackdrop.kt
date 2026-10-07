@@ -108,6 +108,20 @@ internal fun rememberPlayerBackdrop(track: PlayableTrack?): PlayerBackdropColors
 }
 
 /**
+ * 取色预热：开始播放/切歌时（迷你条在场即调用）提前提取封面色入缓存，
+ * 使"点开播放页"时目标色即时可用——铺开动画一起步就是歌曲色，
+ * 不会先落在米色兜底再慢半拍变绿。无封面/加载失败不写缓存（保持兜底路径）。
+ */
+internal suspend fun prewarmBackdrop(context: android.content.Context, track: PlayableTrack?) {
+    val key = track?.albumArtUri?.let { "local:$it" } ?: track?.coverArtUrl ?: return
+    if (backdropCache.get(key) != null) return
+    val bitmap = withContext(Dispatchers.IO) {
+        loadCoverBitmap(context, track?.coverArtUrl, track?.albumArtUri)
+    } ?: return
+    backdropCache.put(key, withContext(Dispatchers.Default) { extractBackdrop(bitmap) })
+}
+
+/**
  * 播放页专用深色配色：accent（取色）作 primary，背景容器色贴近渐变两端，
  * 其余沿用 Material 深色默认值。播放页内部所有 MaterialTheme.colorScheme
  * 引用（滑块/图标/队列行…）经嵌套 MaterialTheme 自动切换，无需逐处改色。

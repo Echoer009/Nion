@@ -201,54 +201,17 @@ fun NionApp() {
                 coroutineScope.launch { dualState.closePanel() }
             }
 
+            // 音乐沉浸态判定（导航栏与左右面板共用）：播放页在组合中即沉浸
+            //（含收起过渡全程，playerBackdrop 在退场动画结束才清空）——
+            // 铺开动画自导航栏起自下而上扫过整个界面，见 FullPlayerOverlay
+            val musicImmersive = currentRoute == "music" && musicVm.playerBackdrop != null
+
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
                 bottomBar = {
-                    // 播放页沉浸态：导航栏底色/主色与播放页铺开(morph)动画同步过渡
-                    //（同时长 250ms + 同缓动），绿色扫到哪导航栏渐变到哪，
-                    // 收起反向同步，任何一帧都不存在"绿-米-绿"硬切
-                    val immersive = currentRoute == "music" &&
-                        musicVm.isFullPlayerOpen &&
-                        musicVm.playerBackdrop != null
-                    val appScheme = MaterialTheme.colorScheme
-                    val targetScheme = if (immersive) {
-                        com.echonion.nion.ui.music.rememberPlayerColorScheme(
-                            musicVm.playerBackdrop!!,
-                        )
-                    } else {
-                        appScheme
-                    }
-                    val navContainer by androidx.compose.animation.animateColorAsState(
-                        targetValue = targetScheme.surfaceContainer,
-                        animationSpec = androidx.compose.animation.core.tween(
-                            250,
-                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
-                        ),
-                        label = "navContainer",
-                    )
-                    val navPrimary by androidx.compose.animation.animateColorAsState(
-                        targetValue = targetScheme.primary,
-                        animationSpec = androidx.compose.animation.core.tween(
-                            250,
-                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
-                        ),
-                        label = "navPrimary",
-                    )
-                    val navUnselected by androidx.compose.animation.animateColorAsState(
-                        targetValue = targetScheme.onSurfaceVariant,
-                        animationSpec = androidx.compose.animation.core.tween(
-                            250,
-                            easing = androidx.compose.animation.core.FastOutSlowInEasing,
-                        ),
-                        label = "navUnselected",
-                    )
-                    MaterialTheme(
-                        colorScheme = appScheme.copy(
-                            surfaceContainer = navContainer,
-                            primary = navPrimary,
-                            onSurfaceVariant = navUnselected,
-                        ),
-                    ) {
+                    // 导航栏即"铺开"起点：沉浸期间整套切换播放页取色配色，
+                    // 渐变底端色与导航栏容器色同值，交界无缝（无截断）
+                    PlayerImmersiveWrap(backdrop = if (musicImmersive) musicVm.playerBackdrop else null) {
                         NionBottomNavBar(
                             currentDestination = currentDestination,
                             onItemClick = { item ->
@@ -270,23 +233,29 @@ fun NionApp() {
                         currentRoute == "music",
                     modifier = Modifier.padding(innerPadding),
                     leftPanel = { onDrag, onDragStopped, modifier ->
-                        NionLeftPanel(
-                            currentRoute = currentRoute,
-                            viewModel = viewModel,
-                            dualState = dualState,
-                            onDrag = onDrag,
-                            onDragStopped = onDragStopped,
-                            modifier = modifier,
-                        )
+                        // 播放页沉浸时音源面板随取色染色（与导航栏同一套配色）
+                        PlayerImmersiveWrap(backdrop = if (musicImmersive) musicVm.playerBackdrop else null) {
+                            NionLeftPanel(
+                                currentRoute = currentRoute,
+                                viewModel = viewModel,
+                                dualState = dualState,
+                                onDrag = onDrag,
+                                onDragStopped = onDragStopped,
+                                modifier = modifier,
+                            )
+                        }
                     },
                     rightPanel = { onDrag, onDragStopped, modifier ->
-                        CompanionSidebar(
-                            onSidebarDrag = onDrag,
-                            onSidebarDragStopped = onDragStopped,
-                            isVisible = dualState.isRightOpen,
-                            currentRoute = currentRoute,
-                            modifier = modifier,
-                        )
+                        // 播放页沉浸时伙伴面板随取色染色（与导航栏同一套配色）
+                        PlayerImmersiveWrap(backdrop = if (musicImmersive) musicVm.playerBackdrop else null) {
+                            CompanionSidebar(
+                                onSidebarDrag = onDrag,
+                                onSidebarDragStopped = onDragStopped,
+                                isVisible = dualState.isRightOpen,
+                                currentRoute = currentRoute,
+                                modifier = modifier,
+                            )
+                        }
                     },
                 ) {
                     NavHost(
@@ -365,6 +334,29 @@ fun NionApp() {
 // ──────────────────────────────────────────────────────
 // 提取的子 Composable
 // ──────────────────────────────────────────────────────
+
+/**
+ * 音乐沉浸包裹层：播放页打开期间给底部导航栏/左右侧滑面板整套套上
+ * 播放页取色配色（深色系）。铺开动画自导航栏自下而上扫过整个界面时，
+ * 导航栏即颜色起点，与播放页渐变底端同色无缝衔接；收起过渡结束还原。
+ *
+ * @param backdrop 播放页取色（null = 非沉浸态，原样组合内容）
+ */
+@Composable
+private fun PlayerImmersiveWrap(
+    backdrop: com.echonion.nion.ui.music.PlayerBackdropColors?,
+    content: @Composable () -> Unit,
+) {
+    if (backdrop != null) {
+        MaterialTheme(
+            colorScheme = com.echonion.nion.ui.music.rememberPlayerColorScheme(backdrop),
+        ) {
+            content()
+        }
+    } else {
+        content()
+    }
+}
 
 /**
  * 底部导航栏。

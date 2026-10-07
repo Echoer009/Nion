@@ -18,6 +18,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
+import androidx.compose.animation.EnterExitState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.ExperimentalSharedTransitionApi
 import androidx.compose.animation.SharedTransitionLayout
 import androidx.compose.animation.SharedTransitionScope
@@ -54,6 +56,8 @@ import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.requiredSize
@@ -172,6 +176,13 @@ fun MusicScreen(
 ) {
     val vm = musicViewModel()
 
+    // 封面取色预热：开始播放/切歌时立即提取入缓存（不等点开播放页），
+    // 保证铺开动画一起步就是歌曲色（详见 prewarmBackdrop 注释）
+    val prewarmContext = LocalContext.current
+    LaunchedEffect(vm.currentTrack?.id) {
+        prewarmBackdrop(prewarmContext, vm.currentTrack)
+    }
+
     // ── 消费注册深链（nion://musicauth?u=..&p=..）──
     // MainActivity 已把账密落库并暂存在 pendingMusicAuthXxx（照通知 Intent 的模式），
     // 音乐界面组合时同步 ViewModel 内存状态并自动触发连接；消费完立即清除防重复执行
@@ -207,10 +218,11 @@ fun MusicScreen(
         AnimatedContent(
             targetState = showFullPlayer,
             transitionSpec = {
-                // 展开/收起均为交叉淡入淡出：位移交由 sharedElement/sharedBounds 的
-                // 弹簧 boundsTransform 完成，避免容器滑动干扰封面飞行轨迹
+                // 展开色"自下而上铺满"由播放页揭示裁剪完成（见 FullPlayerOverlay
+                // 的 reveal）：进入侧不做淡入（保持不透明，让色块边缘干净），
+                // 主界面淡出让位；容器与封面 morph 照旧
                 (
-                    fadeIn(tween(200, easing = FastOutSlowInEasing)) togetherWith
+                    EnterTransition.None togetherWith
                         fadeOut(tween(250, easing = FastOutSlowInEasing))
                     ) using SizeTransform(clip = false)
             },
@@ -2318,6 +2330,13 @@ private fun FullPlayerOverlay(
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose { vm.playerBackdrop = null }
     }
+    // 铺开揭示进度：与容器 morph 同一条临界弹簧曲线（0=收起 1=全开），
+    // 驱动渐变自下而上（从导航栏）铺满/退下 —— NionApp 侧导航栏即颜色起点
+    val reveal by animatedVisibilityScope.transition.animateFloat(
+        transitionSpec = { spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow) },
+        label = "playerReveal",
+    ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
+
     // 播放队列默认收起：顶部按钮呼出（常驻列表会挤占沉浸滑切区）
     var queueVisible by remember { mutableStateOf(false) }
     Surface(
@@ -2341,6 +2360,17 @@ private fun FullPlayerOverlay(
         Box(
             modifier = Modifier
                 .fillMaxSize()
+                .drawWithContent {
+                    // 揭示裁剪：仅绘制底部 reveal 比例区域（顶缘随进度上移），
+                    // 全开后零开销直绘；渐变底端与已染色的导航栏同色衔接
+                    if (reveal >= 1f) {
+                        drawContent()
+                    } else {
+                        clipRect(top = size.height * (1f - reveal)) {
+                            this@drawWithContent.drawContent()
+                        }
+                    }
+                }
                 .background(
                     Brush.verticalGradient(listOf(backdrop.top, backdrop.bottom)),
                 ),
