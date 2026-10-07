@@ -65,7 +65,7 @@ fun MusicSourcePanel(
     // 音源项配置列表：顺序固定 本地→类脑娘→自定义，与主界面切换动画的方向计算一致
     val items = listOf(
         SourceItem(MusicSource.LOCAL, "本地曲目", "扫描本机全部音频", LucideIcons.AudioLines),
-        SourceItem(MusicSource.BRAINGIRL, "类脑娘服务器", MusicViewModel.BRAINGIRL_SERVER_URL, LucideIcons.Cloud),
+        SourceItem(MusicSource.BRAINGIRL, "类脑娘服务器", "预置音源，用网页端注册的账号登录", LucideIcons.Cloud),
         SourceItem(MusicSource.CUSTOM, "自己的服务器", "连接你自己的 Navidrome", LucideIcons.Server),
     )
 
@@ -84,7 +84,7 @@ fun MusicSourcePanel(
                 .fillMaxSize()
                 .padding(vertical = 24.dp, horizontal = 16.dp),
         ) {
-            // ===== 标题栏 =====
+            // ===== 标题栏（与清单侧边栏同款：仅标题 + 20dp 间距，无副标题）=====
             Text(
                 "音乐音源",
                 style = MaterialTheme.typography.titleMedium,
@@ -92,21 +92,12 @@ fun MusicSourcePanel(
                 color = MaterialTheme.colorScheme.onSurface,
             )
 
-            Spacer(modifier = Modifier.height(4.dp))
+            Spacer(modifier = Modifier.height(20.dp))
 
-            // 副标题说明：选中后主界面立即切换到对应音源
-            Text(
-                "选择一个音源开始听歌",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-
-            Spacer(modifier = Modifier.height(16.dp))
-
-            // ===== 音源列表 =====
+            // ===== 音源列表（间距与清单侧边栏一致：4dp）=====
             LazyColumn(
                 modifier = Modifier.fillMaxWidth(),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                 items(items.size) { index ->
                     val item = items[index]
@@ -145,10 +136,13 @@ private data class SourceItem(
 )
 
 /**
- * 单个音源行 —— 图标 + 名称 + 说明 + "未配置"角标。
+ * 单个音源行 —— 与清单侧边栏项（SidebarChecklistItem）完全同款的选中展示：
  *
- * 选中态视觉：secondaryContainer 圆角背景 + 图标/文字染 primary 色，
- * 与项目其他侧边栏（清单列表）的选中风格一致。
+ * - 选中 = secondaryContainer 背景 + onPrimaryContainer 内容 + 左缘 4dp×32dp
+ *   primary 竖条（选中时起始内距 10dp，未选 14dp），标题 SemiBold；
+ * - 未选 = surfaceContainer 背景 + onSurfaceVariant 内容；
+ * - 12dp 圆角 Surface，颜色 animateColorAsState 200ms 平滑过渡；
+ * - 图标 18dp 淡透明（与清单项同款），说明为 labelSmall 副标题。
  *
  * @param item 音源配置
  * @param isSelected 是否为当前选中音源（高亮显示）
@@ -162,84 +156,89 @@ private fun SourceRow(
     unconfigured: Boolean,
     onSelect: () -> Unit,
 ) {
-    // 选中/未选中使用不同容器色；用 animateColorAsState 平滑过渡避免生硬跳变
-    val containerColor by androidx.compose.animation.animateColorAsState(
+    // 与 SidebarChecklistItem 同款配色逻辑（secondaryContainer ≠ 主操作 primary）
+    val bgColor by androidx.compose.animation.animateColorAsState(
         targetValue = if (isSelected) {
             MaterialTheme.colorScheme.secondaryContainer
         } else {
             MaterialTheme.colorScheme.surfaceContainer
         },
-        label = "sourceRowColor",
+        animationSpec = androidx.compose.animation.core.tween(200),
+        label = "sourceRowBg",
     )
-    // 图标与标题颜色：选中时用 primary 强调，未选中用中性 onSurfaceVariant
-    val contentColor = if (isSelected) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
+    val contentColor by androidx.compose.animation.animateColorAsState(
+        targetValue = if (isSelected) {
+            MaterialTheme.colorScheme.onPrimaryContainer
+        } else {
+            MaterialTheme.colorScheme.onSurfaceVariant
+        },
+        animationSpec = androidx.compose.animation.core.tween(200),
+        label = "sourceRowContent",
+    )
 
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            // 先设背景色再响应点击，保证涟漪效果被限制在圆角内
-            .background(containerColor)
-            .clickable(onClick = onSelect)
-            .padding(horizontal = 14.dp, vertical = 12.dp),
-        verticalAlignment = Alignment.CenterVertically,
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = bgColor,
+        modifier = Modifier.fillMaxWidth(),
     ) {
-        Icon(
-            imageVector = item.icon,
-            contentDescription = item.label,
-            tint = contentColor,
-            modifier = Modifier.size(26.dp),
-        )
-        Spacer(modifier = Modifier.width(12.dp))
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                item.label,
-                style = MaterialTheme.typography.bodyLarge,
-                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                color = MaterialTheme.colorScheme.onSurface,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(onClick = onSelect)
+                .padding(start = if (isSelected) 10.dp else 14.dp, end = 6.dp, top = 14.dp, bottom = 14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // 选中指示：左缘 4dp×32dp 主色竖条（清单项同款）
+            if (isSelected) {
+                Box(
+                    modifier = Modifier
+                        .width(4.dp)
+                        .height(32.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(MaterialTheme.colorScheme.primary),
+                )
+                Spacer(modifier = Modifier.width(10.dp))
+            }
+            Icon(
+                imageVector = item.icon,
+                contentDescription = item.label,
+                tint = contentColor.copy(alpha = com.echonion.nion.ui.theme.NionAlpha.TEXT_SUBTLE),
+                modifier = Modifier.size(18.dp),
             )
-            Text(
-                item.description,
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-
-        // 未配置角标：引导用户进入主界面补全账密/URL
-        if (unconfigured) {
             Spacer(modifier = Modifier.width(8.dp))
-            Surface(
-                shape = RoundedCornerShape(8.dp),
-                color = MaterialTheme.colorScheme.errorContainer,
-            ) {
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "未配置",
+                    item.label,
+                    style = MaterialTheme.typography.bodyLarge,
+                    fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                    color = contentColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    item.description,
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onErrorContainer,
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    color = contentColor.copy(alpha = com.echonion.nion.ui.theme.NionAlpha.TEXT_SECONDARY),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
                 )
             }
-        }
 
-        // 选中标记：右侧小圆点，强化当前音源指示
-        if (isSelected) {
-            Spacer(modifier = Modifier.width(8.dp))
-            Box(
-                modifier = Modifier
-                    .size(8.dp)
-                    .background(
-                        color = MaterialTheme.colorScheme.primary,
-                        shape = RoundedCornerShape(50),
-                    ),
-            )
+            // 未配置角标：引导用户进入主界面补全账密/URL
+            if (unconfigured) {
+                Spacer(modifier = Modifier.width(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.errorContainer,
+                ) {
+                    Text(
+                        "未配置",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onErrorContainer,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+            }
         }
     }
 }

@@ -1914,7 +1914,7 @@ private fun ServerConfigForm(vm: MusicViewModel, isCustom: Boolean) {
                     if (isCustom) {
                         "填入 Navidrome / Subsonic 服务器地址与账号信息"
                     } else {
-                        "预置音源 ${MusicViewModel.BRAINGIRL_SERVER_URL}，使用你在网页端注册的账号登录"
+                        "预置音源（地址已内置），使用你在网页端注册的账号登录"
                     },
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
