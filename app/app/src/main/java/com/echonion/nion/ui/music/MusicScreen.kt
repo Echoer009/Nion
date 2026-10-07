@@ -59,8 +59,6 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.requiredWidth
-import androidx.compose.ui.draw.drawWithContent
-import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.ui.draw.alpha
@@ -2338,66 +2336,49 @@ private fun FullPlayerOverlay(
     androidx.compose.runtime.DisposableEffect(Unit) {
         onDispose { vm.playerBackdrop = null }
     }
-    // 揭示进度：与容器 morph 同参数临界弹簧（0=收起 1=全开），驱动全屏渐变
-    // 自导航栏/播放条整体向上铺开、收回时退下 —— 渐变永远全屏布局不被压扁
-    val reveal by animatedVisibilityScope.transition.animateFloat(
-        transitionSpec = { spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow) },
-        label = "playerReveal",
+    // 控件层内容透明度：morph 由 sharedBounds 的 bounds 动画承载（唯一几何
+    // 机制），控件内容只在矩形接近最终尺寸时淡入/淡出，避免整树缩放变形
+    // 被长时间看到；渐变背景属于 sharedBounds 元素本体，全程参与 morph
+    val contentAlpha by animatedVisibilityScope.transition.animateFloat(
+        transitionSpec = { tween(150) },
+        label = "playerContentAlpha",
     ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
 
     // 播放队列默认收起：顶部按钮呼出（常驻列表会挤占沉浸滑切区）
     var queueVisible by remember { mutableStateOf(false) }
 
-    // 结构：渐变层在 sharedBounds 之外 —— bounds 缩放只作用于控件层，渐变
-    // 全屏布局 + 底部揭示裁剪：morph 任何时刻矩形里都是全屏渐变对应位置的
-    // 颜色，底缘恒为渐变底端，与同色导航栏/播放条无缝衔接
-    Box(modifier = Modifier.fillMaxSize()) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .drawWithContent {
-                    if (reveal >= 1f) {
-                        drawContent()
-                    } else {
-                        clipRect(top = size.height * (1f - reveal)) {
-                            this@drawWithContent.drawContent()
-                        }
-                    }
-                }
-                .background(
-                    Brush.verticalGradient(listOf(backdrop.top, backdrop.bottom)),
-                ),
-        )
-        Surface(
-            // 容器 sharedBounds：与迷你播放条配对，播放条 bounds morph 成全屏页。
-            // 内容级 enter/exit 显式 None：控件层全程不透明，收回时整块跟着
-            // bounds 缩回播放条（真镜像），不提前淡出
-            modifier = Modifier
-                .fillMaxSize()
-                .then(
-                    with(sharedTransitionScope) {
-                        Modifier.sharedBounds(
-                            sharedContentState = rememberSharedContentState("music_player_bar"),
-                            animatedVisibilityScope = animatedVisibilityScope,
-                            enter = EnterTransition.None,
-                            exit = ExitTransition.None,
-                            boundsTransform = { _, _ ->
-                                spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
-                            },
-                        )
-                    },
-                ),
-            // Surface 本体透明：只承载控件层的 morph，颜色在下方渐变层
-            color = Color.Transparent,
-        ) {
-            MaterialTheme(colorScheme = playerScheme) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 24.dp)
-                        .statusBarsPadding()
-                        .navigationBarsPadding(),
-                ) {
+    // 真 sharedElement 结构：迷你条 Surface ↔ 播放页这个容器（sharedBounds）
+    // —— 渐变是容器自身的背景，随 bounds 一起 morph（起步底色=播放条一体色，
+    // 收尾为全屏渐变）；封面另有 sharedElement 飞行；没有手写裁剪/对齐层
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .then(
+                with(sharedTransitionScope) {
+                    Modifier.sharedBounds(
+                        sharedContentState = rememberSharedContentState("music_player_bar"),
+                        animatedVisibilityScope = animatedVisibilityScope,
+                        enter = EnterTransition.None,
+                        exit = ExitTransition.None,
+                        boundsTransform = { _, _ ->
+                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                        },
+                    )
+                },
+            )
+            .background(
+                Brush.verticalGradient(listOf(backdrop.top, backdrop.bottom)),
+            ),
+    ) {
+        MaterialTheme(colorScheme = playerScheme) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = contentAlpha }
+                    .padding(horizontal = 24.dp)
+                    .statusBarsPadding()
+                    .navigationBarsPadding(),
+            ) {
                     // ===== 顶部收起按钮 =====
                     Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = onClose) {
@@ -2707,7 +2688,6 @@ private fun FullPlayerOverlay(
             }
         }
     }
-}
 
 /* ============================================================
  * 播放/暂停切换动画
