@@ -51,6 +51,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -781,12 +783,10 @@ private data class SelectorOption(
 )
 
 /**
- * 曲库控件栏（四态整行 morph）。收起态：右对齐 [排序图标][视图图标][搜索图标]；
- * 点排序/视图图标 → 整行 morph 成等高横排选项（其余控件挤开）；
- * 点搜索图标 → 整行 morph 成搜索输入框（同样走 sharedElement）。
- * 展开态点选某项即生效并收回；✕ 收起；退出搜索清空查询词。
+ * 曲库控件栏 —— 推动式三区（排序/视图/搜索），见 [ToolbarZone] 的统一模型。
+ * 常态：右对齐三颗灰图标；点任意图标 → 该区展开成整栏条（兄弟被真实挤走），
+ * 条尾仍是那颗图标（点击收起）；点选项即生效并收回；退出搜索清空查询词。
  */
-@OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun MusicToolbar(
     vm: MusicViewModel,
@@ -794,11 +794,6 @@ private fun MusicToolbar(
     onSelectView: (Boolean) -> Unit,
 ) {
     var mode by remember { mutableStateOf(MusicToolbarMode.NORMAL) }
-
-    // 内容显示模式：展开立即切换；收起延迟到宽度动画收尾再换回图标——
-    // 否则小图标锚在仍在滑动的 zone 右缘上跟着横穿一行，收起观感不对称
-    var displayMode by remember { mutableStateOf(MusicToolbarMode.NORMAL) }
-    // （displayMode 的落位切换在下方三区宽度动画声明之后统一处理）
 
     // 排序/视图的选项集合（未来加选项 = 加一项，控件栏占位不变）
     val sortOptions = remember {
@@ -814,10 +809,21 @@ private fun MusicToolbar(
         )
     }
 
-    // ===== 推动式控件栏（animateDpAsState 驱动宽度，Row 每帧真实重排）=====
-    // 单动画系统：每个区域的宽度是一个 Dp 动画值（展开=整栏宽 / 常态=48 / 让位=0），
-    // Row 按每帧动画宽度重新布局 → 兄弟被真实推动（非覆盖）；Arrangement.End 使
-    // 展开区从右端图标位置向左生长、兄弟被推出右缘。区域裁剪、内容瞬时切换、无淡化。
+    // 图标颜色语义：常态灰；展开时本区图标 灰→主色 渐变（延迟 80ms 与条内容
+    // 揭示同步），收起时渐回灰 —— 展开条选中信号与常态灰图标之间连续过渡
+    val grayColor = MaterialTheme.colorScheme.onSurfaceVariant
+    val priColor = MaterialTheme.colorScheme.primary
+    val sortIconTint by animateColorAsState(
+        targetValue = if (mode == MusicToolbarMode.SORT) priColor else grayColor,
+        animationSpec = tween(180, delayMillis = if (mode == MusicToolbarMode.SORT) 80 else 0),
+        label = "sortIconTint",
+    )
+    val viewIconTint by animateColorAsState(
+        targetValue = if (mode == MusicToolbarMode.VIEW) priColor else grayColor,
+        animationSpec = tween(180, delayMillis = if (mode == MusicToolbarMode.VIEW) 80 else 0),
+        label = "viewIconTint",
+    )
+
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
@@ -826,14 +832,16 @@ private fun MusicToolbar(
         val toolbarWidth = maxWidth
         // 三区共用同一弹簧参数：同速率推动/回弹，消除相对抖动
         val zoneSpring = spring<Dp>(dampingRatio = 1f, stiffness = Spring.StiffnessMediumLow)
+        // 排序区仅在本地专辑视图显示；视图区在搜索态让位
         val sortVisible = vm.source == MusicSource.LOCAL && !showPlaylists && vm.searchQuery.isBlank()
         val viewVisible = vm.searchQuery.isBlank()
 
-        // 三区宽度动画（提升到本作用域：收起落位判断需要读取动画值）
+        // 三区宽度动画：展开=整栏 / 常态=48dp / 让位=0。
+        // Row 按每帧动画宽度真实重排 → 兄弟被真实推动（非覆盖）
         val sortWidth by animateDpAsState(
             targetValue = when {
                 mode == MusicToolbarMode.SORT -> toolbarWidth
-                mode == MusicToolbarMode.NORMAL && sortVisible -> 48.dp
+                mode == MusicToolbarMode.NORMAL && sortVisible -> ToolbarRestWidth
                 else -> 0.dp
             },
             animationSpec = zoneSpring,
@@ -842,7 +850,7 @@ private fun MusicToolbar(
         val viewWidth by animateDpAsState(
             targetValue = when {
                 mode == MusicToolbarMode.VIEW -> toolbarWidth
-                mode == MusicToolbarMode.NORMAL && viewVisible -> 48.dp
+                mode == MusicToolbarMode.NORMAL && viewVisible -> ToolbarRestWidth
                 else -> 0.dp
             },
             animationSpec = zoneSpring,
@@ -851,26 +859,12 @@ private fun MusicToolbar(
         val searchWidth by animateDpAsState(
             targetValue = when {
                 mode == MusicToolbarMode.SEARCH -> toolbarWidth
-                mode == MusicToolbarMode.NORMAL -> 48.dp
+                mode == MusicToolbarMode.NORMAL -> ToolbarRestWidth
                 else -> 0.dp
             },
             animationSpec = zoneSpring,
             label = "searchWidth",
         )
-
-        // 收起落位切换：等三区宽度全部到达目标值（动画真正结束）再换回图标，
-        // 避免固定延时在弹簧未停稳时切换造成的宽度残差跳变
-        LaunchedEffect(mode) {
-            if (mode != MusicToolbarMode.NORMAL) {
-                displayMode = mode
-            } else {
-                val sortTarget = if (sortVisible) 48.dp else 0.dp
-                val viewTarget = if (viewVisible) 48.dp else 0.dp
-                androidx.compose.runtime.snapshotFlow { Triple(sortWidth, viewWidth, searchWidth) }
-                    .first { (sw, vw, ew) -> sw == sortTarget && vw == viewTarget && ew == 48.dp }
-                displayMode = MusicToolbarMode.NORMAL
-            }
-        }
 
         Row(
             modifier = Modifier
@@ -879,170 +873,152 @@ private fun MusicToolbar(
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            // —— 排序区：宽度动画（展开=整栏 / 常态=48 / 让位=0）——
-            Box(
-                modifier = Modifier
-                    .width(sortWidth)
-                    .height(48.dp)
-                    .clipToBounds(),
-                contentAlignment = Alignment.CenterEnd,
+            // —— 排序区 ——
+            ToolbarZone(
+                fullWidth = toolbarWidth,
+                width = sortWidth,
+                icon = if (vm.localAlbumSort == LocalAlbumSort.TITLE) sortOptions[0].icon else sortOptions[1].icon,
+                contentDescription = "排序方式",
+                iconTint = sortIconTint,
+                expanded = mode == MusicToolbarMode.SORT,
+                visible = sortVisible,
+                onIconClick = {
+                    mode = if (mode == MusicToolbarMode.SORT) MusicToolbarMode.NORMAL else MusicToolbarMode.SORT
+                },
             ) {
-                // 展开内容按最终整栏宽度一次性固定布局（不随动画宽度逐帧重排），
-                // zone 只是揭示窗口：展开从图标两侧露出、收起两侧收回，文字全程静止
-                when {
-                    displayMode == MusicToolbarMode.SORT -> {
-                        // 文字小淡入：窗口先撑开(80ms)后标签渐显；收起时快速淡出
-                        val labelAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
-                        // 展开：延迟 80ms 小淡入；收起(mode 回 NORMAL)：120ms 快速淡出，
-                        // 避免"专/歌"等字样在窗口收回过程中残留闪现
-                        androidx.compose.runtime.LaunchedEffect(mode) {
-                            if (mode == MusicToolbarMode.NORMAL) {
-                                labelAlpha.animateTo(0f, tween(durationMillis = 120))
-                            } else {
-                                labelAlpha.animateTo(1f, tween(durationMillis = 150, delayMillis = 80))
-                            }
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.width(toolbarWidth),
-                        ) {
-                        sortOptions.forEach { opt ->
-                            SelectorCell(
-                                option = opt,
-                                textAlpha = labelAlpha.value,
-                                selected = (vm.localAlbumSort == LocalAlbumSort.TITLE) == (opt.key == "title"),
-                                onClick = {
-                                    vm.localAlbumSort =
-                                        if (opt.key == "title") LocalAlbumSort.TITLE else LocalAlbumSort.NEWEST
-                                    mode = MusicToolbarMode.NORMAL
-                                },
-                            )
-                        }
-                            Spacer(modifier = Modifier.weight(1f))
-                            CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
-                        }
-                    }
-
-                    // 回归条件用 mode 而非 displayMode：别的区收起时本区图标立即显示
-                    // （跟着窗口一起被露出）；仅当本区是"正在收起的那区"
-                    // （displayMode 还停在本区模式）时才延迟到落位再换图标
-                    mode == MusicToolbarMode.NORMAL && displayMode != MusicToolbarMode.SORT &&
-                        sortVisible -> IconButton(
-                        onClick = { mode = MusicToolbarMode.SORT },
-                    ) {
-                        Icon(
-                            if (vm.localAlbumSort == LocalAlbumSort.TITLE) sortOptions[0].icon else sortOptions[1].icon,
-                            contentDescription = "排序方式",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-
-                    else -> {}
+                sortOptions.forEach { opt ->
+                    val sel = (vm.localAlbumSort == LocalAlbumSort.TITLE) == (opt.key == "title")
+                    SelectorCell(
+                        option = opt,
+                        selected = sel,
+                        iconTintOverride = if (sel) sortIconTint else null,
+                        onClick = {
+                            vm.localAlbumSort =
+                                if (opt.key == "title") LocalAlbumSort.TITLE else LocalAlbumSort.NEWEST
+                            mode = MusicToolbarMode.NORMAL
+                        },
+                    )
                 }
             }
 
-            // —— 视图区：宽度动画 ——
-            Box(
-                modifier = Modifier
-                    .width(viewWidth)
-                    .height(48.dp)
-                    .clipToBounds(),
-                contentAlignment = Alignment.CenterEnd,
+            // —— 视图区 ——
+            ToolbarZone(
+                fullWidth = toolbarWidth,
+                width = viewWidth,
+                icon = if (showPlaylists) viewOptions[1].icon else viewOptions[0].icon,
+                contentDescription = "曲库视图",
+                iconTint = viewIconTint,
+                expanded = mode == MusicToolbarMode.VIEW,
+                visible = viewVisible,
+                onIconClick = {
+                    mode = if (mode == MusicToolbarMode.VIEW) MusicToolbarMode.NORMAL else MusicToolbarMode.VIEW
+                },
             ) {
-                when {
-                    displayMode == MusicToolbarMode.VIEW -> {
-                        // 同排序区：固定宽度 + 文字小淡入
-                        val labelAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
-                        // 展开：延迟 80ms 小淡入；收起(mode 回 NORMAL)：120ms 快速淡出，
-                        // 避免"专/歌"等字样在窗口收回过程中残留闪现
-                        androidx.compose.runtime.LaunchedEffect(mode) {
-                            if (mode == MusicToolbarMode.NORMAL) {
-                                labelAlpha.animateTo(0f, tween(durationMillis = 120))
-                            } else {
-                                labelAlpha.animateTo(1f, tween(durationMillis = 150, delayMillis = 80))
-                            }
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.width(toolbarWidth),
-                        ) {
-                        viewOptions.forEach { opt ->
-                            SelectorCell(
-                                option = opt,
-                                textAlpha = labelAlpha.value,
-                                selected = showPlaylists == (opt.key == "playlist"),
-                                onClick = {
-                                    onSelectView(opt.key == "playlist")
-                                    mode = MusicToolbarMode.NORMAL
-                                },
-                            )
-                        }
-                            Spacer(modifier = Modifier.weight(1f))
-                            CloseToolbarButton { mode = MusicToolbarMode.NORMAL }
-                        }
-                    }
-
-                    mode == MusicToolbarMode.NORMAL && displayMode != MusicToolbarMode.VIEW &&
-                        viewVisible -> IconButton(
-                        onClick = { mode = MusicToolbarMode.VIEW },
-                    ) {
-                        Icon(
-                            if (showPlaylists) viewOptions[1].icon else viewOptions[0].icon,
-                            contentDescription = "曲库视图",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-
-                    else -> {}
+                viewOptions.forEach { opt ->
+                    val sel = showPlaylists == (opt.key == "playlist")
+                    SelectorCell(
+                        option = opt,
+                        selected = sel,
+                        iconTintOverride = if (sel) viewIconTint else null,
+                        onClick = {
+                            onSelectView(opt.key == "playlist")
+                            mode = MusicToolbarMode.NORMAL
+                        },
+                    )
                 }
             }
 
-            // —— 搜索区：宽度动画 ——
+            // —— 搜索区 ——
+            ToolbarZone(
+                fullWidth = toolbarWidth,
+                width = searchWidth,
+                icon = LucideIcons.Search,
+                contentDescription = "搜索音乐",
+                iconTint = grayColor,
+                expanded = mode == MusicToolbarMode.SEARCH,
+                visible = true,
+                onIconClick = {
+                    if (mode == MusicToolbarMode.SEARCH) {
+                        // 退出搜索即清空查询词（视图自动回落专辑列表）
+                        vm.searchQuery = ""
+                    }
+                    mode = if (mode == MusicToolbarMode.SEARCH) MusicToolbarMode.NORMAL else MusicToolbarMode.SEARCH
+                },
+            ) {
+                SearchFieldRectangle(vm = vm, modifier = Modifier.weight(1f))
+            }
+        }
+    }
+}
+
+/** 控件栏单区的常态宽度（= 一颗 48dp 图标位） */
+private val ToolbarRestWidth = 48.dp
+
+/**
+ * 控件栏区域 —— "揭示窗口 + 恒定尾锚图标"统一模型：
+ *
+ * - 窗口：宽度动画（展开=整栏 / 常态=48dp / 让位=0），Row 级真实重排推动兄弟；
+ * - 展开条：[stripContent] + 弹性空隙 + 尾锚图标，`requiredWidth(整栏)` 硬约束
+ *   ——不被窗口的软约束逐帧钳制压缩（Modifier.width 会被入参约束压小，导致
+ *   内容横移/图标压扁的"大小跳"），内容静止，由窗口 clip 从图标位置向左
+ *   揭示/收回：展开从图标原位向左生长，收起镜像收回；
+ * - 尾锚图标 = 收起态那颗图标本身（点击=展开/收起切换）：展开期间在条尾
+ *   原地待命，收起时随窗口右缘滑回原位 —— 图标全程不消失、不换位、不变尺寸；
+ * - 非展开态：仅图标，alpha 随窗口宽度 0↔48dp 淡入淡出（无切片式生长残影）；
+ *   收起途中（窗口尚未收回 48dp）保持整条组合，直到收回完成才只剩图标，
+ *   切换瞬间两侧图标同位同形，无跳变。
+ */
+@Composable
+private fun ToolbarZone(
+    fullWidth: Dp,
+    width: Dp,
+    icon: ImageVector,
+    contentDescription: String,
+    iconTint: androidx.compose.ui.graphics.Color,
+    expanded: Boolean,
+    visible: Boolean,
+    onIconClick: () -> Unit,
+    stripContent: @Composable RowScope.() -> Unit,
+) {
+    Box(
+        modifier = Modifier
+            .width(width)
+            .height(48.dp)
+            .clipToBounds(),
+        contentAlignment = Alignment.CenterEnd,
+    ) {
+        if (expanded || width > ToolbarRestWidth) {
+            // 展开条（收起动画途中窗口 > 48dp 时同样保留，直至收回完成）
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.requiredWidth(fullWidth),
+            ) {
+                stripContent()
+                Spacer(modifier = Modifier.weight(1f))
+                IconButton(onClick = onIconClick) {
+                    Icon(
+                        icon,
+                        contentDescription = contentDescription,
+                        tint = iconTint,
+                    )
+                }
+            }
+        } else {
+            // 常态/让位：仅图标，alpha 随窗口宽度淡入淡出（宽=48 全显，宽→0 隐没）
             Box(
                 modifier = Modifier
-                    .width(searchWidth)
-                    .height(48.dp)
-                    .clipToBounds(),
+                    .matchParentSize()
+                    .alpha((width / ToolbarRestWidth).coerceIn(0f, 1f)),
                 contentAlignment = Alignment.CenterEnd,
             ) {
-                when {
-                    displayMode == MusicToolbarMode.SEARCH -> {
-                        // 搜索内容（输入框+✕）小淡入淡出：与排序/视图区文字同款节奏，
-                        // 避免大矩形输入框瞬时弹出/消失的生硬感（窗口推动仍由宽度动画承担）
-                        val contentAlpha = remember { androidx.compose.animation.core.Animatable(0f) }
-                        androidx.compose.runtime.LaunchedEffect(mode) {
-                            if (mode == MusicToolbarMode.NORMAL) {
-                                contentAlpha.animateTo(0f, tween(durationMillis = 120))
-                            } else {
-                                contentAlpha.animateTo(1f, tween(durationMillis = 150, delayMillis = 80))
-                            }
-                        }
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .width(toolbarWidth)
-                                .alpha(contentAlpha.value),
-                        ) {
-                            SearchFieldRectangle(vm = vm, modifier = Modifier.weight(1f))
-                            CloseToolbarButton {
-                                // 退出搜索即清空查询词（视图自动回落专辑列表）
-                                vm.searchQuery = ""
-                                mode = MusicToolbarMode.NORMAL
-                            }
-                        }
-                    }
-
-                    mode == MusicToolbarMode.NORMAL && displayMode != MusicToolbarMode.SEARCH -> IconButton(
-                        onClick = { mode = MusicToolbarMode.SEARCH },
-                    ) {
+                if (visible) {
+                    IconButton(onClick = onIconClick) {
                         Icon(
-                            LucideIcons.Search,
-                            contentDescription = "搜索音乐",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            icon,
+                            contentDescription = contentDescription,
+                            tint = iconTint,
                         )
                     }
-
-                    else -> {}
                 }
             }
         }
@@ -1056,8 +1032,9 @@ private fun MusicToolbar(
 @Composable
 private fun SelectorCell(
     option: SelectorOption,
-    // 标签文字透明度：展开时小淡入、收起时快速淡出（图标不参与淡入淡出）
-    textAlpha: Float = 1f,
+    // 选中格图标颜色覆盖：由控件栏区图标颜色动画注入（灰↔主色跨态自然过渡），
+    // null = 使用本格自身的 animateColorAsState
+    iconTintOverride: androidx.compose.ui.graphics.Color? = null,
     selected: Boolean,
     onClick: () -> Unit,
 ) {
@@ -1068,14 +1045,6 @@ private fun SelectorCell(
         modifier = Modifier
             .height(40.dp)
             .clip(RoundedCornerShape(6.dp))
-            // 选中 = 主色淡底（primaryContainer 半透明）+ 主色文字；图标保持常灰
-            .background(
-                if (selected) {
-                    MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.55f)
-                } else {
-                    androidx.compose.ui.graphics.Color.Transparent
-                }
-            )
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp),
     ) {
@@ -1093,7 +1062,7 @@ private fun SelectorCell(
         Icon(
             option.icon,
             contentDescription = null,
-            tint = iconTint,
+            tint = iconTintOverride ?: iconTint,
             modifier = Modifier.size(24.dp),
         )
         Spacer(modifier = Modifier.width(6.dp))
@@ -1101,25 +1070,11 @@ private fun SelectorCell(
             option.label,
             style = MaterialTheme.typography.labelLarge,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-            color = (if (selected) {
+            color = if (selected) {
                 MaterialTheme.colorScheme.primary
             } else {
                 MaterialTheme.colorScheme.onSurfaceVariant
-            }).copy(alpha = textAlpha),
-        )
-    }
-}
-
-/**
- * 控件栏展开态右侧的 ✕ 收起按钮。
- */
-@Composable
-private fun CloseToolbarButton(onClose: () -> Unit) {
-    IconButton(onClick = onClose) {
-        Icon(
-            LucideIcons.X,
-            contentDescription = "收起",
-            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            },
         )
     }
 }
