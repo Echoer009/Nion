@@ -190,7 +190,9 @@ fun DualPanelLayout(
     Box(modifier = modifier.fillMaxSize()) {
         val currentOffset = state.offset.value
 
-        if (currentOffset >= 0f) {
+        // 关闭态(offset==0)不组合任何面板：主内容已无自绘底色遮盖，面板
+        // 常驻组合会从透明主内容后透出（路由切换交叉淡入时闪现侧边栏）
+        if (currentOffset > 0f) {
             leftPanel(
                 { delta -> if (state.offset.value > 0f) state.handleDrag(delta) },
                 { coroutineScope.launch { state.settle() } },
@@ -200,7 +202,7 @@ fun DualPanelLayout(
             )
         }
 
-        if (currentOffset <= 0f) {
+        if (currentOffset < 0f) {
             rightPanel(
                 { delta -> if (state.offset.value < 0f) state.handleDrag(delta) },
                 { coroutineScope.launch { state.settle() } },
