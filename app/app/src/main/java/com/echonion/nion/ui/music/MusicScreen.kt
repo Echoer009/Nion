@@ -2200,18 +2200,9 @@ private fun MiniPlayerBar(
     animatedVisibilityScope: AnimatedVisibilityScope,
 ) {
     Surface(
-        // 容器 sharedBounds：迷你条整体与播放页全屏容器配对，展开时条"生长"成全屏页，
-        // 收起时全屏页缩回条 —— 参照 TaskScreen FAB↔表单的 sharedBounds 模式
-        modifier = with(sharedTransitionScope) {
-            Modifier.sharedBounds(
-                sharedContentState = rememberSharedContentState("music_player_bar"),
-                animatedVisibilityScope = animatedVisibilityScope,
-                // 临界弹簧：柔和无过冲，与项目统一曲线一致
-                boundsTransform = { _, _ ->
-                    spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
-                },
-            )
-        },
+        // 容器不参与 morph（旧"迷你条生长成全屏页"起步时播放页被压缩在条形
+        // 小矩形内，缩放过程中底缘抬离导航栏、露出米色）；铺开改由播放页揭示
+        // 裁剪自下而上完成，此处仅保留封面 sharedElement 飞行
         tonalElevation = 4.dp,
         shape = RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
         color = MaterialTheme.colorScheme.surfaceContainer,
@@ -2340,21 +2331,10 @@ private fun FullPlayerOverlay(
     // 播放队列默认收起：顶部按钮呼出（常驻列表会挤占沉浸滑切区）
     var queueVisible by remember { mutableStateOf(false) }
     Surface(
-        // 容器 sharedBounds：与迷你播放条配对，展开时迷你条生长为全屏页
-        modifier = Modifier
-            .fillMaxSize()
-            .then(
-                with(sharedTransitionScope) {
-                    Modifier.sharedBounds(
-                        sharedContentState = rememberSharedContentState("music_player_bar"),
-                        animatedVisibilityScope = animatedVisibilityScope,
-                        boundsTransform = { _, _ ->
-                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
-                        },
-                    )
-                },
-            ),
-        // 背景交给下层渐变 Box 绘制；Surface 本体透明以承载 sharedBounds 形变
+        // 容器不参与 morph（迷你条↔全屏的 bounds 缩放会抬离底缘露米色）：
+        // 全屏组合 + 揭示裁剪自下而上铺开，封面飞行仍由 sharedElement 完成
+        modifier = Modifier.fillMaxSize(),
+        // 背景交给下层渐变 Box 绘制；Surface 本体透明
         color = Color.Transparent,
     ) {
         Box(

@@ -207,7 +207,13 @@ fun NionApp() {
             val musicImmersive = currentRoute == "music" && musicVm.playerBackdrop != null
 
             Scaffold(
-                containerColor = MaterialTheme.colorScheme.background,
+                // 沉浸态把窗口底色也换成渐变底端色：inset 留缝/面板下方等一切
+                // 露底区域都与导航栏、播放页渐变同色，杜绝米色残条
+                containerColor = if (musicImmersive) {
+                    musicVm.playerBackdrop!!.bottom
+                } else {
+                    MaterialTheme.colorScheme.background
+                },
                 bottomBar = {
                     // 导航栏即"铺开"起点：沉浸期间整套切换播放页取色配色，
                     // 渐变底端色与导航栏容器色同值，交界无缝（无截断）
