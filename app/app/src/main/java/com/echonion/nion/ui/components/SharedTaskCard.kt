@@ -22,15 +22,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.automirrored.filled.Article
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.RadioButtonUnchecked
-import androidx.compose.material.icons.outlined.CalendarToday
-import androidx.compose.material.icons.outlined.Notifications
-import androidx.compose.material.icons.outlined.Repeat
-import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -66,6 +57,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 共享任务卡片 UI 数据模型 —— 统一任务列表和日程页面的卡片数据。
@@ -264,7 +256,7 @@ fun SharedTaskCard(
         // 勾选框：笔记模式显示笔记图标，任务模式显示带动画的 checkbox + 可选爆发
         if (isNotebook) {
             Icon(
-                Icons.AutoMirrored.Filled.Article,
+                LucideIcons.FileText,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                 modifier = Modifier.size(24.dp),
@@ -294,7 +286,7 @@ fun SharedTaskCard(
         if (showCollapseArrow && onToggleCollapse != null) {
             Spacer(modifier = Modifier.width(4.dp))
             Icon(
-                imageVector = Icons.Default.KeyboardArrowDown,
+                imageVector = LucideIcons.ChevronDown,
                 contentDescription = if (arrowRotation == -90f) "展开子任务" else "折叠子任务",
                 modifier = Modifier
                     .size(20.dp)
@@ -387,7 +379,7 @@ internal fun TaskCheckbox(
             )
         } else {
             Icon(
-                Icons.Default.RadioButtonUnchecked,
+                LucideIcons.Circle,
                 contentDescription = "未完成",
                 tint = priorityColor,
                 modifier = Modifier.size(boxSize),
@@ -489,7 +481,7 @@ private fun TaskTextContent(
             if (model.isDaily) {
                 Spacer(modifier = Modifier.width(6.dp))
                 Icon(
-                    Icons.Outlined.Repeat,
+                    LucideIcons.Repeat,
                     contentDescription = "每天",
                     modifier = Modifier.size(14.dp),
                     tint = MaterialTheme.colorScheme.tertiary.copy(alpha = NionAlpha.TEXT_MEDIUM),
@@ -540,7 +532,7 @@ private fun TaskReminderInfoRow(
             if (hasReminder) {
                 val isOverdue = model.reminder.isReminderOverdue() && !model.isDone
                 Icon(
-                    if (model.isDaily) Icons.Outlined.CalendarToday else Icons.Outlined.Notifications,
+                    if (model.isDaily) LucideIcons.Calendar else LucideIcons.Bell,
                     contentDescription = null,
                     modifier = Modifier.size(12.dp),
                     tint = if (isOverdue) MaterialTheme.colorScheme.error
@@ -566,7 +558,7 @@ private fun TaskReminderInfoRow(
             if (hasReminderTime) {
                 if (hasReminder) Spacer(modifier = Modifier.width(8.dp))
                 Icon(
-                    Icons.Outlined.Schedule,
+                    LucideIcons.CalendarClock,
                     contentDescription = null,
                     modifier = Modifier.size(12.dp),
                     tint = if (isDailyOverdue) MaterialTheme.colorScheme.error

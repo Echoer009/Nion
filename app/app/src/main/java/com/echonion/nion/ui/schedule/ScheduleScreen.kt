@@ -37,9 +37,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -449,7 +446,7 @@ private fun MonthHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onPrev) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "上月")
+                Icon(LucideIcons.ChevronLeft, contentDescription = "上月")
             }
             Row(
                 modifier = Modifier
@@ -471,7 +468,7 @@ private fun MonthHeader(
                 )
             }
             IconButton(onClick = onNext) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下月")
+                Icon(LucideIcons.ChevronRight, contentDescription = "下月")
             }
         }
     }
@@ -640,7 +637,7 @@ private fun CalendarPickerDialog(
                         pagerState.animateScrollToPage(pagerState.currentPage - 1)
                     }
                 }) {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "上月")
+                    Icon(LucideIcons.ChevronLeft, contentDescription = "上月")
                 }
                 Text(
                     displayedYearMonth.format(
@@ -655,7 +652,7 @@ private fun CalendarPickerDialog(
                         pagerState.animateScrollToPage(pagerState.currentPage + 1)
                     }
                 }) {
-                    Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下月")
+                    Icon(LucideIcons.ChevronRight, contentDescription = "下月")
                 }
             }
 

@@ -22,12 +22,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Assignment
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -49,6 +43,7 @@ import androidx.compose.ui.unit.dp
 import com.echonion.nion.ui.companion.MarkdownText
 import com.echonion.nion.ui.task.TaskItem
 import com.echonion.nion.ui.theme.NionAlpha
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 笔记编辑页 —— 全屏 Dialog，包含标题输入、Markdown 编辑/预览切换器和关联任务区域。
@@ -160,7 +155,7 @@ fun NotebookEditor(
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
-                                Icons.AutoMirrored.Filled.ArrowBack,
+                                LucideIcons.ArrowLeft,
                                 contentDescription = "返回",
                                 modifier = Modifier.size(20.dp),
                             )
@@ -208,7 +203,7 @@ fun NotebookEditor(
                             contentAlignment = Alignment.Center,
                         ) {
                             Icon(
-                                imageVector = if (previewMode) Icons.Default.Edit else Icons.Default.Visibility,
+                                imageVector = if (previewMode) LucideIcons.Pencil else LucideIcons.Eye,
                                 contentDescription = if (previewMode) "切换到编辑" else "切换到预览",
                                 modifier = Modifier.size(20.dp),
                             )
@@ -370,7 +365,7 @@ private fun LinkedTasksBar(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                 ) {
                     Icon(
-                        Icons.Default.Add,
+                        LucideIcons.Plus,
                         contentDescription = "关联任务",
                         modifier = Modifier.size(14.dp),
                         tint = MaterialTheme.colorScheme.primary,
@@ -411,7 +406,7 @@ private fun LinkedTaskChip(
             horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
             Icon(
-                Icons.Default.Assignment,
+                LucideIcons.ClipboardList,
                 contentDescription = null,
                 modifier = Modifier.size(12.dp),
                 tint = MaterialTheme.colorScheme.onSecondaryContainer,

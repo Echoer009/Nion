@@ -27,10 +27,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Alarm
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -66,6 +62,7 @@ import com.echonion.nion.reminder.ReminderStore
 import com.echonion.nion.ui.companion.MarkdownText
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 全局提醒悬浮卡片 —— 监听 NionApp 的提醒事件，在任意页面显示底部悬浮通知卡片。
@@ -222,7 +219,7 @@ fun ReminderOverlay(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        Icons.Default.Alarm,
+                                        LucideIcons.AlarmClock,
                                         contentDescription = null,
                                         tint = accentColor,
                                         modifier = Modifier.size(18.dp),
@@ -274,7 +271,7 @@ fun ReminderOverlay(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        Icons.Default.Timer,
+                                        LucideIcons.Timer,
                                         contentDescription = "开始专注",
                                         modifier = Modifier.size(14.dp),
                                         tint = accentColor,
@@ -299,7 +296,7 @@ fun ReminderOverlay(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        Icons.Default.Close,
+                                        LucideIcons.X,
                                         contentDescription = "关闭",
                                         modifier = Modifier.size(14.dp),
                                         tint = onCardColor.copy(alpha = NionAlpha.TEXT_MEDIUM),

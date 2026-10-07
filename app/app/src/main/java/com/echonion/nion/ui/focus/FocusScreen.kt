@@ -35,9 +35,6 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
@@ -778,7 +775,7 @@ private fun FocusControlBar(
                 enabled = isRunning || remainingSeconds < focusMinutes * 60,
             ) {
                 Icon(
-                    Icons.Default.Stop,
+                    LucideIcons.Square,
                     contentDescription = "提前结束",
                     tint = if (isRunning) MaterialTheme.colorScheme.error
                         else MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1010,7 +1007,7 @@ private fun NoTaskOptionCard(
             }
             if (isSelected) {
                 Icon(
-                    Icons.Default.Check,
+                    LucideIcons.Check,
                     contentDescription = null,
                     tint = primaryColor,
                     modifier = Modifier.size(22.dp),
@@ -1108,7 +1105,7 @@ private fun HierarchicalTaskCard(
                 // 选中时显示勾选图标
                 if (isSelected) {
                     Icon(
-                        Icons.Default.Check,
+                        LucideIcons.Check,
                         contentDescription = null,
                         tint = primaryColor,
                         modifier = Modifier.size(22.dp),

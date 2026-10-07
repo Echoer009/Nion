@@ -28,16 +28,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddCircleOutline
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.ArrowDropUp
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Timer
-import androidx.compose.material.icons.outlined.Alarm
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -75,6 +65,7 @@ import com.echonion.nion.ui.task.TaskItem
 import com.echonion.nion.ui.task.formatFocusTime
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 任务详情浮层内部的面板状态：
@@ -335,7 +326,7 @@ private fun AddSubtaskPanel(
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        Icons.Default.AddCircleOutline,
+                        LucideIcons.CirclePlus,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(22.dp),
@@ -350,7 +341,7 @@ private fun AddSubtaskPanel(
             )
             Spacer(modifier = Modifier.weight(1f))
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.Close, contentDescription = "关闭")
+                Icon(LucideIcons.X, contentDescription = "关闭")
             }
         }
 
@@ -454,7 +445,7 @@ private fun RecurrencePanel(
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        Icons.Outlined.Repeat,
+                        LucideIcons.Repeat,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(22.dp),
@@ -469,7 +460,7 @@ private fun RecurrencePanel(
             )
             Spacer(modifier = Modifier.weight(1f))
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.Close, contentDescription = "关闭")
+                Icon(LucideIcons.X, contentDescription = "关闭")
             }
         }
 
@@ -556,7 +547,7 @@ private fun ReminderPanel(
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        Icons.Outlined.Alarm,
+                        LucideIcons.AlarmClock,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(22.dp),
@@ -571,7 +562,7 @@ private fun ReminderPanel(
             )
             Spacer(modifier = Modifier.weight(1f))
             IconButton(onClick = onBack) {
-                Icon(Icons.Default.Close, contentDescription = "关闭")
+                Icon(LucideIcons.X, contentDescription = "关闭")
             }
         }
 
@@ -681,7 +672,7 @@ private fun DetailPanelHeader(
             )
         }
         IconButton(onClick = onDismiss) {
-            Icon(Icons.Default.Close, contentDescription = "关闭")
+            Icon(LucideIcons.X, contentDescription = "关闭")
         }
     }
 }
@@ -721,7 +712,7 @@ private fun DetailRecurrenceReminderRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.Outlined.Repeat,
+                LucideIcons.Repeat,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
                 // 重复激活状态使用 secondary（信息性指示）
@@ -756,7 +747,7 @@ private fun DetailRecurrenceReminderRow(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.Outlined.Alarm,
+                LucideIcons.AlarmClock,
                 contentDescription = null,
                 modifier = Modifier.size(16.dp),
                 // 提醒激活状态使用 secondary（信息性指示）
@@ -890,7 +881,7 @@ private fun FocusInfoRow(
                         // 状态 A 左侧：时钟图标 + 专注时间文字
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Icon(
-                                Icons.Default.Timer,
+                                LucideIcons.Timer,
                                 contentDescription = null,
                                 modifier = Modifier.size(20.dp),
                                 tint = MaterialTheme.colorScheme.secondary,
@@ -933,7 +924,7 @@ private fun FocusInfoRow(
                             onClick = { onStartFocus(selectedDuration) },
                         ) {
                             Icon(
-                                Icons.Default.PlayArrow,
+                                LucideIcons.Play,
                                 contentDescription = "开始专注",
                                 modifier = Modifier
                                     .padding(8.dp)
@@ -967,7 +958,7 @@ private fun FocusInfoRow(
                             onClick = { onFocusExpandedChange(true) },
                         ) {
                             Icon(
-                                Icons.Default.PlayArrow,
+                                LucideIcons.Play,
                                 contentDescription = "开始专注",
                                 modifier = Modifier
                                     .padding(8.dp)
@@ -1002,13 +993,13 @@ private fun FocusInfoRow(
                                 horizontalAlignment = Alignment.CenterHorizontally,
                             ) {
                                 Icon(
-                                    Icons.Default.ArrowDropUp,
+                                    LucideIcons.ChevronUp,
                                     contentDescription = null,
                                     modifier = Modifier.size(10.dp),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                                 Icon(
-                                    Icons.Default.ArrowDropDown,
+                                    LucideIcons.ChevronDown,
                                     contentDescription = null,
                                     modifier = Modifier.size(10.dp),
                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1053,7 +1044,7 @@ private fun DetailBottomToolbar(
                 ),
             ) {
                 Icon(
-                    Icons.Default.AddCircleOutline,
+                    LucideIcons.CirclePlus,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
                 )
@@ -1074,7 +1065,7 @@ private fun DetailBottomToolbar(
                 ),
             ) {
                 Icon(
-                    Icons.Outlined.DeleteOutline,
+                    LucideIcons.Trash2,
                     contentDescription = null,
                     modifier = Modifier.size(18.dp),
                 )

@@ -52,12 +52,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.outlined.CalendarToday
-import androidx.compose.material.icons.outlined.Alarm
-import androidx.compose.material.icons.outlined.DeleteOutline
-import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -617,7 +611,7 @@ private fun TaskScreenContent(
                             if (dualState.isRightOpen) dualState.closeRight()
                             dualState.toggleLeft()
                         }) {
-                            Icon(Icons.Default.Menu, contentDescription = "清单", tint = MaterialTheme.colorScheme.onSurface)
+                            Icon(LucideIcons.Menu, contentDescription = "清单", tint = MaterialTheme.colorScheme.onSurface)
                         }
                     },
                     actions = {
@@ -732,7 +726,7 @@ private fun ReminderEntryRow(
     ) {
         // Alarm 图标，已设置提醒时使用 secondary 色（信息性状态）
         Icon(
-            Icons.Outlined.Alarm,
+            LucideIcons.AlarmClock,
             contentDescription = null,
             modifier = Modifier.size(18.dp),
             tint = if (reminder != null) MaterialTheme.colorScheme.secondary
@@ -1127,7 +1121,7 @@ private fun AddTaskOverlay(
                             PanelHeader(
                                 icon = {
                                     Icon(
-                                        Icons.Outlined.Alarm,
+                                        LucideIcons.AlarmClock,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.secondary,
                                         modifier = Modifier.size(22.dp),
@@ -1231,7 +1225,7 @@ private fun RecurrenceSettingPanel(
         PanelHeader(
             icon = {
                 Icon(
-                    Icons.Outlined.Repeat,
+                    LucideIcons.Repeat,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.size(22.dp),

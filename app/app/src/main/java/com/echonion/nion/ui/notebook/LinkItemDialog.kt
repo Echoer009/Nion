@@ -14,9 +14,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AddCircleOutline
-import androidx.compose.material.icons.filled.Link
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -35,6 +32,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.echonion.nion.ui.task.TaskItem
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 笔记-任务关联选择器对话框 —— 搜索并选择要关联的任务或笔记。
@@ -116,7 +114,7 @@ fun LinkItemDialog(
                             ) {
                                 Icon(
                                     // 已关联=Link（已连接），未关联=AddCircleOutline（可添加）
-                                    if (isLinked) Icons.Default.Link else Icons.Default.AddCircleOutline,
+                                    if (isLinked) LucideIcons.Link else LucideIcons.CirclePlus,
                                     contentDescription = null,
                                     tint = if (isLinked)
                                         MaterialTheme.colorScheme.primary

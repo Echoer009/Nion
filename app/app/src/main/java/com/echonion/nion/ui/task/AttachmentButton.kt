@@ -11,10 +11,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.AttachFile
-import androidx.compose.material.icons.outlined.Image
-import androidx.compose.material.icons.automirrored.outlined.InsertDriveFile
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -25,6 +21,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 附件添加按钮 —— 使用 Material Design 的 AttachFile（回形针）图标。
@@ -54,7 +51,7 @@ fun AttachmentButton(
         // 回形针按钮：始终可见，点击切换展开/收起
         IconButton(onClick = { expanded = !expanded }) {
             Icon(
-                imageVector = Icons.Outlined.AttachFile,
+                imageVector = LucideIcons.Paperclip,
                 contentDescription = "添加附件",
                 modifier = Modifier.size(20.dp),
                 tint = if (expanded) MaterialTheme.colorScheme.primary
@@ -90,7 +87,7 @@ fun AttachmentButton(
                         },
                     ) {
                         Icon(
-                            imageVector = Icons.Outlined.Image,
+                            imageVector = LucideIcons.Image,
                             contentDescription = "选择图片",
                             modifier = Modifier.size(20.dp),
                             // 附件按钮图标使用 tertiary（装饰性功能入口）
@@ -106,7 +103,7 @@ fun AttachmentButton(
                         },
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Outlined.InsertDriveFile,
+                            imageVector = LucideIcons.File,
                             contentDescription = "选择文件",
                             modifier = Modifier.size(20.dp),
                             // 附件按钮图标使用 tertiary

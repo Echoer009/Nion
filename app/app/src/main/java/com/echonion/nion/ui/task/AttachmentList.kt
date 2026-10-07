@@ -17,11 +17,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Image
-import androidx.compose.material.icons.automirrored.filled.InsertDriveFile
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.IconButtonDefaults
@@ -38,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import java.io.File
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 附件 UI 模型 —— 用于在列表中显示附件信息
@@ -167,7 +163,7 @@ private fun AttachmentCard(
                 } else {
                     // 加载失败时显示占位图标
                     Icon(
-                        imageVector = Icons.Default.Image,
+                        imageVector = LucideIcons.Image,
                         contentDescription = null,
                         modifier = Modifier.size(36.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_HINT),
@@ -216,7 +212,7 @@ private fun AttachmentCard(
                 ),
             ) {
                 Icon(
-                    imageVector = Icons.Default.Close,
+                    imageVector = LucideIcons.X,
                     contentDescription = "删除附件",
                     modifier = Modifier.size(12.dp),
                 )
@@ -229,10 +225,10 @@ private fun AttachmentCard(
  * 根据 MIME 类型返回对应的文件图标
  */
 private fun fileIconForType(mimeType: String) = when {
-    mimeType.startsWith("image/") -> Icons.Default.Image
-    mimeType.startsWith("video/") -> Icons.Default.Description
-    mimeType.contains("pdf") -> Icons.Default.Description
-    else -> Icons.AutoMirrored.Filled.InsertDriveFile
+    mimeType.startsWith("image/") -> LucideIcons.Image
+    mimeType.startsWith("video/") -> LucideIcons.FileText
+    mimeType.contains("pdf") -> LucideIcons.FileText
+    else -> LucideIcons.File
 }
 
 /**

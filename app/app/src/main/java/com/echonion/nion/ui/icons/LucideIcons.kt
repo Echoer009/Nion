@@ -134,4 +134,125 @@ val AudioLines: ImageVector by lazy { buildLucide("AudioLines", listOf("M2,10v3"
 
 /** lucide:circle-plus（圆形加号，添加类入口） */
 val CirclePlus: ImageVector by lazy { buildLucide("CirclePlus", listOf("M22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 22,12Z", "M8,12h8", "M12,8v8")) }
+
+/** lucide:check */
+val Check: ImageVector by lazy { buildLucide("Check", listOf("M20,6L9,17l-5,-5")) }
+
+/** lucide:repeat */
+val Repeat: ImageVector by lazy { buildLucide("Repeat", listOf("m17,2l4,4l-4,4", "M3,11v-1a4,4 0 0,1 4,-4h14", "m7,22l-4,-4l4,-4", "M21,13v1a4,4 0 0,1 -4,4H3")) }
+
+/** lucide:file-text */
+val FileText: ImageVector by lazy { buildLucide("FileText", listOf("M6,22a2,2 0 0,1 -2,-2V4a2,2 0 0,1 2,-2h8a2.4,2.4 0 0,1 1.704,0.706l3.588,3.588A2.4,2.4 0 0,1 20,8v12a2,2 0 0,1 -2,2Z", "M14,2v5a1,1 0 0,0 1,1h5", "M10,9H8", "M16,13H8", "M16,17H8")) }
+
+/** lucide:alarm-clock */
+val AlarmClock: ImageVector by lazy { buildLucide("AlarmClock", listOf("M20,13A8,8 0 0,1 12,21A8,8 0 0,1 4,13A8,8 0 0,1 20,13Z", "M12,9v4l2,2", "M5,3L2,6", "m22,6l-3,-3", "M6.38,18.7L4,21", "M17.64,18.67L20,21")) }
+
+/** lucide:timer */
+val Timer: ImageVector by lazy { buildLucide("Timer", listOf("M10,2L14,2", "M12,14L15,11", "M20,14A8,8 0 0,1 12,22A8,8 0 0,1 4,14A8,8 0 0,1 20,14Z")) }
+
+/** lucide:arrow-left */
+val ArrowLeft: ImageVector by lazy { buildLucide("ArrowLeft", listOf("m12,19l-7,-7l7,-7", "M19,12H5")) }
+
+/** lucide:chevron-right */
+val ChevronRight: ImageVector by lazy { buildLucide("ChevronRight", listOf("m9,18l6,-6l-6,-6")) }
+
+/** lucide:chevron-left */
+val ChevronLeft: ImageVector by lazy { buildLucide("ChevronLeft", listOf("m15,18l-6,-6l6,-6")) }
+
+/** lucide:eye */
+val Eye: ImageVector by lazy { buildLucide("Eye", listOf("M2.062,12.348a1,1 0 0,1 0,-0.696a10.75,10.75 0 0,1 19.876,0a1,1 0 0,1 0,0.696a10.75,10.75 0 0,1 -19.876,0", "M15,12A3,3 0 0,1 12,15A3,3 0 0,1 9,12A3,3 0 0,1 15,12Z")) }
+
+/** lucide:circle-check */
+val CircleCheck: ImageVector by lazy { buildLucide("CircleCheck", listOf("M22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 22,12Z", "m9,12l2,2l4,-4")) }
+
+/** lucide:smile */
+val Smile: ImageVector by lazy { buildLucide("Smile", listOf("M22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 22,12Z", "M8,14s1.5,2 4,2s4,-2 4,-2", "M9,9L9.01,9", "M15,9L15.01,9")) }
+
+/** lucide:bookmark */
+val Bookmark: ImageVector by lazy { buildLucide("Bookmark", listOf("m19,21l-7,-4l-7,4V5a2,2 0 0,1 2,-2h10a2,2 0 0,1 2,2v16Z")) }
+
+/** lucide:paperclip */
+val Paperclip: ImageVector by lazy { buildLucide("Paperclip", listOf("m16,6l-8.414,8.586a2,2 0 0,0 2.829,2.829l8.414,-8.586a4,4 0 1,0 -5.657,-5.657l-8.379,8.551a6,6 0 1,0 8.485,8.485l8.379,-8.551")) }
+
+/** lucide:sun */
+val Sun: ImageVector by lazy { buildLucide("Sun", listOf("M16,12A4,4 0 0,1 12,16A4,4 0 0,1 8,12A4,4 0 0,1 16,12Z", "M12,2v2", "M12,20v2", "m4.93,4.93l1.41,1.41", "m17.66,17.66l1.41,1.41", "M2,12h2", "M20,12h2", "m6.34,17.66l-1.41,1.41", "m19.07,4.93l-1.41,1.41")) }
+
+/** lucide:triangle-alert */
+val TriangleAlert: ImageVector by lazy { buildLucide("TriangleAlert", listOf("m21.73,18l-8,-14a2,2 0 0,0 -3.48,0l-8,14A2,2 0 0,0 4,21h16a2,2 0 0,0 1.73,-3", "M12,9v4", "M12,17h0.01")) }
+
+/** lucide:eye-off */
+val EyeOff: ImageVector by lazy { buildLucide("EyeOff", listOf("M10.733,5.076a10.744,10.744 0 0,1 11.205,6.575a1,1 0 0,1 0,0.696a10.747,10.747 0 0,1 -1.444,2.49", "M14.084,14.158a3,3 0 0,1 -4.242,-4.242", "M17.479,17.499a10.75,10.75 0 0,1 -15.417,-5.151a1,1 0 0,1 0,-0.696a10.75,10.75 0 0,1 4.446,-5.143", "m2,2l20,20")) }
+
+/** lucide:arrow-left-right */
+val ArrowLeftRight: ImageVector by lazy { buildLucide("ArrowLeftRight", listOf("M8,3L4,7l4,4", "M4,7h16", "m16,21l4,-4l-4,-4", "M20,17H4")) }
+
+/** lucide:square */
+val Square: ImageVector by lazy { buildLucide("Square", listOf("M5,3H19A2,2 0 0,1 21,5V19A2,2 0 0,1 19,21H5A2,2 0 0,1 3,19V5A2,2 0 0,1 5,3Z")) }
+
+/** lucide:map-pin */
+val MapPin: ImageVector by lazy { buildLucide("MapPin", listOf("M20,10c0,4.993 -5.539,10.193 -7.399,11.799a1,1 0 0,1 -1.202,0C9.539,20.193 4,14.993 4,10a8,8 0 0,1 16,0", "M15,10A3,3 0 0,1 12,13A3,3 0 0,1 9,10A3,3 0 0,1 15,10Z")) }
+
+/** lucide:chevron-up */
+val ChevronUp: ImageVector by lazy { buildLucide("ChevronUp", listOf("m18,15l-6,-6l-6,6")) }
+
+/** lucide:image */
+val Image: ImageVector by lazy { buildLucide("Image", listOf("M5,3H19A2,2 0 0,1 21,5V19A2,2 0 0,1 19,21H5A2,2 0 0,1 3,19V5A2,2 0 0,1 5,3Z", "M11,9A2,2 0 0,1 9,11A2,2 0 0,1 7,9A2,2 0 0,1 11,9Z", "m21,15l-3.086,-3.086a2,2 0 0,0 -2.828,0L6,21")) }
+
+/** lucide:history */
+val History: ImageVector by lazy { buildLucide("History", listOf("M3,12a9,9 0 1,0 9,-9a9.75,9.75 0 0,0 -6.74,2.74L3,8", "M3,3v5h5", "M12,7v5l4,2")) }
+
+/** lucide:pencil */
+val Pencil: ImageVector by lazy { buildLucide("Pencil", listOf("M21.174,6.812a1,1 0 0,0 -3.986,-3.987L3.842,16.174a2,2 0 0,0 -0.5,0.83l-1.321,4.352a0.5,0.5 0 0,0 0.623,0.622l4.353,-1.32a2,2 0 0,0 0.83,-0.497Z", "m15,5l4,4")) }
+
+/** lucide:bell */
+val Bell: ImageVector by lazy { buildLucide("Bell", listOf("M10.268,21a2,2 0 0,0 3.464,0", "M3.262,15.326A1,1 0 0,0 4,17h16a1,1 0 0,0 0.74,-1.673C19.41,13.956 18,12.499 18,8A6,6 0 0,0 6,8c0,4.499 -1.411,5.956 -2.738,7.326")) }
+
+/** lucide:calendar */
+val Calendar: ImageVector by lazy { buildLucide("Calendar", listOf("M8,2v4", "M16,2v4", "M5,4H19A2,2 0 0,1 21,6V20A2,2 0 0,1 19,22H5A2,2 0 0,1 3,20V6A2,2 0 0,1 5,4Z", "M3,10h18")) }
+
+/** lucide:square-check */
+val SquareCheck: ImageVector by lazy { buildLucide("SquareCheck", listOf("M5,3H19A2,2 0 0,1 21,5V19A2,2 0 0,1 19,21H5A2,2 0 0,1 3,19V5A2,2 0 0,1 5,3Z", "m9,12l2,2l4,-4")) }
+
+/** lucide:upload */
+val Upload: ImageVector by lazy { buildLucide("Upload", listOf("M12,3v12", "m17,8l-5,-5l-5,5", "M21,15v4a2,2 0 0,1 -2,2H5a2,2 0 0,1 -2,-2v-4")) }
+
+/** lucide:settings */
+val Settings: ImageVector by lazy { buildLucide("Settings", listOf("M9.671,4.136a2.34,2.34 0 0,1 4.659,0a2.34,2.34 0 0,0 3.319,1.915a2.34,2.34 0 0,1 2.33,4.033a2.34,2.34 0 0,0 0,3.831a2.34,2.34 0 0,1 -2.33,4.033a2.34,2.34 0 0,0 -3.319,1.915a2.34,2.34 0 0,1 -4.659,0a2.34,2.34 0 0,0 -3.32,-1.915a2.34,2.34 0 0,1 -2.33,-4.033a2.34,2.34 0 0,0 0,-3.831A2.34,2.34 0 0,1 6.35,6.051a2.34,2.34 0 0,0 3.319,-1.915", "M15,12A3,3 0 0,1 12,15A3,3 0 0,1 9,12A3,3 0 0,1 15,12Z")) }
+
+/** lucide:minus */
+val Minus: ImageVector by lazy { buildLucide("Minus", listOf("M5,12h14")) }
+
+/** lucide:circle */
+val Circle: ImageVector by lazy { buildLucide("Circle", listOf("M22,12A10,10 0 0,1 12,22A10,10 0 0,1 2,12A10,10 0 0,1 22,12Z")) }
+
+/** lucide:locate-fixed */
+val LocateFixed: ImageVector by lazy { buildLucide("LocateFixed", listOf("M2,12L5,12", "M19,12L22,12", "M12,2L12,5", "M12,19L12,22", "M19,12A7,7 0 0,1 12,19A7,7 0 0,1 5,12A7,7 0 0,1 19,12Z", "M15,12A3,3 0 0,1 12,15A3,3 0 0,1 9,12A3,3 0 0,1 15,12Z")) }
+
+/** lucide:menu */
+val Menu: ImageVector by lazy { buildLucide("Menu", listOf("M4,5h16", "M4,12h16", "M4,19h16")) }
+
+/** lucide:link */
+val Link: ImageVector by lazy { buildLucide("Link", listOf("M10,13a5,5 0 0,0 7.54,0.54l3,-3a5,5 0 0,0 -7.07,-7.07l-1.72,1.71", "M14,11a5,5 0 0,0 -7.54,-0.54l-3,3a5,5 0 0,0 7.07,7.07l1.71,-1.71")) }
+
+/** lucide:download */
+val Download: ImageVector by lazy { buildLucide("Download", listOf("M12,15V3", "M21,15v4a2,2 0 0,1 -2,2H5a2,2 0 0,1 -2,-2v-4", "m7,10l5,5l5,-5")) }
+
+/** lucide:copy */
+val Copy: ImageVector by lazy { buildLucide("Copy", listOf("M10,8H20A2,2 0 0,1 22,10V20A2,2 0 0,1 20,22H10A2,2 0 0,1 8,20V10A2,2 0 0,1 10,8Z", "M4,16c-1.1,0 -2,-0.9 -2,-2V4c0,-1.1 0.9,-2 2,-2h10c1.1,0 2,0.9 2,2")) }
+
+/** lucide:battery-warning */
+val BatteryWarning: ImageVector by lazy { buildLucide("BatteryWarning", listOf("M10,17h0.01", "M10,7v6", "M14,6h2a2,2 0 0,1 2,2v8a2,2 0 0,1 -2,2h-2", "M22,14v-4", "M6,18H4a2,2 0 0,1 -2,-2V8a2,2 0 0,1 2,-2h2")) }
+
+/** lucide:clipboard-list */
+val ClipboardList: ImageVector by lazy { buildLucide("ClipboardList", listOf("M9,2H15A1,1 0 0,1 16,3V5A1,1 0 0,1 15,6H9A1,1 0 0,1 8,5V3A1,1 0 0,1 9,2Z", "M16,4h2a2,2 0 0,1 2,2v14a2,2 0 0,1 -2,2H6a2,2 0 0,1 -2,-2V6a2,2 0 0,1 2,-2h2", "M12,11h4", "M12,16h4", "M8,11h0.01", "M8,16h0.01")) }
+
+/** lucide:file */
+val File: ImageVector by lazy { buildLucide("File", listOf("M6,22a2,2 0 0,1 -2,-2V4a2,2 0 0,1 2,-2h8a2.4,2.4 0 0,1 1.704,0.706l3.588,3.588A2.4,2.4 0 0,1 20,8v12a2,2 0 0,1 -2,2Z", "M14,2v5a1,1 0 0,0 1,1h5")) }
+
+/** lucide:send */
+val Send: ImageVector by lazy { buildLucide("Send", listOf("M14.536,21.686a0.5,0.5 0 0,0 0.937,-0.024l6.5,-19a0.496,0.496 0 0,0 -0.635,-0.635l-19,6.5a0.5,0.5 0 0,0 -0.024,0.937l7.93,3.18a2,2 0 0,1 1.112,1.11Z", "m21.854,2.147l-10.94,10.939")) }
+
+/** lucide:external-link */
+val ExternalLink: ImageVector by lazy { buildLucide("ExternalLink", listOf("M15,3h6v6", "M10,14L21,3", "M18,13v6a2,2 0 0,1 -2,2H5a2,2 0 0,1 -2,-2V8a2,2 0 0,1 2,-2h6")) }
+
 }

@@ -25,9 +25,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowLeft
-import androidx.compose.material.icons.outlined.Alarm
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -51,6 +48,7 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 选择步骤枚举：Date = 选日期，Time = 选时间
@@ -253,7 +251,7 @@ private fun ReminderTitleRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Icon(
-            Icons.Outlined.Alarm,
+            LucideIcons.AlarmClock,
             contentDescription = null,
             modifier = Modifier.size(18.dp),
             tint = if (reminder != null) MaterialTheme.colorScheme.primary
@@ -396,7 +394,7 @@ private fun TimePickerStep(
         ) {
             // 返回箭头
             Icon(
-                Icons.AutoMirrored.Outlined.KeyboardArrowLeft,
+                LucideIcons.ChevronLeft,
                 contentDescription = "返回选择日期",
                 modifier = Modifier.size(20.dp),
                 // 导航返回箭头使用 tertiary

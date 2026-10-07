@@ -25,9 +25,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.WbSunny
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -67,6 +64,7 @@ import com.echonion.nion.ui.theme.NionColorTheme
 import com.echonion.nion.ui.theme.NionTheme
 import com.echonion.nion.ui.theme.ThemePalette
 import uniffi.nion_core.StickerData
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 问候悬浮窗 Service —— 在 App 退到后台时，通过 WindowManager 显示问候悬浮卡片。
@@ -441,7 +439,7 @@ private fun FloatingGreetingCard(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            Icons.Default.WbSunny,
+                            LucideIcons.Sun,
                             contentDescription = null,
                             tint = accentColor,
                             modifier = Modifier.size(18.dp),
@@ -468,7 +466,7 @@ private fun FloatingGreetingCard(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Icon(
-                            Icons.Default.Close,
+                            LucideIcons.X,
                             contentDescription = "关闭",
                             modifier = Modifier.size(14.dp),
                             tint = onCardColor.copy(alpha = 0.7f),

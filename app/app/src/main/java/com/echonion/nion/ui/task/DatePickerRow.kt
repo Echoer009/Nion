@@ -30,11 +30,6 @@ import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.outlined.CalendarToday
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -71,6 +66,7 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 import java.util.Locale
 import kotlinx.coroutines.launch
+import com.echonion.nion.ui.icons.LucideIcons
 
 private val dayLabels = listOf("一", "二", "三", "四", "五", "六", "日")
 
@@ -169,7 +165,7 @@ fun NionCalendar(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             IconButton(onClick = { pickerYear = (pickerYear - 1).coerceAtLeast(1900) }) {
-                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "上一年")
+                                Icon(LucideIcons.ChevronLeft, contentDescription = "上一年")
                             }
                             // 年份文字，不使用 sharedElement（两边文字内容不同 "2026年" vs "2026年 5月"，
                             // morph 时最后一个字会闪烁），由容器 Surface 的 bounds morph 提供动画
@@ -179,7 +175,7 @@ fun NionCalendar(
                                 fontWeight = FontWeight.Bold,
                             )
                             IconButton(onClick = { pickerYear = (pickerYear + 1).coerceAtMost(2100) }) {
-                                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下一年")
+                                Icon(LucideIcons.ChevronRight, contentDescription = "下一年")
                             }
                         }
                         Spacer(modifier = Modifier.height(12.dp))
@@ -327,7 +323,7 @@ private fun CalendarHeader(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             IconButton(onClick = onPreviousMonth) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowLeft, contentDescription = "上月")
+                Icon(LucideIcons.ChevronLeft, contentDescription = "上月")
             }
             // 年月文字：不使用 sharedElement（两边文字内容不同会闪烁），由容器 Surface 的 bounds morph 提供动画
             Text(
@@ -346,7 +342,7 @@ private fun CalendarHeader(
                 fontWeight = FontWeight.SemiBold,
             )
             IconButton(onClick = onNextMonth) {
-                Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下月")
+                Icon(LucideIcons.ChevronRight, contentDescription = "下月")
             }
         }
     }

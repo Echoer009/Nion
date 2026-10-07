@@ -30,8 +30,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -59,6 +57,7 @@ import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 统计周期配置 —— 用于 Tab 切换的数据模型。
@@ -136,7 +135,7 @@ fun FocusStatsPanel(
                     modifier = Modifier.size(36.dp),
                 ) {
                     Icon(
-                        Icons.Default.Refresh,
+                        LucideIcons.RefreshCw,
                         contentDescription = "刷新",
                         modifier = Modifier.size(18.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,

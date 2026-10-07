@@ -24,9 +24,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Article
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
 import androidx.compose.material3.Icon
@@ -52,6 +49,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.ui.graphics.Color
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 笔记型清单主界面 —— 显示笔记列表，支持搜索过滤和新建笔记。
@@ -110,7 +108,7 @@ fun NotebookContent(
                     }
                 }) {
                     Icon(
-                        Icons.Default.Search,
+                        LucideIcons.Search,
                         contentDescription = "搜索笔记",
                         tint = if (isSearchOpen) MaterialTheme.colorScheme.primary
                         else MaterialTheme.colorScheme.onSurface,
@@ -156,7 +154,7 @@ fun NotebookContent(
                     horizontalAlignment = Alignment.CenterHorizontally,
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Filled.Article,
+                        LucideIcons.FileText,
                         contentDescription = null,
                         modifier = Modifier.size(48.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),

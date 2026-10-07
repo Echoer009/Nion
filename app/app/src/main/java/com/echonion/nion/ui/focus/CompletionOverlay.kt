@@ -25,9 +25,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -58,6 +55,7 @@ import com.echonion.nion.ui.theme.NionAlpha
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 专注完成悬浮卡片 —— 监听 NionApp 的专注完成事件，在任意页面显示底部鼓励卡片。
@@ -223,7 +221,7 @@ fun CompletionOverlay(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        Icons.Default.Timer,
+                                        LucideIcons.Timer,
                                         contentDescription = null,
                                         tint = accentColor,
                                         modifier = Modifier.size(18.dp),
@@ -250,7 +248,7 @@ fun CompletionOverlay(
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        Icons.Default.Close,
+                                        LucideIcons.X,
                                         contentDescription = "关闭",
                                         modifier = Modifier.size(14.dp),
                                         tint = onCardColor.copy(alpha = NionAlpha.TEXT_MEDIUM),

@@ -47,15 +47,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.OpenInNew
-import androidx.compose.material.icons.filled.BatteryAlert
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.ExpandMore
-import androidx.compose.material.icons.filled.LocationOn
-import androidx.compose.material.icons.filled.MyLocation
-import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
@@ -328,7 +319,7 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
                     Icon(
-                        Icons.Default.LocationOn,
+                        LucideIcons.MapPin,
                         contentDescription = null,
                         tint = MaterialTheme.colorScheme.secondary,
                         modifier = Modifier.size(24.dp),
@@ -361,7 +352,7 @@ fun SettingsScreen(
                         }
                     } else {
                         Icon(
-                            Icons.Default.Check,
+                            LucideIcons.Check,
                             contentDescription = "已授权",
                             tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(20.dp),
@@ -441,7 +432,7 @@ private fun OverlayPermissionCard(context: Context) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.AutoMirrored.Filled.OpenInNew,
+                LucideIcons.ExternalLink,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.size(24.dp),
@@ -475,7 +466,7 @@ private fun OverlayPermissionCard(context: Context) {
                 }
             } else {
                 Icon(
-                    Icons.Default.Check,
+                    LucideIcons.Check,
                     contentDescription = "已授权",
                     tint = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.size(20.dp),
@@ -532,7 +523,7 @@ private fun BatteryPermissionCard(context: Context) {
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.Default.BatteryAlert,
+                LucideIcons.BatteryWarning,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.secondary,
                 modifier = Modifier.size(24.dp),
@@ -560,7 +551,7 @@ private fun BatteryPermissionCard(context: Context) {
                 }
             } else {
                 Icon(
-                    Icons.Default.Check,
+                    LucideIcons.Check,
                     contentDescription = "已设置",
                     tint = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.size(20.dp),
@@ -644,7 +635,7 @@ private fun DataManagementCard(context: Context) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    Icons.Default.Download,
+                    LucideIcons.Download,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.size(24.dp),
@@ -682,7 +673,7 @@ private fun DataManagementCard(context: Context) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    Icons.Default.Upload,
+                    LucideIcons.Upload,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.size(24.dp),
@@ -1036,7 +1027,7 @@ private fun ThemeSelectorCard(
 
                 // 展开箭头（带旋转动画）
                 Icon(
-                    Icons.Default.ExpandMore,
+                    LucideIcons.ChevronDown,
                     contentDescription = if (isExpanded) "收起" else "展开",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier
@@ -1223,7 +1214,7 @@ private fun PresetThemeItem(
             // 选中勾
             if (isSelected) {
                 Icon(
-                    Icons.Default.Check,
+                    LucideIcons.Check,
                     contentDescription = "已选中",
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp),
@@ -1363,7 +1354,7 @@ private fun CustomThemeItem(
             // 选中勾
             if (isActive) {
                 Icon(
-                    Icons.Default.Check,
+                    LucideIcons.Check,
                     contentDescription = "使用中",
                     tint = MaterialTheme.colorScheme.primary,
                     modifier = Modifier.size(20.dp),
@@ -1509,7 +1500,7 @@ private fun LocationCard(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Icon(
-                            Icons.Default.LocationOn,
+                            LucideIcons.MapPin,
                             contentDescription = null,
                             tint = MaterialTheme.colorScheme.secondary,
                             modifier = Modifier.size(24.dp),
@@ -1542,7 +1533,7 @@ private fun LocationCard(
                                 modifier = Modifier.size(36.dp),
                             ) {
                                 Icon(
-                                    Icons.Default.MyLocation,
+                                    LucideIcons.LocateFixed,
                                     contentDescription = "定位",
                                     tint = if (hasPermission) MaterialTheme.colorScheme.primary
                                     else MaterialTheme.colorScheme.onSurfaceVariant,

@@ -12,8 +12,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +28,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import java.io.File
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 图片全屏预览浮层 —— 覆盖全屏显示图片，支持捏合缩放和关闭按钮。
@@ -109,7 +108,7 @@ fun ImagePreviewOverlay(
                 .statusBarsPadding(),
         ) {
             Icon(
-                imageVector = Icons.Default.Close,
+                imageVector = LucideIcons.X,
                 contentDescription = "关闭预览",
                 tint = MaterialTheme.colorScheme.onPrimary,
                 modifier = Modifier.size(28.dp),

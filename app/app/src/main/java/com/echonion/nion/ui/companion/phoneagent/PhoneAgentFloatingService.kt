@@ -29,12 +29,6 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Pause
-import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Remove
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
@@ -76,6 +70,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlin.math.abs
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * Phone Agent 悬浮窗 Service —— 在 Agent 执行手机操作时悬浮显示思考和操作过程。
@@ -557,10 +552,10 @@ private fun ExpandedPanel(
                     modifier = Modifier.weight(1f),
                 )
                 IconButton(onClick = onMinimize, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Remove, contentDescription = "最小化", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    Icon(LucideIcons.Minus, contentDescription = "最小化", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                 }
                 IconButton(onClick = onClose, modifier = Modifier.size(28.dp)) {
-                    Icon(Icons.Default.Close, contentDescription = "关闭", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                    Icon(LucideIcons.X, contentDescription = "关闭", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                 }
             }
 
@@ -610,7 +605,7 @@ private fun ExpandedPanel(
                     ),
                     modifier = Modifier.weight(1f),
                 ) {
-                    Icon(if (isPaused) Icons.Default.PlayArrow else Icons.Default.Pause, contentDescription = if (isPaused) "恢复" else "暂停", modifier = Modifier.size(18.dp))
+                    Icon(if (isPaused) LucideIcons.Play else LucideIcons.Pause, contentDescription = if (isPaused) "恢复" else "暂停", modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(text = if (isPaused) "恢复" else "暂停", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 }
@@ -620,7 +615,7 @@ private fun ExpandedPanel(
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
                     modifier = Modifier.weight(1f),
                 ) {
-                    Icon(Icons.Default.Stop, contentDescription = "停止", modifier = Modifier.size(18.dp))
+                    Icon(LucideIcons.Square, contentDescription = "停止", modifier = Modifier.size(18.dp))
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(text = "停止", fontWeight = FontWeight.SemiBold, fontSize = 14.sp)
                 }

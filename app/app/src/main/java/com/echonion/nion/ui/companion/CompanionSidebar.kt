@@ -8,8 +8,6 @@ import com.echonion.nion.ui.companion.phoneagent.PhoneAgentFloatingService
 import kotlinx.coroutines.Dispatchers
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibilityScope
 import androidx.compose.animation.EnterTransition
@@ -67,23 +65,6 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.ui.unit.Dp
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Send
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.SwapHoriz
-import androidx.compose.material.icons.outlined.AutoAwesome
-import androidx.compose.material.icons.outlined.AttachFile
-import androidx.compose.material.icons.outlined.Bookmarks
-import androidx.compose.material.icons.outlined.SentimentSatisfied
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ElevatedCard
 import androidx.compose.material3.HorizontalDivider
@@ -146,6 +127,7 @@ import com.echonion.nion.ui.theme.NionAlpha
 import com.echonion.nion.ui.theme.NionColors
 import com.echonion.nion.util.BitmapUtils
 import androidx.compose.ui.platform.LocalDensity
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 聊天图片数据 —— 消息中携带的一张图片，含 base64 编码和 MIME 类型。
@@ -432,7 +414,7 @@ private fun SetupContent(
             if (onBack != null) {
                 IconButton(onClick = onBack) {
                     Icon(
-                        Icons.Default.ArrowBack,
+                        LucideIcons.ArrowLeft,
                         contentDescription = "返回",
                         modifier = Modifier.size(20.dp),
                     )
@@ -968,7 +950,7 @@ private fun ProfilePhoneAgentSettings(viewModel: CompanionViewModel) {
                 trailingIcon = {
                     IconButton(onClick = { apiKeyVisible = !apiKeyVisible }) {
                         Icon(
-                            if (apiKeyVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                            if (apiKeyVisible) LucideIcons.Eye else LucideIcons.EyeOff,
                             contentDescription = if (apiKeyVisible) "隐藏" else "显示",
                             modifier = Modifier.size(20.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1038,7 +1020,7 @@ private fun ProfileTopBar(
     ) {
         IconButton(onClick = onBack) {
             Icon(
-                Icons.Default.ArrowBack,
+                LucideIcons.ArrowLeft,
                 contentDescription = "返回并保存",
                 modifier = Modifier.size(20.dp),
             )
@@ -1047,7 +1029,7 @@ private fun ProfileTopBar(
             // 表情包按钮：打开表情包管理面板
             IconButton(onClick = onStickersClick) {
                 Icon(
-                    Icons.Outlined.SentimentSatisfied,
+                    LucideIcons.Smile,
                     contentDescription = "表情包",
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1056,7 +1038,7 @@ private fun ProfileTopBar(
             // "关于你"按钮：打开用户偏好面板
             IconButton(onClick = onPreferencesClick) {
                 Icon(
-                    Icons.Outlined.Bookmarks,
+                    LucideIcons.Bookmark,
                     contentDescription = "关于你",
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1065,7 +1047,7 @@ private fun ProfileTopBar(
             // 记忆按钮：打开 Nion 的笔记本
             IconButton(onClick = onMemoriesClick) {
                 Icon(
-                    Icons.Outlined.AutoAwesome,
+                    LucideIcons.Sparkles,
                     contentDescription = "记忆",
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1505,7 +1487,7 @@ private fun ExpandablePromptCard(
                         }
                         // 展开/折叠箭头
                         Icon(
-                            Icons.Default.KeyboardArrowDown,
+                            LucideIcons.ChevronDown,
                             contentDescription = if (expanded) "收起" else "展开",
                             modifier = Modifier
                                 .size(24.dp)
@@ -1675,7 +1657,7 @@ private fun ExpandableReminderCard(
                         )
                         // 展开/折叠箭头
                         Icon(
-                            Icons.Default.KeyboardArrowDown,
+                            LucideIcons.ChevronDown,
                             contentDescription = if (expanded) "收起" else "展开",
                             modifier = Modifier
                                 .size(24.dp)
@@ -1840,7 +1822,7 @@ private fun PreferenceItem(
                 modifier = Modifier.size(24.dp),
             ) {
                 Icon(
-                    Icons.Default.Close,
+                    LucideIcons.X,
                     contentDescription = "删除偏好",
                     modifier = Modifier.size(14.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
@@ -1987,7 +1969,7 @@ private fun ChatHeader(
             // 新对话按钮：保存当前对话并开始新对话
             IconButton(onClick = onNewChat) {
                 Icon(
-                    Icons.Default.Add,
+                    LucideIcons.Plus,
                     contentDescription = "新对话",
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -1996,7 +1978,7 @@ private fun ChatHeader(
             // 历史记录按钮：查看历史对话列表
             IconButton(onClick = onHistoryClick) {
                 Icon(
-                    Icons.Default.History,
+                    LucideIcons.History,
                     contentDescription = "历史记录",
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2005,7 +1987,7 @@ private fun ChatHeader(
             // 切换配置按钮：打开多配置选择面板
             IconButton(onClick = onSwitchClick) {
                 Icon(
-                    Icons.Default.SwapHoriz,
+                    LucideIcons.ArrowLeftRight,
                     contentDescription = "切换配置",
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2123,7 +2105,7 @@ private fun ChatInputBar(
                                 contentAlignment = Alignment.Center,
                             ) {
                                 Icon(
-                                    Icons.Default.Close,
+                                    LucideIcons.X,
                                     contentDescription = "移除图片",
                                     modifier = Modifier.size(10.dp),
                                     tint = Color.White,
@@ -2205,7 +2187,7 @@ private fun ChatInputBar(
                     modifier = Modifier.size(36.dp),
                 ) {
                     Icon(
-                        Icons.Outlined.AttachFile,
+                        LucideIcons.Paperclip,
                         contentDescription = "选择图片",
                         tint = if (hasImages)
                             MaterialTheme.colorScheme.primary
@@ -2249,7 +2231,7 @@ private fun ChatInputBar(
                     enabled = canSend,
                 ) {
                     Icon(
-                        Icons.AutoMirrored.Filled.Send,
+                        LucideIcons.Send,
                         contentDescription = "发送",
                         tint = if (canSend)
                             MaterialTheme.colorScheme.primary
@@ -2684,7 +2666,7 @@ private fun MessageActionBar(
                 modifier = Modifier.size(32.dp),
             ) {
                 Icon(
-                    Icons.Default.ContentCopy,
+                    LucideIcons.Copy,
                     contentDescription = "复制",
                     modifier = Modifier.size(16.dp),
                     tint = if (isUser)
@@ -2700,7 +2682,7 @@ private fun MessageActionBar(
                     modifier = Modifier.size(32.dp),
                 ) {
                     Icon(
-                        Icons.Default.Refresh,
+                        LucideIcons.RefreshCw,
                         contentDescription = "重试",
                         modifier = Modifier.size(16.dp),
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -2713,7 +2695,7 @@ private fun MessageActionBar(
                 modifier = Modifier.size(32.dp),
             ) {
                 Icon(
-                    Icons.Default.Delete,
+                    LucideIcons.Trash2,
                     contentDescription = "删除",
                     modifier = Modifier.size(16.dp),
                     tint = if (isUser)
@@ -3041,7 +3023,7 @@ private fun TableFullscreenOverlay(
                         .size(36.dp),
                 ) {
                     Icon(
-                        Icons.Default.Close,
+                        LucideIcons.X,
                         contentDescription = "关闭表格",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -3163,7 +3145,7 @@ private fun HistoryPanel(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.Default.History,
+                LucideIcons.History,
                 contentDescription = null,
                 modifier = Modifier.size(20.dp),
                 tint = MaterialTheme.colorScheme.onSurface,
@@ -3181,7 +3163,7 @@ private fun HistoryPanel(
                 modifier = Modifier.size(36.dp),
             ) {
                 Icon(
-                    Icons.Default.Close,
+                    LucideIcons.X,
                     contentDescription = "关闭",
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -3281,7 +3263,7 @@ private fun ConversationItem(
         if (isActive) {
             // 当前对话确认标记（信息性状态使用 secondary）
             Icon(
-                Icons.Default.Check,
+                LucideIcons.Check,
                 contentDescription = "当前对话",
                 modifier = Modifier.size(18.dp),
                 tint = MaterialTheme.colorScheme.secondary,
@@ -3293,7 +3275,7 @@ private fun ConversationItem(
             modifier = Modifier.size(28.dp),
         ) {
             Icon(
-                Icons.Default.Delete,
+                LucideIcons.Trash2,
                 contentDescription = "删除对话",
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTLE),
@@ -3334,7 +3316,7 @@ private fun SwitchProviderPanel(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.Default.SwapHoriz,
+                LucideIcons.ArrowLeftRight,
                 contentDescription = null,
                 modifier = Modifier.size(20.dp),
                 tint = MaterialTheme.colorScheme.onSurface,
@@ -3352,7 +3334,7 @@ private fun SwitchProviderPanel(
                 modifier = Modifier.size(36.dp),
             ) {
                 Icon(
-                    Icons.Default.Close,
+                    LucideIcons.X,
                     contentDescription = "关闭",
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -3403,7 +3385,7 @@ private fun SwitchProviderPanel(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Icon(
-                    Icons.Default.Add,
+                    LucideIcons.Plus,
                     contentDescription = null,
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.primary,
@@ -3464,7 +3446,7 @@ private fun ConfigItem(
         if (isActive) {
             // 当前配置确认标记（信息性状态使用 secondary）
             Icon(
-                Icons.Default.Check,
+                LucideIcons.Check,
                 contentDescription = "当前使用",
                 modifier = Modifier.size(18.dp),
                 tint = MaterialTheme.colorScheme.secondary,
@@ -3477,7 +3459,7 @@ private fun ConfigItem(
             modifier = Modifier.size(28.dp),
         ) {
             Icon(
-                Icons.Default.Edit,
+                LucideIcons.Pencil,
                 contentDescription = "编辑配置",
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTLE),
@@ -3489,7 +3471,7 @@ private fun ConfigItem(
             modifier = Modifier.size(28.dp),
         ) {
             Icon(
-                Icons.Default.Delete,
+                LucideIcons.Trash2,
                 contentDescription = "删除配置",
                 modifier = Modifier.size(16.dp),
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTLE),
@@ -3539,7 +3521,7 @@ private fun PreferencesPanel(
         ) {
             IconButton(onClick = onClose) {
                 Icon(
-                    Icons.Default.ArrowBack,
+                    LucideIcons.ArrowLeft,
                     contentDescription = "返回",
                     modifier = Modifier.size(20.dp),
                 )
@@ -3562,7 +3544,7 @@ private fun PreferencesPanel(
             // 右上角添加偏好按钮
             IconButton(onClick = { showAddPrefDialog = true }) {
                 Icon(
-                    Icons.Default.Add,
+                    LucideIcons.Plus,
                     contentDescription = "添加偏好",
                     modifier = Modifier.size(20.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -3653,7 +3635,7 @@ private fun PreferencesPanel(
                 verticalArrangement = Arrangement.Center,
             ) {
                 Icon(
-                    Icons.Outlined.Bookmarks,
+                    LucideIcons.Bookmark,
                     contentDescription = null,
                     modifier = Modifier.size(48.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.BG_VERY_SUBTLE),
@@ -3747,7 +3729,7 @@ private fun MemoriesPanel(
         ) {
             IconButton(onClick = onClose) {
                 Icon(
-                    Icons.Default.ArrowBack,
+                    LucideIcons.ArrowLeft,
                     contentDescription = "返回",
                     modifier = Modifier.size(20.dp),
                 )
@@ -3845,7 +3827,7 @@ private fun MemoriesPanel(
                 verticalArrangement = Arrangement.Center,
             ) {
                 Icon(
-                    Icons.Outlined.AutoAwesome,
+                    LucideIcons.Sparkles,
                     contentDescription = null,
                     modifier = Modifier.size(48.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.BG_VERY_SUBTLE),
@@ -3975,7 +3957,7 @@ private fun MemoryItem(
                 modifier = Modifier.size(24.dp),
             ) {
                 Icon(
-                    Icons.Default.Close,
+                    LucideIcons.X,
                     contentDescription = "删除记忆",
                     modifier = Modifier.size(14.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),

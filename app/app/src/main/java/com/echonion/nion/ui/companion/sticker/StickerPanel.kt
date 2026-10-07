@@ -22,11 +22,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.outlined.SentimentSatisfied
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -50,6 +45,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.echonion.nion.ui.companion.CompanionViewModel
 import uniffi.nion_core.StickerData
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 表情包管理面板 —— 独立面板，用于添加、查看和删除表情包。
@@ -80,7 +76,7 @@ internal fun StickersPanel(
         ) {
             IconButton(onClick = onClose) {
                 Icon(
-                    Icons.AutoMirrored.Filled.ArrowBack,
+                    LucideIcons.ArrowLeft,
                     contentDescription = "返回",
                     modifier = Modifier.size(20.dp),
                 )
@@ -119,7 +115,7 @@ internal fun StickersPanel(
             readOnly = true,
             label = { Text("添加表情包") },
             leadingIcon = {
-                Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+                Icon(LucideIcons.Plus, contentDescription = null, modifier = Modifier.size(18.dp))
             },
             modifier = Modifier
                 .fillMaxWidth()
@@ -139,7 +135,7 @@ internal fun StickersPanel(
             ) {
                 Spacer(modifier = Modifier.height(40.dp))
                 Icon(
-                    Icons.Outlined.SentimentSatisfied,
+                    LucideIcons.Smile,
                     contentDescription = null,
                     modifier = Modifier.size(48.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.BG_SUBTLE),
@@ -250,7 +246,7 @@ private fun StickerItem(
                 modifier = Modifier.size(28.dp),
             ) {
                 Icon(
-                    Icons.Default.Delete,
+                    LucideIcons.Trash2,
                     contentDescription = "删除表情包",
                     modifier = Modifier.size(16.dp),
                     tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),

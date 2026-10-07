@@ -24,9 +24,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Article
-import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -55,6 +52,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.joinAll
 import kotlinx.coroutines.launch
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 扁平任务行 —— 根据 depth 分发到主任务行或子任务行。
@@ -443,7 +441,7 @@ private fun SubTaskRow(
         if (isNotebook) {
             // 笔记模式：显示笔记图标，不可点击切换完成
             androidx.compose.material3.Icon(
-                Icons.AutoMirrored.Filled.Article,
+                LucideIcons.FileText,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = NionAlpha.TEXT_SUBTITLE),
                 modifier = Modifier.size(checkSize),

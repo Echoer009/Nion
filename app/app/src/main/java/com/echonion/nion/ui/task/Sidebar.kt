@@ -33,12 +33,6 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.automirrored.filled.Article
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -72,6 +66,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import sh.calvin.reorderable.ReorderableItem
 import sh.calvin.reorderable.rememberReorderableLazyListState
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 侧边栏内容 —— 显示清单列表，支持切换、新建、删除、拖拽排序。
@@ -326,7 +321,7 @@ private fun AddChecklistInputField(
                 // 任务清单按钮
                 ChecklistTypeChip(
                     label = "任务",
-                    icon = Icons.Default.CheckCircle,
+                    icon = LucideIcons.CircleCheck,
                     isSelected = selectedType == "task",
                     onClick = { onTypeChange("task") },
                     modifier = Modifier.weight(1f),
@@ -334,7 +329,7 @@ private fun AddChecklistInputField(
                 // 笔记清单按钮
                 ChecklistTypeChip(
                     label = "笔记",
-                    icon = Icons.AutoMirrored.Filled.Article,
+                    icon = LucideIcons.FileText,
                     isSelected = selectedType == "notebook",
                     onClick = { onTypeChange("notebook") },
                     modifier = Modifier.weight(1f),
@@ -369,7 +364,7 @@ private fun AddChecklistInputField(
                         modifier = Modifier.size(28.dp),
                     ) {
                         Icon(
-                            Icons.Default.Check,
+                            LucideIcons.Check,
                             contentDescription = "确认",
                             // 确认勾选使用 secondary（次要操作确认）
                             tint = if (name.isNotBlank())
@@ -468,7 +463,7 @@ private fun AddChecklistButton(
             ) {
                 // 次要操作图标和文字使用 secondary
                 Icon(
-                    Icons.Default.Add,
+                    LucideIcons.Plus,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.secondary,
                     modifier = Modifier.size(18.dp),
@@ -574,7 +569,7 @@ private fun SidebarChecklistItem(
             }
             // 清单类型图标：任务型用 CheckCircle，笔记型用 Article
             Icon(
-                imageVector = if (checklistType == "notebook") Icons.AutoMirrored.Filled.Article else Icons.Default.CheckCircle,
+                imageVector = if (checklistType == "notebook") LucideIcons.FileText else LucideIcons.CircleCheck,
                 contentDescription = null,
                 tint = contentColor.copy(alpha = NionAlpha.TEXT_SUBTLE),
                 modifier = Modifier.size(18.dp),
@@ -616,7 +611,7 @@ private fun SidebarChecklistItem(
                     modifier = Modifier.size(32.dp),
                 ) {
                     Icon(
-                        Icons.Default.Close,
+                        LucideIcons.X,
                         contentDescription = "删除",
                         tint = contentColor.copy(alpha = NionAlpha.TEXT_SUBTLE),
                         modifier = Modifier.size(16.dp),

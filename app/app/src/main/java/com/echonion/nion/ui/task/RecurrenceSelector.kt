@@ -20,8 +20,6 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -38,6 +36,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 循环规则入口行 —— 显示当前循环设置，点击后导航到全屏 RECURRENCE 面板。
@@ -68,7 +67,7 @@ fun RecurrenceEntryRow(
     ) {
         // Repeat 图标，已设置循环时使用 primary 色
         Icon(
-            Icons.Outlined.Repeat,
+            LucideIcons.Repeat,
             contentDescription = null,
             modifier = Modifier.size(18.dp),
             tint = if (recurrenceRule == "daily") MaterialTheme.colorScheme.primary
@@ -152,7 +151,7 @@ fun RecurrenceSelector(
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Icon(
-                Icons.Outlined.Repeat,
+                LucideIcons.Repeat,
                 contentDescription = null,
                 modifier = Modifier.size(18.dp),
                 tint = if (recurrenceRule == "daily") MaterialTheme.colorScheme.primary

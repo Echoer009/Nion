@@ -15,11 +15,6 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Article
-import androidx.compose.material.icons.filled.Clear
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -56,6 +51,7 @@ import com.echonion.nion.ui.task.TaskItem
 import com.echonion.nion.ui.task.toUi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * 全局笔记搜索页面 —— 搜索所有笔记型清单中的笔记。
@@ -109,7 +105,7 @@ fun NoteSearchScreen(
             TopAppBar(
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                        Icon(LucideIcons.ArrowLeft, contentDescription = "返回")
                     }
                 },
                 title = {
@@ -121,14 +117,14 @@ fun NoteSearchScreen(
                             .focusRequester(focusRequester),
                         placeholder = { Text("搜索笔记...") },
                         leadingIcon = {
-                            Icon(Icons.Default.Search, contentDescription = null)
+                            Icon(LucideIcons.Search, contentDescription = null)
                         },
                         trailingIcon = {
                             // 清除搜索内容按钮：输入框非空时显示
                             if (query.isNotEmpty()) {
                                 IconButton(onClick = { query = "" }) {
                                     Icon(
-                                        Icons.Default.Clear,
+                                        LucideIcons.X,
                                         contentDescription = "清除",
                                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
@@ -188,7 +184,7 @@ fun NoteSearchScreen(
                 ) {
                     Column(horizontalAlignment = Alignment.CenterHorizontally) {
                         Icon(
-                            Icons.AutoMirrored.Filled.Article,
+                            LucideIcons.FileText,
                             contentDescription = null,
                             modifier = Modifier.size(48.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.3f),

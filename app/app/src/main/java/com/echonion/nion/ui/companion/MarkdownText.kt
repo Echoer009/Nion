@@ -25,9 +25,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CheckBox
-import androidx.compose.material.icons.filled.CheckBoxOutlineBlank
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -53,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import uniffi.nion_core.StickerData
 import com.echonion.nion.ui.companion.sticker.StickerService
+import com.echonion.nion.ui.icons.LucideIcons
 
 private const val TAG = "MarkdownText"
 
@@ -637,7 +635,7 @@ private fun TaskListBlockBlock(
                     baseStyle.fontSize.toDp()
                 }
                 Icon(
-                    imageVector = if (item.checked) Icons.Filled.CheckBox else Icons.Filled.CheckBoxOutlineBlank,
+                    imageVector = if (item.checked) LucideIcons.SquareCheck else LucideIcons.Square,
                     contentDescription = if (item.checked) "已完成" else "未完成",
                     modifier = Modifier
                         .width(iconSize)

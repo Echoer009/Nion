@@ -23,14 +23,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowDropDown
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -62,6 +54,7 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
+import com.echonion.nion.ui.icons.LucideIcons
 
 /**
  * API 配置引导页 —— 当用户尚未配置 API key 时显示，也可用于编辑已保存的配置。
@@ -357,8 +350,8 @@ private fun ProviderSelectorCard(
                     }
                 }
                 Icon(
-                    if (dropdownExpanded) Icons.Default.KeyboardArrowUp
-                    else Icons.Default.KeyboardArrowDown,
+                    if (dropdownExpanded) LucideIcons.ChevronUp
+                    else LucideIcons.ChevronDown,
                     contentDescription = if (dropdownExpanded) "收起" else "展开",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -410,7 +403,7 @@ private fun ProviderSelectorCard(
                             // 选中标记：主题色勾号
                             if (isSelected) {
                                 Icon(
-                                    Icons.Default.Check,
+                                    LucideIcons.Check,
                                     contentDescription = "已选中",
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(20.dp),
@@ -458,7 +451,7 @@ private fun ApiKeyInputField(
         trailingIcon = {
             IconButton(onClick = onToggleVisibility) {
                 Icon(
-                    if (apiKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                    if (apiKeyVisible) LucideIcons.EyeOff else LucideIcons.Eye,
                     contentDescription = if (apiKeyVisible) "隐藏密钥" else "显示密钥",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -515,7 +508,7 @@ private fun ModelSectionHeader(
                     modifier = Modifier.size(32.dp),
                 ) {
                     Icon(
-                        Icons.Default.Refresh,
+                        LucideIcons.RefreshCw,
                         contentDescription = "获取模型列表",
                         modifier = Modifier.size(18.dp),
                         tint = if (apiKeyInput.isNotBlank())
@@ -580,8 +573,8 @@ private fun ModelSelectorCard(
                         MaterialTheme.colorScheme.onSurface,
                 )
                 Icon(
-                    if (dropdownExpanded) Icons.Default.KeyboardArrowUp
-                    else Icons.Default.KeyboardArrowDown,
+                    if (dropdownExpanded) LucideIcons.ChevronUp
+                    else LucideIcons.ChevronDown,
                     contentDescription = if (dropdownExpanded) "收起" else "展开",
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -618,7 +611,7 @@ private fun ModelSelectorCard(
                             )
                             if (isModelSelected) {
                                 Icon(
-                                    Icons.Default.Check,
+                                    LucideIcons.Check,
                                     contentDescription = "已选中",
                                     tint = MaterialTheme.colorScheme.primary,
                                     modifier = Modifier.size(20.dp),

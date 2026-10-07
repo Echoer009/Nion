@@ -7,12 +7,6 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.CalendarMonth
-import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.MusicNote
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.material.icons.filled.Timer
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -64,6 +58,7 @@ import com.echonion.nion.ui.theme.NionColorTheme
 import com.echonion.nion.ui.theme.NionTheme
 import com.echonion.nion.ui.theme.ThemePalette
 import kotlinx.coroutines.launch
+import com.echonion.nion.ui.icons.LucideIcons
 
 data class BottomNavItem(
     val route: String,
@@ -72,11 +67,11 @@ data class BottomNavItem(
 )
 
 val bottomNavItems = listOf(
-    BottomNavItem("tasks", "任务", Icons.Default.CheckCircle),
-    BottomNavItem("schedule", "日程", Icons.Default.CalendarMonth),
-    BottomNavItem("pomodoro", "专注", Icons.Default.Timer),
-    BottomNavItem("music", "音乐", Icons.Default.MusicNote),
-    BottomNavItem("settings", "设置", Icons.Default.Settings),
+    BottomNavItem("tasks", "任务", LucideIcons.CircleCheck),
+    BottomNavItem("schedule", "日程", LucideIcons.Calendar),
+    BottomNavItem("pomodoro", "专注", LucideIcons.Timer),
+    BottomNavItem("music", "音乐", LucideIcons.Music),
+    BottomNavItem("settings", "设置", LucideIcons.Settings),
 )
 
 /** Fade Through 过渡动画：旧页面先淡出，再淡入新页面，中间有短暂空白帧 */
