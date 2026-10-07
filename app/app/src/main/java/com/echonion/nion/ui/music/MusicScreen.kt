@@ -259,21 +259,42 @@ fun MusicScreen(
                     showFullPlayer = true
                 }
 
+                // 专辑|歌单视图切换状态（纯 UI 状态）：提升到页面级，由 TopAppBar 标题行
+                // 的分段控件读写；本地与服务器两种音源共用同一状态，搜索态分段隐藏
+                var showPlaylists by remember { mutableStateOf(false) }
+
                 Scaffold(
                     contentWindowInsets = WindowInsets.statusBars,
                     topBar = {
                         TopAppBar(
                             title = {
-                                // 标题直接显示当前音源名（页面不再叠"音乐"两行标题）
-                                Text(
-                                    when (vm.source) {
-                                        MusicSource.LOCAL -> "本地曲目"
-                                        MusicSource.BRAINGIRL -> "类脑娘服务器"
-                                        MusicSource.CUSTOM -> "自己的服务器"
-                                    },
-                                    style = MaterialTheme.typography.headlineSmall,
-                                    fontWeight = FontWeight.Bold,
-                                )
+                                // 标题行：音源名 + 专辑|歌单分段切换（搜索态自动隐藏分段）
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Text(
+                                        when (vm.source) {
+                                            MusicSource.LOCAL -> "本地曲目"
+                                            MusicSource.BRAINGIRL -> "类脑娘服务器"
+                                            MusicSource.CUSTOM -> "自己的服务器"
+                                        },
+                                        style = MaterialTheme.typography.headlineSmall,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    if (vm.searchQuery.isBlank()) {
+                                        Spacer(modifier = Modifier.width(12.dp))
+                                        LibraryViewSegment(
+                                            icon = LucideIcons.Disc3,
+                                            contentDescription = "专辑视图",
+                                            selected = !showPlaylists,
+                                            onClick = { showPlaylists = false },
+                                        )
+                                        LibraryViewSegment(
+                                            icon = LucideIcons.ListMusic,
+                                            contentDescription = "歌单视图",
+                                            selected = showPlaylists,
+                                            onClick = { showPlaylists = true },
+                                        )
+                                    }
+                                }
                             },
                             actions = {
                                 // 右上角伙伴入口，与专注页/日程页保持一致
@@ -324,18 +345,21 @@ fun MusicScreen(
                                 // 本地曲目：MediaStore 全机音频（含权限申请流程）
                                 MusicSource.LOCAL -> LocalMusicContent(
                                     vm = vm,
+                                    showPlaylists = showPlaylists,
                                     trackCoverModifier = trackCoverModifier,
                                     onPlayFromList = openPlayerFromTrack,
                                 )
                                 // 服务器：未配置时显示引导配置表单，配置后进入曲库浏览
                                 MusicSource.BRAINGIRL -> ServerMusicContent(
                                     vm = vm,
+                                    showPlaylists = showPlaylists,
                                     isCustom = false,
                                     trackCoverModifier = trackCoverModifier,
                                     onPlayFromList = openPlayerFromTrack,
                                 )
                                 MusicSource.CUSTOM -> ServerMusicContent(
                                     vm = vm,
+                                    showPlaylists = showPlaylists,
                                     isCustom = true,
                                     trackCoverModifier = trackCoverModifier,
                                     onPlayFromList = openPlayerFromTrack,
@@ -383,6 +407,8 @@ fun MusicScreen(
 @Composable
 private fun LocalMusicContent(
     vm: MusicViewModel,
+    // 专辑|歌单视图切换（状态提升至 MusicScreen，由 TopAppBar 分段控件驱动）
+    showPlaylists: Boolean,
     // 曲目行小封面 sharedElement 工厂（由 MusicScreen 创建，key 带曲目 id）
     trackCoverModifier: @Composable (String) -> Modifier,
     // 从列表点歌回调：传入被点曲目 id，由上层展开播放页并配对封面 morph
@@ -447,6 +473,7 @@ private fun LocalMusicContent(
         // 浏览态：与云端同构（搜索 + 专辑列表/详情 + morph）
         else -> LocalLibraryContent(
             vm = vm,
+            showPlaylists = showPlaylists,
             trackCoverModifier = trackCoverModifier,
             onPlayFromList = onPlayFromList,
         )
@@ -462,6 +489,8 @@ private fun LocalMusicContent(
 @Composable
 private fun LocalLibraryContent(
     vm: MusicViewModel,
+    // 专辑|歌单视图切换（状态提升至 MusicScreen，由 TopAppBar 分段控件驱动）
+    showPlaylists: Boolean,
     // 曲目行小封面 sharedElement 工厂（由 MusicScreen 创建，key 带曲目 id）
     trackCoverModifier: @Composable (String) -> Modifier,
     // 从列表点歌回调：传入被点曲目 id，由上层展开播放页并配对封面 morph
@@ -473,9 +502,6 @@ private fun LocalLibraryContent(
     // 歌单详情打开时拦截系统返回：先回到歌单列表（与专辑详情一致）
     BackHandler(enabled = vm.currentPlaylist != null) { vm.closePlaylist() }
 
-    // 专辑|歌单视图切换状态（纯 UI 状态；搜索激活时隐藏切换入口并回落专辑视图）
-    var showPlaylists by remember { mutableStateOf(false) }
-
     // 首次进入加载当前音源的歌单列表（loadPlaylists 内部有"已有数据不重查"保护）
     LaunchedEffect(Unit) { vm.loadPlaylists() }
 
@@ -484,11 +510,10 @@ private fun LocalLibraryContent(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        // ===== 控件栏：排序/视图/搜索 三入口（整行四态 morph；标题在页面 TopAppBar）=====
+        // ===== 控件栏：排序/搜索 两入口（专辑|歌单切换已上移 TopAppBar 分段控件）=====
         MusicToolbar(
             vm = vm,
             showPlaylists = showPlaylists,
-            onSelectView = { showPlaylists = it },
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -626,6 +651,8 @@ private fun LocalLibraryContent(
 private fun ServerMusicContent(
     vm: MusicViewModel,
     isCustom: Boolean,
+    // 专辑|歌单视图切换（状态提升至 MusicScreen，由 TopAppBar 分段控件驱动）
+    showPlaylists: Boolean,
     // 曲目行小封面 sharedElement 工厂（由 MusicScreen 创建，key 带曲目 id）
     trackCoverModifier: @Composable (String) -> Modifier,
     // 从列表点歌回调：传入被点曲目 id，由上层展开播放页并配对封面 morph
@@ -648,9 +675,6 @@ private fun ServerMusicContent(
     // 歌单详情打开时拦截系统返回：先回到歌单列表（与本地音源一致）
     BackHandler(enabled = vm.currentPlaylist != null) { vm.closePlaylist() }
 
-    // 专辑|歌单视图切换状态（与本地音源同构；搜索激活时隐藏切换入口）
-    var showPlaylists by remember { mutableStateOf(false) }
-
     // 首次进入加载当前账号的歌单列表（loadPlaylists 内部有"已有数据不重查"保护）
     LaunchedEffect(Unit) { vm.loadPlaylists() }
 
@@ -659,11 +683,10 @@ private fun ServerMusicContent(
             .fillMaxSize()
             .padding(horizontal = 16.dp),
     ) {
-        // ===== 控件栏：视图/搜索 入口（整行四态 morph；标题在页面 TopAppBar）=====
+        // ===== 控件栏：搜索 入口（专辑|歌单切换已上移 TopAppBar 分段控件）=====
         MusicToolbar(
             vm = vm,
             showPlaylists = showPlaylists,
-            onSelectView = { showPlaylists = it },
         )
 
         Spacer(modifier = Modifier.height(8.dp))
@@ -776,13 +799,13 @@ private fun ServerMusicContent(
 }
 
 /**
- * 曲库控件栏 —— 整行单 sharedElement 容器，四态 morph（本地与服务器音源共用）：
- * NORMAL（图标收起态）/ SORT（整行=排序选项）/ VIEW（整行=视图选项）/ SEARCH（整行=搜索框）。
- * 展开某态时其余控件被挤开、行内只剩该态内容；行高恒定 48dp 不跳变；
+ * 曲库控件栏 —— 整行单 sharedElement 容器，三态 morph（本地与服务器音源共用）：
+ * NORMAL（图标收起态）/ SORT（整行=排序选项）/ SEARCH（整行=搜索框）。
+ * 展开某态时其余控件被挤开、行内只剩该态内容；行高恒定 40dp 不跳变；
  * 收起态与任一展开态互为同一 sharedElement（"music_toolbar_container"），
  * 切换即整行容器 morph。标题不在此栏（在页面 TopAppBar，显示音源名）。
  */
-private enum class MusicToolbarMode { NORMAL, SORT, VIEW, SEARCH }
+private enum class MusicToolbarMode { NORMAL, SORT, SEARCH }
 
 /**
  * 展开式图标选择器的一个选项（图标 + 两字标签，横排格子用）。
@@ -794,29 +817,23 @@ private data class SelectorOption(
 )
 
 /**
- * 曲库控件栏 —— 三区（排序/视图/搜索），见 [ToolbarZone] 的飞行图标模型：
+ * 曲库控件栏 —— 两区（排序/搜索），见 [ToolbarZone] 的飞行图标模型：
  * 点图标 → 该图标飞行到选中项位置并染主色，条占满整栏（兄弟图标被推出场），
  * 角上浮现 ✕；✕ 或点选项收起，收起完全镜像；退出搜索清空查询词。
  */
 @Composable
 private fun MusicToolbar(
     vm: MusicViewModel,
+    // 当前是否歌单视图：仅用于排序区显隐（专辑|歌单切换入口在 TopAppBar 分段控件）
     showPlaylists: Boolean,
-    onSelectView: (Boolean) -> Unit,
 ) {
     var mode by remember { mutableStateOf(MusicToolbarMode.NORMAL) }
 
-    // 排序/视图的选项集合（未来加选项 = 加一项 + 调整 ToolbarCellWidth 即可）
+    // 排序的选项集合（未来加选项 = 加一项 + 调整 ToolbarCellWidth 即可）
     val sortOptions = remember {
         listOf(
             SelectorOption("title", LucideIcons.ArrowDownAZ, "名称"),
             SelectorOption("newest", LucideIcons.CalendarClock, "最新"),
-        )
-    }
-    val viewOptions = remember {
-        listOf(
-            SelectorOption("album", LucideIcons.Disc3, "专辑"),
-            SelectorOption("playlist", LucideIcons.ListMusic, "歌单"),
         )
     }
 
@@ -829,37 +846,25 @@ private fun MusicToolbar(
         animationSpec = tween(180, delayMillis = if (mode == MusicToolbarMode.SORT) 80 else 0),
         label = "sortIconTint",
     )
-    val viewIconTint by animateColorAsState(
-        targetValue = if (mode == MusicToolbarMode.VIEW) priColor else grayColor,
-        animationSpec = tween(180, delayMillis = if (mode == MusicToolbarMode.VIEW) 80 else 0),
-        label = "viewIconTint",
-    )
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .height(48.dp),
+            .height(40.dp),
     ) {
         val toolbarWidth = maxWidth
-        // 排序区仅在本地专辑视图显示；视图区在搜索态让位
+        // 排序区仅在本地专辑视图显示（歌单视图/搜索态让位隐藏）
         val sortVisible = vm.source == MusicSource.LOCAL && !showPlaylists && vm.searchQuery.isBlank()
-        val viewVisible = vm.searchQuery.isBlank()
 
-        // 收起态宽度：NORMAL 时本区图标占位 48dp；任一区展开期间兄弟区让位为 0
+        // 收起态宽度：NORMAL 时本区图标占位 40dp；任一区展开期间兄弟区让位为 0
         //（整行只保留一个展开区，条才能占满整栏）
         val sortRest = if (mode == MusicToolbarMode.NORMAL && sortVisible) ToolbarIconWidth else 0.dp
-        val viewRest = if (mode == MusicToolbarMode.NORMAL && viewVisible) ToolbarIconWidth else 0.dp
         val searchRest = if (mode == MusicToolbarMode.NORMAL) ToolbarIconWidth else 0.dp
-
-        // 飞行终点（IconButton 左缘偏移）：图标在 48dp 按钮内居中，
-        // 故 = 目标格图标左缘(格序×96 + 内距14) - 12
-        val sortFlight = ToolbarCellWidth * (if (vm.localAlbumSort == LocalAlbumSort.TITLE) 0 else 1) + 2.dp
-        val viewFlight = ToolbarCellWidth * (if (showPlaylists) 1 else 0) + 2.dp
 
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(48.dp),
+                .height(40.dp),
             horizontalArrangement = Arrangement.End,
             verticalAlignment = Alignment.CenterVertically,
         ) {
@@ -885,33 +890,6 @@ private fun MusicToolbar(
                         onClick = {
                             vm.localAlbumSort =
                                 if (opt.key == "title") LocalAlbumSort.TITLE else LocalAlbumSort.NEWEST
-                            mode = MusicToolbarMode.NORMAL
-                        },
-                    )
-                }
-            }
-
-            // —— 视图区 ——
-            ToolbarZone(
-                expandedWidth = toolbarWidth,
-                collapsedWidth = viewRest,
-                expanded = mode == MusicToolbarMode.VIEW,
-                icon = if (showPlaylists) viewOptions[1].icon else viewOptions[0].icon,
-                contentDescription = "曲库视图",
-                iconTint = viewIconTint,
-                iconTargetLeft = flightTarget(if (showPlaylists) 1 else 0),
-                visible = viewVisible,
-                onIconClick = { mode = MusicToolbarMode.VIEW },
-                onClose = { mode = MusicToolbarMode.NORMAL },
-            ) {
-                viewOptions.forEach { opt ->
-                    val sel = showPlaylists == (opt.key == "playlist")
-                    SelectorCell(
-                        option = opt,
-                        selected = sel,
-                        showIcon = !sel,
-                        onClick = {
-                            onSelectView(opt.key == "playlist")
                             mode = MusicToolbarMode.NORMAL
                         },
                     )
@@ -948,15 +926,51 @@ private fun MusicToolbar(
     }
 }
 
+/**
+ * TopAppBar 标题行的专辑|歌单分段按钮 —— 选中态主色淡底 + 主色图标，
+ * 未选中态透明底 + 灰图标；紧凑 40dp 触达，Surface 只做选中底色衬托。
+ */
+@Composable
+private fun LibraryViewSegment(
+    icon: ImageVector,
+    contentDescription: String,
+    selected: Boolean,
+    onClick: () -> Unit,
+) {
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = if (selected) {
+            MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)
+        } else {
+            Color.Transparent
+        },
+    ) {
+        IconButton(
+            onClick = onClick,
+            modifier = Modifier.size(40.dp),
+        ) {
+            Icon(
+                icon,
+                contentDescription = contentDescription,
+                tint = if (selected) {
+                    MaterialTheme.colorScheme.primary
+                } else {
+                    MaterialTheme.colorScheme.onSurfaceVariant
+                },
+            )
+        }
+    }
+}
+
 /** 控件栏单颗图标的占位宽度 / 选项格定宽 */
-private val ToolbarIconWidth = 48.dp
-private val ToolbarCellWidth = 96.dp
+private val ToolbarIconWidth = 40.dp
+private val ToolbarCellWidth = 80.dp
 
 /**
- * 飞行终点（条坐标下 IconButton 左缘）：格子左排在条首，格 i 左缘 = i×96，
- * 格内图标左缘 = +14（水平内距），图标在 48dp 按钮内居中差 12 → 按钮左缘 = +2。
+ * 飞行终点（条坐标下 IconButton 左缘）：格子左排在条首，格 i 左缘 = i×80，
+ * 格内图标左缘 = +14（水平内距），图标在 40dp 按钮内居中差 8 → 按钮左缘 = +6。
  */
-private fun flightTarget(cellIndex: Int): Dp = ToolbarCellWidth * cellIndex + 2.dp
+private fun flightTarget(cellIndex: Int): Dp = ToolbarCellWidth * cellIndex + 6.dp
 
 /**
  * 控件栏区域 —— "揭示窗口 + 角落槽 + 飞行图标"统一模型（搜索区为钉槽变体）：
@@ -964,9 +978,9 @@ private fun flightTarget(cellIndex: Int): Dp = ToolbarCellWidth * cellIndex + 2.
  * - 区 = [揭示窗口][角落槽]（Row，宽度动画 + 裁切）。收起态窗口=0：条内容
  *   物理不存在，常态只有图标，不可能有条内容残漏；
  * - 条内容左排（选项靠左）、骑窗口左缘从角落滑出/滑回：展开时本区图标锁步
- *   领先自家格子 2dp —— 图标全程钉在格子图标位上"领格子出场"，不横穿文字；
+ *   领先自家格子 6dp —— 图标全程钉在格子图标位上"领格子出场"，不横穿文字；
  *   收起时条内容 120ms 淡出，避免文字滑过图标产生残影闪烁；
- * - 角落槽恒 48dp 在区右端：✕ 在此淡入淡出（图标飞走后浮现，最右侧）；
+ * - 角落槽恒 40dp 在区右端：✕ 在此淡入淡出（图标飞走后浮现，最右侧）；
  *   本区图标同一节点贯穿全程，展开时向左飞入条内选中格图标位（与窗口
  *   同参弹簧锁步），颜色 灰↔主色 渐变；iconTargetLeft=null 则钉槽（搜索区）；
  * - 让位（他区展开）：本区整体被推走，图标 150ms 淡出；回位淡入。
@@ -1027,7 +1041,7 @@ private fun ToolbarZone(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier
             .width(zoneWidth)
-            .height(48.dp)
+            .height(40.dp)
             .clipToBounds(),
     ) {
         // 揭示窗口：收起=0（条不存在）；展开=区宽-角落槽。
@@ -1035,7 +1049,7 @@ private fun ToolbarZone(
         Box(
             modifier = Modifier
                 .width((zoneWidth - ToolbarIconWidth).coerceAtLeast(0.dp))
-                .height(48.dp)
+                .height(40.dp)
                 .clipToBounds(),
         ) {
             Row(
@@ -1706,7 +1720,7 @@ private fun PlaylistRow(
 }
 
 /**
- * 歌单详情内容 —— 头部（名称 + 说明 + 曲目数/总时长 + 播放整单）+ 曲目列表（可单首移除）。
+ * 歌单详情内容 —— 头部（封面块 + 名称 + 说明 + 曲目数/总时长）+ 曲目列表（可单首移除）。
  * 点击曲目以整个歌单为队列起播。本地/服务器共用：曲目读 [MusicViewModel.playlistTracks]。
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -1732,9 +1746,16 @@ private fun PlaylistDetailContent(
         modifier = Modifier.fillMaxSize(),
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        // 歌单头部：容器 morph（与列表歌单行配对）+ 名称/说明/统计 + 播放整单按钮
+        // 歌单头部：容器 morph（与列表歌单行配对）+ 96dp 封面块 + 名称/说明/统计
         item(key = "playlist_header") {
-            Column(
+            // 候选封面：前 8 首中不同封面 key（本地 albumArtUri / 服务器 coverArtUrl）去重后的曲目
+            val coverCandidates = remember(vm.playlistTracks) {
+                vm.playlistTracks.take(8).distinctBy {
+                    it.albumArtUri?.let { uri -> "local:$uri" } ?: it.coverArtUrl
+                }
+            }
+            val coverIndex = vm.playlistCoverIndex(playlist.id, coverCandidates.size)
+            Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .then(
@@ -1749,54 +1770,76 @@ private fun PlaylistDetailContent(
                         },
                     )
                     .padding(top = 8.dp, bottom = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        LucideIcons.ListMusic,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(32.dp),
-                    )
-                    Spacer(modifier = Modifier.width(12.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            playlist.name,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        // 统计行：曲目数 + 总时长（本地歌单头部为现算值，云端为服务端统计）
-                        val duration = if (playlist.durationSeconds > 0) {
-                            playlist.durationSeconds.toLong()
-                        } else {
-                            vm.playlistTracks.sumOf { it.durationSeconds }
-                        }
-                        Text(
-                            listOf("${vm.playlistTracks.size} 首", formatTrackDuration(duration))
-                                .joinToString(" · "),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    // 播放整单：以歌单全部曲目为队列从第一首起播
-                    FilledIconButton(
-                        onClick = { vm.playPlaylist() },
-                        colors = IconButtonDefaults.filledIconButtonColors(
-                            containerColor = MaterialTheme.colorScheme.primary,
-                        ),
+                // 96dp 封面块：空歌单用占位图标，否则显示当前选中候选曲目封面；
+                // 点击（候选 > 1 时）循环切换下一个候选封面
+                if (coverCandidates.isEmpty()) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier = Modifier.size(96.dp),
                     ) {
-                        Icon(
-                            LucideIcons.Play,
-                            contentDescription = "播放整单",
-                            tint = MaterialTheme.colorScheme.onPrimary,
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                LucideIcons.ListMusic,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(32.dp),
+                            )
+                        }
+                    }
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .size(96.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .then(
+                                if (coverCandidates.size > 1) {
+                                    Modifier.clickable {
+                                        vm.cyclePlaylistCover(playlist.id, coverCandidates.size)
+                                    }
+                                } else {
+                                    Modifier
+                                },
+                            ),
+                    ) {
+                        val selectedCover = coverCandidates[coverIndex]
+                        CoverArt(
+                            coverUrl = selectedCover.coverArtUrl,
+                            albumArtUri = selectedCover.albumArtUri,
+                            modifier = Modifier.size(96.dp),
+                            placeHolderSize = 40.dp,
+                            cornerRadius = 16.dp,
                         )
                     }
                 }
-                if (playlist.comment.isNotBlank()) {
+                Spacer(modifier = Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        playlist.comment,
-                        style = MaterialTheme.typography.bodyMedium,
+                        playlist.name,
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    // 副行：策展说明（无则不显示）
+                    if (playlist.comment.isNotBlank()) {
+                        Text(
+                            playlist.comment,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    // 统计行：曲目数 + 总时长（本地歌单头部为现算值，云端为服务端统计）
+                    val duration = if (playlist.durationSeconds > 0) {
+                        playlist.durationSeconds.toLong()
+                    } else {
+                        vm.playlistTracks.sumOf { it.durationSeconds }
+                    }
+                    Text(
+                        listOf("${vm.playlistTracks.size} 首", formatTrackDuration(duration))
+                            .joinToString(" · "),
+                        style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 4.dp),
                     )
                 }
             }
@@ -2126,6 +2169,7 @@ private fun MiniPlayerBar(
                                 )
                             },
                         ),
+                    cornerRadius = 12.dp,
                 )
                 Spacer(modifier = Modifier.width(10.dp))
                 Column(modifier = Modifier.weight(1f)) {
@@ -2331,30 +2375,27 @@ private fun FullPlayerOverlay(
                                         } else {
                                             "music_track_cover_${pageTrack.id}"
                                         }
-                                    Surface(
-                                        shape = RoundedCornerShape(24.dp),
-                                        tonalElevation = 2.dp,
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    ) {
-                                        CoverArt(
-                                            coverUrl = pageTrack.coverArtUrl,
-                                            albumArtUri = pageTrack.albumArtUri,
-                                            modifier = Modifier
-                                                .size(280.dp)
-                                                .then(
-                                                    with(sharedTransitionScope) {
-                                                        Modifier.sharedElement(
-                                                            sharedContentState = rememberSharedContentState(coverKey),
-                                                            animatedVisibilityScope = animatedVisibilityScope,
-                                                            boundsTransform = { _, _ ->
-                                                                spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
-                                                            },
-                                                        )
-                                                    },
-                                                ),
-                                            placeHolderSize = 96.dp,
-                                        )
-                                    }
+                                    // 大封面即 morph 目标本身：不再包外层底座，
+                                    // 圆角由 CoverArt 的 cornerRadius 统一裁剪
+                                    CoverArt(
+                                        coverUrl = pageTrack.coverArtUrl,
+                                        albumArtUri = pageTrack.albumArtUri,
+                                        modifier = Modifier
+                                            .size(280.dp)
+                                            .then(
+                                                with(sharedTransitionScope) {
+                                                    Modifier.sharedElement(
+                                                        sharedContentState = rememberSharedContentState(coverKey),
+                                                        animatedVisibilityScope = animatedVisibilityScope,
+                                                        boundsTransform = { _, _ ->
+                                                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                                                        },
+                                                    )
+                                                },
+                                            ),
+                                        placeHolderSize = 96.dp,
+                                        cornerRadius = 12.dp,
+                                    )
 
                                     // ===== 曲名 / 艺术家 / 专辑（跟随页面曲目） =====
                                     Column(
@@ -2650,7 +2691,7 @@ private fun TrackRow(
                 modifier = Modifier
                     .size(40.dp)
                     .then(coverModifier(track.id)),
-                cornerRadius = 8.dp,
+                cornerRadius = 12.dp,
             )
             if (isCurrent) {
                 // 当前曲角标：primary 色小圆底 + 音符图标，压在封面右下角

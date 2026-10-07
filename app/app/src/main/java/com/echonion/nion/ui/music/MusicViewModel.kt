@@ -197,6 +197,21 @@ class MusicViewModel(
     /** 完整播放页是否展开（跨组件共享：MusicScreen 读写，NionApp 据此隐藏底部导航） */
     var isFullPlayerOpen by mutableStateOf(false)
 
+    /** 歌单封面选择：playlistId → 候选下标。Navidrome 无封面写入 API，仅客户端记忆（进程内） */
+    private val playlistCoverChoices = mutableStateOf(mapOf<String, Int>())
+
+    /** 当前歌单选中的候选封面下标（越界回 0） */
+    fun playlistCoverIndex(playlistId: String, candidateCount: Int): Int =
+        (playlistCoverChoices.value[playlistId] ?: 0).coerceIn(0, (candidateCount - 1).coerceAtLeast(0))
+
+    /** 循环切换到下一个候选 */
+    fun cyclePlaylistCover(playlistId: String, candidateCount: Int) {
+        if (candidateCount <= 1) return
+        val cur = playlistCoverIndex(playlistId, candidateCount)
+        playlistCoverChoices.value = playlistCoverChoices.value +
+            (playlistId to (cur + 1) % candidateCount)
+    }
+
     /** 播放页当前沉浸背景色（封面取色结果）；NionApp 据此给底部导航栏染色。播放页关闭时置 null */
     var playerBackdrop by mutableStateOf<PlayerBackdropColors?>(null)
 
