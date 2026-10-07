@@ -2,7 +2,6 @@ package com.echonion.nion.ui.components
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
@@ -11,7 +10,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.SideEffect
@@ -180,7 +178,6 @@ fun DualPanelLayout(
     val coroutineScope = rememberCoroutineScope()
     val leftPx = with(LocalDensity.current) { leftPanelWidth.toPx() }
     val rightPx = with(LocalDensity.current) { rightPanelWidth.toPx() }
-    val cachedShadowElevation = with(LocalDensity.current) { 16.dp.toPx() }
     val cachedShape = remember { RoundedCornerShape(24.dp) }
     val noShape = remember { RoundedCornerShape(0.dp) }
 
@@ -225,11 +222,10 @@ fun DualPanelLayout(
                     translationX = currentOffset
                     scaleX = 1f - fraction * 0.05f
                     scaleY = 1f - fraction * 0.05f
-                    shadowElevation = fraction * cachedShadowElevation
+                    // 主内容卡不做投影：深色沉浸底下阴影突兀（用户要求删除）
                     shape = if (fraction > 0.01f) cachedShape else noShape
                     clip = true
                 }
-                .background(MaterialTheme.colorScheme.background)
                 .draggable(
                     orientation = Orientation.Horizontal,
                     state = rememberDraggableState { delta ->
