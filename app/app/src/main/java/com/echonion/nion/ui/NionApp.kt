@@ -2,6 +2,8 @@ package com.echonion.nion.ui
 
 import android.app.Application
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
@@ -217,6 +219,12 @@ fun NionApp() {
 
             Scaffold(
                 containerColor = MaterialTheme.colorScheme.background,
+                // 不吃状态栏 top inset：内容区上延至屏幕顶（含状态栏区域），让音乐播放页的
+                // morph 矩形能一次 bounds 动画连续扫过状态栏（真 morph，取代旧的二值状态栏条）。
+                // 各页/面板各自处理状态栏：页面 Scaffold 用 contentWindowInsets=statusBars 把
+                // 列表推到状态栏下（净效果与改前一致），面板在 DualPanelLayout 统一补状态栏 padding。
+                // 底部仍由 bottomBar 承担，底部米色缝修法不受影响
+                contentWindowInsets = WindowInsets(0, 0, 0, 0),
                 bottomBar = {
                     // 退出 250ms 淡回；选中图标取 accent，未选中取深色主题中性灰
                     val navContainer = com.echonion.nion.ui.music.immersiveUnitColor(
@@ -257,6 +265,19 @@ fun NionApp() {
                     }
                 },
             ) { innerPadding ->
+                // 内容区沉浸渐变的两端色：上端接状态栏条(backdrop.top 浅)、下端接导航栏
+                // (backdrop.bottom 深)，各走 immersiveUnitColor 250ms 淡入淡出；非沉浸两端
+                // 均回落米色 background（= 原来的纯米色底）。用于下方 DualPanelLayout 背景。
+                val immersiveTop = com.echonion.nion.ui.music.immersiveUnitColor(
+                    active = musicImmersive,
+                    song = musicVm.playerBackdrop?.top ?: Color.Transparent,
+                    fallback = appScheme.background,
+                )
+                val immersiveBottom = com.echonion.nion.ui.music.immersiveUnitColor(
+                    active = musicImmersive,
+                    song = musicVm.playerBackdrop?.bottom ?: Color.Transparent,
+                    fallback = appScheme.background,
+                )
                 DualPanelLayout(
                     leftPanelWidth = if (currentRoute == "pomodoro") 300.dp else 260.dp,
                     rightPanelWidth = 320.dp,
@@ -264,7 +285,13 @@ fun NionApp() {
                     // music 路由左滑呼出音源选择面板（与 tasks 清单/pomodoro 统计同一手势）
                     enableLeftSwipe = currentRoute == "tasks" || currentRoute == "pomodoro" ||
                         currentRoute == "music",
-                    modifier = Modifier.padding(innerPadding),
+                    // 内容区背景：沉浸态用「上浅→下深」的歌曲渐变（与状态栏条 top、导航栏 bottom
+                    // 两端同色）——补上"呼出侧边栏时主内容卡缩放 (0.95) 四周露出的窗口底"，
+                    // 且顶端接住状态栏条不再出现"状态栏浅绿 vs 内容区深绿"的台阶。加在
+                    // padding(innerPadding) 之后 ⇒ 只覆盖状态栏与底部导航栏之间的内容区。
+                    modifier = Modifier
+                        .padding(innerPadding)
+                        .background(Brush.verticalGradient(listOf(immersiveTop, immersiveBottom))),
                     leftPanel = { onDrag, onDragStopped, modifier ->
                         // 播放页沉浸时音源面板随取色染色（与导航栏同一套配色）
                         PlayerImmersiveWrap(backdrop = if (musicImmersive) musicVm.playerBackdrop else null) {
@@ -353,26 +380,11 @@ fun NionApp() {
                 }
             }
 
-            // 音乐播放页的状态栏条：各页 Scaffold 用 contentWindowInsets = statusBars
-            // 把内容推到状态栏下方，状态栏区域露出的是窗口米色底 —— 播放页铺满后
-            // 顶部会留一条米色带（与底部导航栏的同类问题对称）。播放页铺满期间在状态栏
-            // 高度盖一条歌曲渐变顶端色（与渐变首像素同色，交界无缝）；展开/收回途中状态栏
-            // 正下方是米色列表，状态栏保持米色才与之连续。
-            // 可见性在绘制阶段读 morph 进度 State 本体（vm.playerMorphProgress），与容器
-            // 矩形同一帧判定"是否铺到顶" —— 走重组链路会晚 2~3 帧，收起起步时状态栏下
-            // 露出几像素米色缝。仅音乐路由组合，其他页面完全不受影响
-            if (currentRoute == "music") {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .windowInsetsTopHeight(WindowInsets.statusBars)
-                        .drawBehind {
-                            val color = musicVm.playerBackdrop?.top ?: return@drawBehind
-                            if ((musicVm.playerMorphProgress?.value ?: 0f) >= 1f) drawRect(color)
-                        },
-                )
-            }
-            // 系统栏图标深浅：状态栏图标随状态栏条（铺满时为深色歌曲色 → 白图标）；
+            // 状态栏不再有独立二值色条：NionApp 内容区已上延至屏幕顶，音乐播放页的
+            // morph 矩形（底锚定整屏渐变）会连续扫过状态栏区域 —— 展开时渐变从屏顶
+            // 一路铺下、收起时反向，状态栏与屏身始终同一支渐变、无"浅绿状态栏 vs 深绿
+            // 屏身"的台阶、也无旧实现 p>=1 的硬跳闪烁。
+            // 系统栏图标深浅：状态栏图标随播放页铺满翻深浅（铺满=深色歌曲色 → 白图标）；
             // 导航栏手势条随底部导航栏（沉浸全程为歌曲色 → 白手势条）。退出后恢复
             // NionTheme 的深色图标。SideEffect 在 NionTheme 之后执行，覆盖其设置
             val playerSettled = currentRoute == "music" && musicVm.isFullPlayerSettled

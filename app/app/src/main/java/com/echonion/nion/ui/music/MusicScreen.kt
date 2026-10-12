@@ -84,6 +84,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -418,8 +419,20 @@ fun MusicScreen(
                 var actionRowId by remember(vm.source) { mutableStateOf<String?>(null) }
                 // 多选批量删除确认框开关（由选择栏右上角垃圾桶触发）
                 var pendingPlaylistBatchDelete by remember { mutableStateOf(false) }
-                // 操作模式下的系统返回：清空选中退出操作态（而非退出页面）
-                BackHandler(enabled = selectedPlaylistIds.isNotEmpty()) {
+                // 离开歌单列表视图（切到专辑视图 / 打开某歌单详情）时清空操作态选中：
+                // 选中态只在歌单列表有意义；hoist 到页面级后若不清，会把顶部选择栏/批量删除/
+                // 返回拦截泄漏到专辑视图或播放页（本次实测：残留选中致播放页第一次返回被
+                // "清选中"吃掉、看起来没反应）。showPlaylists=false 或打开了某歌单详情即清
+                LaunchedEffect(showPlaylists, vm.currentPlaylist) {
+                    if (!showPlaylists || vm.currentPlaylist != null) {
+                        selectedPlaylistIds = emptySet()
+                        actionRowId = null
+                    }
+                }
+                // 操作模式下的系统返回：清空选中退出操作态（而非退出页面）。
+                // && !showFullPlayer：播放页盖在上面时返回优先收播放页 —— 本 handler 组合更晚、
+                // 优先级高于播放页 handler，不门控会先悄悄清选中、看起来"第一次返回失效"
+                BackHandler(enabled = selectedPlaylistIds.isNotEmpty() && !showFullPlayer) {
                     selectedPlaylistIds = emptySet()
                     actionRowId = null
                 }
@@ -3162,9 +3175,10 @@ private fun FullPlayerOverlay(
                     }
                     // 控件入场不再整列统一淡入：顶部按钮行/曲目信息/进度与按钮三组各自
                     // 经 controlsEnter 错落浮现（见上方 topRow/info/transportProgress）。
-                    // 不再叠加 statusBars/navigationBars 内边距：本页根（NionApp
-                    // Scaffold 的内容区）已经把系统栏排除在外 —— 此前两处 padding
-                    // 是双重计入，控件被整体压离上下边缘（米色线排查时的疑点之一）
+                    // 状态栏 padding：真 morph 后本页根（NionApp 内容区）已上延至屏幕顶、含
+                    // 状态栏区域 —— 渐变背景要铺满状态栏，但控件（收起钮等）必须避让状态栏，
+                    // 故在此补状态栏内边距。底部无需补：根底边 = 底部导航栏顶边，本就在导航栏之上
+                    .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(horizontal = 24.dp),
             ) {
                     // ===== 顶部收起按钮 =====

@@ -487,6 +487,10 @@ class SubsonicException(message: String) : Exception(message)
  */
 internal object SubsonicJsonCache {
     private const val DIR_NAME = "subsonic-json"
+    // 容量上限：8MB。JSON 响应单条很小（KB 级），8MB 足够放下数百个专辑/歌单/列表；
+    // 超限按 lastModified 从旧到新淘汰（与封面磁盘缓存同款 LRU 近似）。
+    // 不设上限的话每开一个专辑/歌单就留一个文件、只增不删，长期慢性膨胀
+    private const val MAX_BYTES = 8L * 1024 * 1024
     private var dir: File? = null
 
     private fun dirOf(context: Context): File =
@@ -499,19 +503,36 @@ internal object SubsonicJsonCache {
         return digest.joinToString("") { "%02x".format(it) } + ".json"
     }
 
-    /** 读缓存；无缓存返回 null */
+    /** 读缓存；无缓存返回 null。命中即更新 lastModified，让 LRU 淘汰保活热点 */
     fun read(context: Context, key: String): String? {
         val file = File(dirOf(context), fileName(key))
-        return runCatching { file.readText() }.getOrNull()
+        return runCatching {
+            file.readText().also { file.setLastModified(System.currentTimeMillis()) }
+        }.getOrNull()
     }
 
-    /** 写缓存（整文件覆盖） */
+    /** 写缓存（整文件覆盖）+ 超限淘汰 */
     fun write(context: Context, key: String, json: String) {
-        runCatching { File(dirOf(context), fileName(key)).writeText(json) }
+        runCatching {
+            File(dirOf(context), fileName(key)).writeText(json)
+            trim(context)
+        }
     }
 
     /** 精确失效：数据变更时删除对应缓存 */
     fun remove(context: Context, key: String) {
         runCatching { File(dirOf(context), fileName(key)).delete() }
+    }
+
+    /** 总量超限时按 lastModified 从旧到新删除，直到回到上限内（与封面磁盘缓存同款） */
+    private fun trim(context: Context) {
+        val files = dirOf(context).listFiles()?.filter { it.isFile } ?: return
+        var total = files.sumOf { it.length() }
+        if (total <= MAX_BYTES) return
+        files.sortedBy { it.lastModified() }.forEach { f ->
+            if (total <= MAX_BYTES) return
+            total -= f.length()
+            f.delete()
+        }
     }
 }

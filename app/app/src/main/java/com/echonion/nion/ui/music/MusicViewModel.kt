@@ -556,9 +556,9 @@ class MusicViewModel(
         isLoadingServer = true
         serverError = null
         viewModelScope.launch {
-            // ① 磁盘缓存先显（跨启动冷启动不再空屏转圈）；缓存键含音源参数，
-            //    专辑库是全服务器共享的，不按用户区分
-            val cacheKey = "albums:newest:30"
+            // ① 磁盘缓存先显（跨启动冷启动不再空屏转圈）；键带 cacheNs() 前缀
+            //    （host+用户名）隔离不同服务器——否则切音源会闪出另一台的专辑
+            val cacheKey = "${cacheNs()}albums:newest:30"
             runCatching {
                 val raw = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
                 raw?.let { client.parseAlbumListResponse(JSONObject(it)) }
@@ -607,7 +607,7 @@ class MusicViewModel(
         serverError = null
         viewModelScope.launch {
             // ① 磁盘缓存先显（打开过一次的专辑秒开）；命中即上屏，加载态随之结束
-            val cacheKey = "album:${album.id}"
+            val cacheKey = "${cacheNs()}album:${album.id}"
             runCatching {
                 val raw = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
                 raw?.let { client.parseAlbumResponse(JSONObject(it)) }
@@ -708,6 +708,26 @@ class MusicViewModel(
     }
 
     /**
+     * 磁盘缓存命名空间前缀 —— 把「服务器 host + 登录用户名」拼进所有 JSON 缓存键，
+     * 隔离不同服务器/账号的缓存。否则两台服务器共用 "albums:newest:30" 这类固定键
+     * 会串台：切音源时先闪出另一台服务器的专辑（SWR 命中旧缓存），实体 id 若撞串
+     * 还可能取到另一台的专辑/歌单详情。本地音源不走服务器缓存路径。
+     *
+     * 注：音频缓存键沿用 "song:<id>"（不加此前缀）—— id 为 "subsonic:<songId>"、
+     * songId 服务器内唯一、跨服务器撞串概率≈0，且播放侧键在独立的
+     * MediaControllerFacade 构建、无音源上下文，强行命名空间会导致两处键不一致反而丢缓存。
+     */
+    private fun cacheNs(): String {
+        val base = when (source) {
+            MusicSource.BRAINGIRL -> BRAINGIRL_SERVER_URL
+            MusicSource.CUSTOM -> customServerUrl
+            MusicSource.LOCAL -> ""
+        }
+        val host = runCatching { java.net.URI(base).host }.getOrNull() ?: base
+        return "$host|${currentServerUsername()}|"
+    }
+
+    /**
      * 歌单可见性策略的唯一权威点 —— 当前策略：每人只看自己的歌单。
      *
      * 规则：`owner == null`（部分 Subsonic 兼容服务端不回该字段，宁可多显示
@@ -746,7 +766,7 @@ class MusicViewModel(
         viewModelScope.launch {
             runCatching {
                 val client = buildClient() ?: return@launch
-                val cacheKey = "playlist:$id"
+                val cacheKey = "${cacheNs()}playlist:$id"
                 val raw: String = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
                     // 已有缓存（早前打开过）不重复拉 JSON，只补封面
                     ?: playlistPrefetchSemaphore.withPermit {
@@ -793,7 +813,7 @@ class MusicViewModel(
         viewModelScope.launch {
             runCatching {
                 val client = buildClient() ?: return@launch
-                val cacheKey = "album:$id"
+                val cacheKey = "${cacheNs()}album:$id"
                 val raw: String = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
                     ?: playlistPrefetchSemaphore.withPermit {
                         client.getAlbumRaw(id).toString().also {
@@ -850,8 +870,8 @@ class MusicViewModel(
         playlistError = null
         viewModelScope.launch {
             // ① 磁盘缓存先显（跨启动冷启动秒出列表，不用转圈等网络）；
-            //    键含用户名 —— 不同账号各见各的，缓存互不串台
-            val cacheKey = "playlists:${currentServerUsername()}"
+            //    键带 cacheNs() 前缀（host+用户名）—— 不同服务器/账号各见各的，互不串台
+            val cacheKey = "${cacheNs()}playlists"
             runCatching {
                 val raw = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
                 raw?.let { client.parsePlaylistsResponse(JSONObject(it)) }
@@ -1046,7 +1066,7 @@ class MusicViewModel(
                 if (localPlaylistDbId(id) == null) {
                 // 云端变更：精确失效该歌单的详情缓存（下次打开走网络取新数据，
                 // 避免 stale-while-revalidate 先闪一帧旧曲目列表）
-                SubsonicJsonCache.remove(app, "playlist:$id")
+                SubsonicJsonCache.remove(app, "${cacheNs()}playlist:$id")
                 }
                 if (currentPlaylist?.id == id) closePlaylist()
                 loadPlaylists(force = true)
@@ -1083,7 +1103,7 @@ class MusicViewModel(
                 if (localPlaylistDbId(id) == null) {
                 // 云端变更：精确失效该歌单的详情缓存（下次打开走网络取新数据，
                 // 避免 stale-while-revalidate 先闪一帧旧曲目列表）
-                SubsonicJsonCache.remove(app, "playlist:$id")
+                SubsonicJsonCache.remove(app, "${cacheNs()}playlist:$id")
                 }
                 loadPlaylists(force = true)
                 // 立即同步当前打开歌单的头部元信息（loadPlaylists 异步完成，避免头部滞后）
@@ -1132,7 +1152,7 @@ class MusicViewModel(
                 if (localPlaylistDbId(id) == null) {
                 // 云端变更：精确失效该歌单的详情缓存（下次打开走网络取新数据，
                 // 避免 stale-while-revalidate 先闪一帧旧曲目列表）
-                SubsonicJsonCache.remove(app, "playlist:$id")
+                SubsonicJsonCache.remove(app, "${cacheNs()}playlist:$id")
                 }
                 loadPlaylists(force = true)
                 if (currentPlaylist?.id == id) openPlaylist(id)
@@ -1162,7 +1182,7 @@ class MusicViewModel(
                 if (localPlaylistDbId(id) == null) {
                 // 云端变更：精确失效该歌单的详情缓存（下次打开走网络取新数据，
                 // 避免 stale-while-revalidate 先闪一帧旧曲目列表）
-                SubsonicJsonCache.remove(app, "playlist:$id")
+                SubsonicJsonCache.remove(app, "${cacheNs()}playlist:$id")
                 }
                 loadPlaylists(force = true)
                 if (currentPlaylist?.id == id) openPlaylist(id)
@@ -1263,6 +1283,16 @@ class MusicViewModel(
     private var prefetchJob: Job? = null
 
     /**
+     * 当前活跃网络是否"非计费"（Wi-Fi/以太网等）。无活跃网络或拿不到能力时
+     * 保守返回 false（当作计费，不预取），避免误判在移动数据上狂下整首。
+     */
+    private fun isUnmeteredNetwork(): Boolean {
+        val cm = app.getSystemService(android.net.ConnectivityManager::class.java) ?: return false
+        val caps = cm.getNetworkCapabilities(cm.activeNetwork) ?: return false
+        return caps.hasCapability(android.net.NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
+
+    /**
      * 预取下一首到音频磁盘缓存（仅云端曲目）。触发点：起播（playQueue）与
      * 播放器切歌（onMediaItemTransition）—— 任何时候当前曲变更后，后台
      * 静默拉取队列中的下一首；已完整缓存或本地曲目直接跳过
@@ -1271,6 +1301,9 @@ class MusicViewModel(
         val next = queue.getOrNull(currentIndex + 1) ?: return
         val uri = next.playbackUri ?: return
         if (!uri.startsWith("http")) return
+        // 计费网络（移动数据等）不预取整首：整首落盘会在后台悄悄吃流量，无损专辑尤甚。
+        // 仅非计费网络（Wi-Fi 等）才预取；计费网络下照常按需边播边缓存，不额外下载
+        if (!isUnmeteredNetwork()) return
         val cacheKey = "song:${next.id}"
         prefetchJob?.cancel()
         prefetchJob = viewModelScope.launch(Dispatchers.IO) {

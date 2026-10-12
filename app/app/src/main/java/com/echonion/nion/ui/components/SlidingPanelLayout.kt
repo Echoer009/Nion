@@ -6,6 +6,9 @@ import androidx.compose.foundation.gestures.Orientation
 import androidx.compose.foundation.gestures.draggable
 import androidx.compose.foundation.gestures.rememberDraggableState
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -198,6 +201,9 @@ fun DualPanelLayout(
                 { coroutineScope.launch { state.settle() } },
                 Modifier
                     .width(leftPanelWidth)
+                    // 状态栏 padding：NionApp 内容区已上延至屏顶（为音乐 morph 让路），
+                    // 面板不自带状态栏避让，这里统一补上，避免面板顶内容钻到状态栏下
+                    .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(start = panelPadding, top = 16.dp, bottom = 16.dp),
             )
         }
@@ -209,6 +215,8 @@ fun DualPanelLayout(
                 Modifier
                     .align(Alignment.CenterEnd)
                     .width(rightPanelWidth)
+                    // 状态栏 padding：同左面板，补上状态栏避让
+                    .windowInsetsPadding(WindowInsets.statusBars)
                     .padding(top = 16.dp, bottom = 16.dp, end = panelPadding),
             )
         }
