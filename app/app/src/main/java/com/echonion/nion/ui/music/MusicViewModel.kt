@@ -279,6 +279,8 @@ class MusicViewModel(
             positionMs = 0L
             // 切歌后预取新的下一首到音频缓存（后台静默，见 prefetchNextTrack）
             prefetchNextTrack()
+            // 新当前曲的大封面也预热（用户随时可能展开播放页）
+            warmPlayerCover(queue.getOrNull(currentIndex))
             durationMs = 0L
         }
 
@@ -748,16 +750,57 @@ class MusicViewModel(
                 // 封面预热：详情页首屏前几首的 web 封面逐个写入三级缓存
                 //（与 CoverArt 展示用同一个稳定 key，打开时直接命中）
                 val (_, songs) = client.parsePlaylistResponse(JSONObject(raw))
+                // 预热的必须是详情页行实际请求的 150px 变体（缓存 key 含 size，
+                // 预热 300 会 miss）——打开时行封面直接命中磁盘/内存
                 songs.take(PREFETCH_COVER_COUNT)
-                    .filter { it.coverArtUrl?.startsWith("http") == true }
-                    .forEach { track ->
-                        withContext(Dispatchers.IO) {
-                            loadCoverBitmapCached(app, track.coverArtUrl, null)
-                        }
+                    .map { coverUrlAtSize(it.coverArtUrl, 150) }
+                    .filter { it?.startsWith("http") == true }
+                    .forEach { url ->
+                        withContext(Dispatchers.IO) { loadCoverBitmapCached(app, url, null) }
                     }
             }.onFailure {
                 // 失败移出去重集合：该行下次进视口可重试（网络波动不该毁掉整个会话的预取）
                 synchronized(prefetchedPlaylists) { prefetchedPlaylists -= id }
+            }
+        }
+    }
+
+    // ── 视口内专辑预取（与歌单预取同款策略）──
+    private val prefetchedAlbums = mutableSetOf<String>()
+
+    /**
+     * 预取专辑详情到磁盘缓存 —— 专辑行进入视口时由 UI 调用：getAlbum 原始
+     * JSON 写 [SubsonicJsonCache]（openAlbum 命中即秒开），并预热前
+     * [PREFETCH_COVER_COUNT] 首曲目的 150px 行封面。本地专辑打开零耗时跳过；
+     * 会话去重、失败可重试，与歌单预取共用并发闸门。
+     *
+     * @param id 统一专辑 id
+     */
+    fun prefetchAlbum(id: String) {
+        if (id.startsWith(LOCAL_ALBUM_ID_PREFIX)) return
+        synchronized(prefetchedAlbums) {
+            if (id in prefetchedAlbums) return
+            prefetchedAlbums += id
+        }
+        viewModelScope.launch {
+            runCatching {
+                val client = buildClient() ?: return@launch
+                val cacheKey = "album:$id"
+                val raw: String = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
+                    ?: playlistPrefetchSemaphore.withPermit {
+                        client.getAlbumRaw(id).toString().also {
+                            withContext(Dispatchers.IO) { SubsonicJsonCache.write(app, cacheKey, it) }
+                        }
+                    }
+                val songs = client.parseAlbumResponse(JSONObject(raw)).songs
+                songs.take(PREFETCH_COVER_COUNT)
+                    .map { coverUrlAtSize(it.coverArtUrl, 150) }
+                    .filter { it?.startsWith("http") == true }
+                    .forEach { url ->
+                        withContext(Dispatchers.IO) { loadCoverBitmapCached(app, url, null) }
+                    }
+            }.onFailure {
+                synchronized(prefetchedAlbums) { prefetchedAlbums -= id }
             }
         }
     }
@@ -1160,6 +1203,8 @@ class MusicViewModel(
         c.play()
         // 起播即预取下一首：当前曲还在缓冲时，下一首已在后台写入缓存
         prefetchNextTrack()
+        // 当前曲的 600px 大封面同步预热（展开播放页 morph 不闪占位）
+        warmPlayerCover(tracks.getOrNull(startIndex))
     }
 
     /** 播放/暂停切换；队列未加载时静默忽略 */
@@ -1237,6 +1282,19 @@ class MusicViewModel(
                     source.close()
                 }
             }
+        }
+    }
+
+    /**
+     * 预热播放页 600px 大封面变体 —— 迷你条/列表只有 150px，展开播放页的
+     * morph 需要高清水位；不预热的话大封面会先闪占位图再弹出。
+     * 本地封面走 loadThumbnail（512px 上限）天然就位，仅云端需要预热
+     */
+    private fun warmPlayerCover(track: PlayableTrack?) {
+        val url = track?.coverArtUrl ?: return
+        if (!url.startsWith("http")) return
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { loadCoverBitmapCached(app, coverUrlAtSize(url, 600), null) }
         }
     }
 

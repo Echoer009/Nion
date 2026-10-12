@@ -408,9 +408,48 @@ fun MusicScreen(
                 // 选择器展开态：TopAppBar 下方揭示行（专辑|歌单 两格 + 飞行图标）
                 var viewExpanded by remember { mutableStateOf(false) }
 
+                // ── 歌单列表操作态（长按行进入）——状态提升到此处 ──
+                // 既供下方歌单行渲染（高亮/行内按钮/多选判定），也供 TopAppBar 在
+                // 多选(>1)时就地换成选择栏（✕ 已选 N 项 🗑）。切换音源时自动重置，
+                // 避免跨音源残留选中。selectedPlaylistIds：选中歌单 id 集合（空=普通模式，
+                // 点行开详情；非空=操作模式，点行切换选中）；actionRowId：单选时挂行内
+                // 「编辑/删除」ghost 钮的行 id（多选后置 null、按钮整体收回）
+                var selectedPlaylistIds by remember(vm.source) { mutableStateOf(setOf<String>()) }
+                var actionRowId by remember(vm.source) { mutableStateOf<String?>(null) }
+                // 多选批量删除确认框开关（由选择栏右上角垃圾桶触发）
+                var pendingPlaylistBatchDelete by remember { mutableStateOf(false) }
+                // 操作模式下的系统返回：清空选中退出操作态（而非退出页面）
+                BackHandler(enabled = selectedPlaylistIds.isNotEmpty()) {
+                    selectedPlaylistIds = emptySet()
+                    actionRowId = null
+                }
+
                 Scaffold(
                     contentWindowInsets = WindowInsets.statusBars,
                     topBar = {
+                        // 歌单多选(>1)时：音源标题行就地换成选择栏（✕ 已选 N 项 🗑），
+                        // 与任务页 SelectionTopBar 同一语言；单选/常态显示普通音源标题行。
+                        // AnimatedContent 做淡入淡出，避免硬切。
+                        AnimatedContent(
+                            targetState = selectedPlaylistIds.size > 1,
+                            transitionSpec = {
+                                fadeIn(tween(160, easing = FastOutSlowInEasing)) togetherWith
+                                    fadeOut(tween(140, easing = FastOutSlowInEasing))
+                            },
+                            label = "musicTopBar",
+                        ) { selecting ->
+                        if (selecting) {
+                            MusicSelectionTopBar(
+                                selectedCount = selectedPlaylistIds.size,
+                                // ✕：清空选中退出操作态
+                                onClear = {
+                                    selectedPlaylistIds = emptySet()
+                                    actionRowId = null
+                                },
+                                // 垃圾桶：弹批量删除确认框
+                                onDelete = { pendingPlaylistBatchDelete = true },
+                            )
+                        } else {
                         TopAppBar(
                             title = {
                                 // 标题行：音源名 + 视图切换单入口图标（搜索态自动隐藏）
@@ -466,6 +505,8 @@ fun MusicScreen(
                                 containerColor = Color.Transparent,
                             ),
                         )
+                        } // else（普通音源标题行）
+                        } // AnimatedContent(musicTopBar)
                     },
                 ) { innerPadding ->
                     Column(
@@ -877,6 +918,7 @@ private fun LocalLibraryContent(
                             isLoading = vm.isLoadingLocal,
                             emptyText = "本机没有专辑",
                             onOpenAlbum = { vm.openAlbum(it) },
+                            onPrefetch = { vm.prefetchAlbum(it) },
                             sharedTransitionScope = this@SharedTransitionLayout,
                             animatedVisibilityScope = this@AnimatedContent,
                         )
@@ -1034,6 +1076,7 @@ private fun ServerMusicContent(
                             isLoading = vm.isLoadingServer,
                             emptyText = "服务器上还没有专辑",
                             onOpenAlbum = { vm.openAlbum(it) },
+                            onPrefetch = { vm.prefetchAlbum(it) },
                             sharedTransitionScope = this@SharedTransitionLayout,
                             animatedVisibilityScope = this@AnimatedContent,
                         )
@@ -1513,6 +1556,8 @@ private fun AlbumListContent(
     isLoading: Boolean,
     emptyText: String,
     onOpenAlbum: (LibraryAlbum) -> Unit,
+    // 行进入视口时触发，传入专辑 id —— 由调用方接 VM 的视口预取
+    onPrefetch: (String) -> Unit,
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
 ) {
@@ -1537,6 +1582,9 @@ private fun AlbumListContent(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(albums, key = { "album-${it.id}" }) { album ->
+            // 视口预取：行进入组合即后台拉详情 JSON 与首批封面，点开秒显
+            //（与歌单列表同款策略；本地专辑在 VM 内跳过）
+            LaunchedEffect(album.id) { onPrefetch(album.id) }
             AlbumRow(
                 album = album,
                 onClick = { onOpenAlbum(album) },
@@ -2148,7 +2196,8 @@ private fun PlaylistRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         CoverArt(
-            coverUrl = playlist.coverArtUrl,
+            // 52dp 小图：请求 150px 变体（字节约 300px 一半以下），缓存 key 自动区分
+            coverUrl = coverUrlAtSize(playlist.coverArtUrl, 150),
             modifier = Modifier.size(52.dp),
             cornerRadius = 10.dp,
         )
@@ -2797,7 +2846,8 @@ private fun MiniPlayerBar(
                 // 入场按来源选择是否参与配对；收起统一接住当前大封面，
                 // key 由上层传入，避免把“从哪打开”误当成“收回哪里”。
                 CoverArt(
-                    coverUrl = track.coverArtUrl,
+                    // 44dp 迷你条小图：150px 变体
+                    coverUrl = coverUrlAtSize(track.coverArtUrl, 150),
                     albumArtUri = track.albumArtUri,
                     modifier = Modifier
                         .size(44.dp)
@@ -3148,7 +3198,9 @@ private fun FullPlayerOverlay(
                                     // 大封面即 morph 目标本身：不再包外层底座，
                                     // 圆角由 CoverArt 的 cornerRadius 统一裁剪
                                     CoverArt(
-                                        coverUrl = pageTrack.coverArtUrl,
+                                        // 280dp 大封面：600px 变体（300px 拉伸发软）；
+                                        // 当前/下一首的 600 变体随播放预热，展开即命中
+                                        coverUrl = coverUrlAtSize(pageTrack.coverArtUrl, 600),
                                         albumArtUri = pageTrack.albumArtUri,
                                         modifier = Modifier
                                             .size(280.dp)
@@ -3468,7 +3520,8 @@ private fun TrackRow(
         // 经 coverSlot 包裹：槽位固定 40dp，morph 时封面“被借走”飞行、行不回流
         coverSlot(track.id) {
             CoverArt(
-                coverUrl = track.coverArtUrl,
+                // 40dp 行小图：150px 变体
+                coverUrl = coverUrlAtSize(track.coverArtUrl, 150),
                 albumArtUri = track.albumArtUri,
                 modifier = Modifier.size(40.dp),
                 cornerRadius = 12.dp,
@@ -3621,7 +3674,8 @@ private fun AlbumRow(
         // 均无时显示专辑图标占位。
         // 与详情页大封面同 key 配对，打开详情时小封面放大飞行
         CoverArt(
-            coverUrl = album.coverArtUrl,
+            // 52dp 专辑行小图：150px 变体
+            coverUrl = coverUrlAtSize(album.coverArtUrl, 150),
             albumArtUri = album.albumArtUri,
             modifier = Modifier
                 .size(52.dp)
@@ -3757,6 +3811,37 @@ internal fun stableCoverKey(coverUrl: String?, albumArtUri: String?): String? {
 }
 
 /**
+ * 把服务器封面 URL 的 `size` 查询参数改写成指定值 —— 按显示位要尺寸：
+ * 列表小行 150px（字节约 300px 的 1/2 以下）、播放页大封面 600px（更清晰）。
+ * 服务器按 size 现缩再传输，等效"传输即压缩"（JPEG 本身已压缩，gzip 无益）。
+ * 仅改写 http(s) URL；其余（null / 本地 URI）原样返回。
+ * 缓存 key 天然含 size（见 [stableCoverKey]），各尺寸变体在三级缓存互不串扰。
+ */
+internal fun coverUrlAtSize(coverUrl: String?, size: Int): String? {
+    if (coverUrl == null || !coverUrl.startsWith("http")) return coverUrl
+    return runCatching {
+        val uri = Uri.parse(coverUrl)
+        val builder = uri.buildUpon().clearQuery()
+        // 保存认证（u/t/s）等全部查询参数，仅把 size 换成目标值；无 size 则补上
+        var hasSize = false
+        uri.queryParameterNames.forEach { name ->
+            uri.getQueryParameters(name).forEach { value ->
+                if (name == "size") {
+                    if (!hasSize) { // size 可能重复出现，只保留一个目标值
+                        builder.appendQueryParameter(name, size.toString())
+                        hasSize = true
+                    }
+                } else {
+                    builder.appendQueryParameter(name, value)
+                }
+            }
+        }
+        if (!hasSize) builder.appendQueryParameter("size", size.toString())
+        builder.build().toString()
+    }.getOrDefault(coverUrl)
+}
+
+/**
  * 进程内封面缓存 —— key → Bitmap 的 LruCache，按内存字节限容（maxMemory/8，
  * 典型设备 16~48MB）。旧实现按"张数"限 24 张：一屏专辑行 + 详情大封面就互相
  * 挤掉，滚动回看必然重新加载；按字节限容后常用列表可整体驻留内存。
@@ -3781,11 +3866,12 @@ internal object CoverArtCache {
  * （cacheDir/covers/），跨启动有效，二次进入列表零网络请求。本地封面不走
  * 磁盘（本身就是本地数据，再存一份只浪费空间，靠扩容后的内存缓存即可）。
  *
- * 总量上限 64MB，写入后超限按 lastModified 从旧到新淘汰；目录用 cacheDir
+ * 总量上限 256MB（约八千至一万余张 300px JPEG，重度曲库也够用），写入后超限按
+ * lastModified 从旧到新淘汰；目录用 cacheDir
  * （系统磁盘紧张时可整体回收，无需权限，也不进应用备份）。
  */
 private object CoverDiskCache {
-    private const val MAX_BYTES = 64L * 1024 * 1024
+    private const val MAX_BYTES = 256L * 1024 * 1024
     private const val DIR_NAME = "covers"
 
     /** 目录懒初始化（首次使用时创建），进程内复用 */
@@ -3919,10 +4005,17 @@ private fun CoverArt(
         // 委托属性无法智能转换非空，先落到局部 val 再判空使用
         val loaded = bitmap
         if (loaded != null) {
+            // 首次异步加载成功后 150ms 淡入：占位图 → 封面平滑过渡（丝滑感）。
+            // 内存缓存命中的场景 produceState 初值即非空，alpha 直接从 1 起，
+            // 不会有多余动画
+            val fadeIn = remember { androidx.compose.animation.core.Animatable(if (loaded != null) 1f else 0f) }
+            LaunchedEffect(Unit) { fadeIn.animateTo(1f, tween(150, easing = FastOutSlowInEasing)) }
             Image(
                 bitmap = loaded.asImageBitmap(),
                 contentDescription = "封面",
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer { alpha = fadeIn.value },
                 contentScale = ContentScale.Crop,
             )
         } else {
