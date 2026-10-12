@@ -30,6 +30,7 @@ import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.SizeTransform
 import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -53,6 +54,8 @@ import androidx.compose.ui.unit.Dp
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.Image
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.boundsInRoot
@@ -60,7 +63,6 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.requiredWidth
 import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.wrapContentSize
-import kotlinx.coroutines.flow.distinctUntilChanged
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Brush
@@ -76,10 +78,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
-import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -104,6 +104,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.key
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.foundation.pager.VerticalPager
@@ -117,6 +119,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
@@ -136,6 +143,51 @@ import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import com.echonion.nion.ui.icons.LucideIcons
+
+// ── 播放条 ↔ 播放页 morph 的统一时钟（毫秒）──
+// 容器/封面 bounds 动画、播放页退场组合保持、控件淡入延迟全部以它为基准，
+// 保证"矩形铺满 ⇔ 沉浸窗口结束 ⇔ 控件完全浮现"三件事严格同时收口
+private const val MorphDurationMillis = 400
+
+// 控件层入场：morph 起步 ~80ms 后开始，跨越整个 morph、铺满后再收尾 ~120ms。
+// 配合"自下而上"的分组错落 —— 矩形向上扫过哪一组控件，哪一组就开始浮现，
+// 封面落位与控件就位衔接成一个连续动作，而不是铺满后整页控件突然出现
+private const val ControlsEnterDelayMillis = 80
+private const val ControlsEnterDurationMillis = 440
+
+// 控件入场上浮距离：从下方 24dp 处浮到原位（配合透明度，给出"落座"的方向感）
+private val ControlsEnterOffset = 24.dp
+
+/**
+ * 把一条 0..1 的总进度切出 [start]..[end] 这一段并重新映射到 0..1（超出夹紧）。
+ * 用于让多组控件共用一个动画时钟、但依次错落浮现。
+ */
+private fun staggered(progress: Float, start: Float, end: Float): Float =
+    ((progress - start) / (end - start)).coerceIn(0f, 1f)
+
+/**
+ * 控件入场修饰：透明度 = 进度，同时从下方 [ControlsEnterOffset] 上浮到原位。
+ * 只改 graphicsLayer（不触发重新布局），动画期间每帧开销只有一次图层属性更新。
+ *
+ * @param progress 本组控件的入场进度（0=隐藏在下方，1=就位）
+ */
+private fun Modifier.controlsEnter(progress: () -> Float): Modifier = graphicsLayer {
+    val p = progress()
+    alpha = p
+    translationY = (1f - p) * ControlsEnterOffset.toPx()
+}
+
+/** 迷你播放条常态的顶部圆角（morph 中线性过渡到 0） */
+private val MiniBarTopCornerRadius = 16.dp
+
+/**
+ * morph 容器背景的底边外延量（米色线根因之一）：过渡中共享元素在 overlay 里以
+ * 浮点偏移绘制、尺寸按整数重测，矩形底边常落在亚像素位置 —— 最后一行像素只被
+ * 半覆盖，下方迷你条进度条（橙）与 Scaffold 米色底从中透出，形成一条逐帧闪烁的
+ * 亮线。两侧背景都向下多画 2dp 盖住这一行；超出内容区的部分被 DualPanelLayout
+ * 主内容层的 clip 裁掉，绝不会画到底部导航栏上
+ */
+private val MorphBottomOverhang = 2.dp
 
 /**
  * 获取 Activity 作用域的 MusicViewModel。
@@ -193,85 +245,154 @@ fun MusicScreen(
         mainActivity.clearPendingMusicAuth()
     }
 
-    // 完整播放页是否展开：挂在 VM 上，NionApp 据此在播放页展开时隐藏底部
-    // 导航栏（沉浸色铺满全屏）；跨路由记忆（回音乐页仍在播放页）
+    // 完整播放页是否展开：挂在 VM 上，NionApp 据此把底部导航栏染成沉浸色；
+    // 跨路由记忆（回音乐页仍在播放页）
     var showFullPlayer by vm::isFullPlayerOpen
 
-    // 记录"从列表点歌"打开播放页时的曲目 id：
-    // 非空时播放页大封面使用 "music_track_cover_<trackId>" 作为 sharedElement key，
-    // 与被点击的列表行小封面配对，实现"行内小封面飞成大封面"的 morph；
-    // 从迷你条展开时为 null，大封面改与迷你条封面配对（key "music_player_cover"）。
-    // 播放页关闭时清空，回到默认的迷你条配对
+    // 本次展开的来源曲目：只决定入场起点，不决定收起终点。
+    // 播放页在整次展开/收起期间保留同一个封面 key，收起时由播放栏接手配对；
+    // 不在收起首帧更换大封面 key，避免丢失共享元素已经记录的当前位置。
+    // 退场组合真正销毁后清空，使下一次点歌前各行封面已重新注册好入场 key。
     var openedFromTrackId by remember { mutableStateOf<String?>(null) }
+    // 本次飞行的身份与正在播放哪一首分离：切歌后仍由当前大封面飞回播放栏。
+    val playerCoverKey = remember(openedFromTrackId) {
+        openedFromTrackId?.let { "music_track_cover_$it" } ?: "music_player_cover"
+    }
 
     // 完整播放页打开时拦截系统返回：先收起播放页而不是退出音乐页
     BackHandler(enabled = showFullPlayer) { showFullPlayer = false }
-    // 诊断：目标切换
-    LaunchedEffect(showFullPlayer) { android.util.Log.d("MorphLog", "target=$showFullPlayer") }
 
+    // 本页常驻取色（prewarmBackdrop 已在开始播放时预热缓存，此处即时命中）：
+    // 一个色源三处消费 —— 迷你条常态一体色 / morph 两侧的底锚定整屏渐变 /
+    // NionApp 导航栏染色。展开瞬间即为歌曲色，不会先落米色兜底再慢半拍变色
+    val backdrop = rememberPlayerBackdrop(vm.currentTrack, animateChanges = vm.isFullPlayerOpen)
 
-    // SharedTransitionLayout：为两套 morph 提供共享容器（照 TaskScreen 任务卡↔详情浮层范式）
-    // 1. 迷你播放条 ↔ 完整播放页：容器 sharedBounds("music_player_bar") +
-    //    封面 sharedElement("music_player_cover")
-    // 2. 曲目行小封面 ↔ 播放页大封面：sharedElement("music_track_cover_<trackId>")
-    // AnimatedContent 的两个分支互斥组合，同一 sharedElement key 的源/目标
-    // 只会在过渡期间短暂共存，不存在稳态冲突
+    // 点击展开的两个同步入口：在点击回调里（重组之前）直接写 playerBackdrop，
+    // 保证 morph 首帧导航栏就已是歌曲色。点歌时 playQueue 已同步切好
+    // currentTrack，peekBackdrop 用被点行已解码的封面位图当场取色 —— 首帧即
+    // 本首歌的真实颜色，而不是上一首/米色兜底（旧实现首次点歌整块米色展开）
+    val openFromMini: () -> Unit = {
+        vm.playerBackdrop = peekBackdrop(vm.currentTrack) ?: backdrop
+        openedFromTrackId = null
+        showFullPlayer = true
+    }
+    val openFromTrack: (String) -> Unit = { trackId ->
+        vm.playerBackdrop = peekBackdrop(vm.currentTrack) ?: backdrop
+        openedFromTrackId = trackId
+        showFullPlayer = true
+    }
+
+    // ── 播放条 ↔ 播放页的唯一几何机制（照 TaskScreen FAB↔浮层范式）──
+    // 结构：
+    // SharedTransitionLayout
+    //  └ Box（根，高度 = morph 目标高度；底边 = 内容区底边 = 导航栏顶边）
+    //     ├ 音乐主界面 —— 常驻组合、永不被淡出（旧实现用 AnimatedContent
+    //     │   交叉淡入，半透明帧会把窗口米色底透出来，这是米色线的温床）
+    //     │   └ … Scaffold（TopAppBar + 音源内容）
+    //     │       └ 迷你播放条 AnimatedVisibility(!showFullPlayer)（自持退场作用域）
+    //     └ AnimatedVisibility(showFullPlayer) —— 最后一个孩子，盖在最上层
+    //         └ FullPlayerOverlay
+    // 容器配对：迷你条背景层 ↔ 播放页背景层同 key（"music_player_bar"），
+    // bounds 条形↔全屏走同一条 tween 时钟；两端底边同为一根线（根底边），
+    // morph 全程底边零位移 —— 底部米色缝被结构性排除
     SharedTransitionLayout(modifier = Modifier.fillMaxSize()) {
-        AnimatedContent(
-            targetState = showFullPlayer,
-            transitionSpec = {
-                // 展开/收起均为交叉淡入淡出：位移交由 sharedBounds 的 bounds
-                // 动画完成（此组合经多轮实测可靠）
-                (
-                    fadeIn(tween(1600, easing = FastOutSlowInEasing)) togetherWith
-                        fadeOut(tween(2000, easing = FastOutSlowInEasing))
-                    ) using SizeTransform(clip = false)
-            },
-            label = "fullPlayer",
-        ) { fullPlayerVisible ->
-            if (fullPlayerVisible) {
-                // ===== 完整播放页分支 =====
-                FullPlayerOverlay(
-                    vm = vm,
-                    onClose = {
-                        showFullPlayer = false
-                        // 注意：openedFromTrackId 故意不在收起时清空 —— 收起动画
-                        // 期间行封面仍需与大封面配对飞行；下次从迷你条展开时才复位
-                    },
-                    sharedTransitionScope = this@SharedTransitionLayout,
-                    animatedVisibilityScope = this@AnimatedContent,
-                    // 打开来源：非空 = 从曲目行点开（行内封面 morph），
-                    // null = 从迷你条展开（迷你条封面 morph）
-                    openedFromTrackId = openedFromTrackId,
-                )
-            } else {
-                // ===== 音乐主界面分支（音源内容 + 迷你播放条）=====
-                LaunchedEffect(Unit) { android.util.Log.d("MorphLog", "main composed") }
-                androidx.compose.runtime.DisposableEffect(Unit) {
-                    onDispose { android.util.Log.d("MorphLog", "main disposed") }
-                }
-                val sharedScope = this@SharedTransitionLayout
-                val playerAnimatedScope = this@AnimatedContent
+        val sharedScope = this@SharedTransitionLayout
 
-                // 曲目行小封面 sharedElement：常驻挂载（不能点开时才挂——
-                // 过渡首帧配对方"迟到"会导致整个 morph 渲染直接跳终态，实测
-                // 点歌打开无任何动画；常驻时点击前配对已就绪，动画正常渲染）
-                val trackCoverModifier: @Composable (String) -> Modifier = { trackId ->
-                    with(sharedScope) {
-                        Modifier.sharedElement(
-                            sharedContentState = rememberSharedContentState("music_track_cover_$trackId"),
-                            animatedVisibilityScope = playerAnimatedScope,
-                            boundsTransform = { _, _ ->
-                                androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
-                            },
+        // 根高度（px）：morph 目标高度，也是两侧共用的"整屏渐变"总高。
+        // 迷你条端以 size.height - rootH 为 startY 画渐变 ⇒ 无论矩形多高，
+        // 显示的都是最终整屏渐变的对应切片：无压扁、无纯色→渐变跳变，
+        // 且切片最底像素 = backdrop.bottom = 导航栏色，交界天然无缝
+        var rootHeightPx by remember { mutableStateOf(0f) }
+        // 迷你条高度（px）：容器 morph 顶角圆角 16dp→0 插值的条形端端点
+        var barHeightPx by remember { mutableStateOf(0f) }
+
+        // 注：沉浸色（vm.playerBackdrop）的发布在 FullPlayerOverlay 内完成 ——
+        // 跟随播放页自身的组合生命周期（AnimatedVisibility 把退场组合保持到
+        // morph 结束），且随取色实时更新；此处只保留点击回调里的首帧预写
+
+        // 容器 morph 的顶角圆角裁剪：条形端 16dp → 全屏端 0，按动画中实时
+        // 高度线性插值。展开首帧矩形带着与迷你条常态一致的圆角（不会瞬间
+        // 用直角盖掉行内容），收回末帧圆角平滑归位；两端共用同一 clip，
+        // 展开/收回像素对称。clipPath 坐标系 = SharedTransitionScope 坐标系
+        val containerCornerClip = remember {
+            object : SharedTransitionScope.OverlayClip {
+                private val clipPath = Path()
+                override fun getClipPath(
+                    sharedContentState: SharedTransitionScope.SharedContentState,
+                    bounds: Rect,
+                    layoutDirection: androidx.compose.ui.unit.LayoutDirection,
+                    density: androidx.compose.ui.unit.Density,
+                ): Path? {
+                    val root = rootHeightPx
+                    val bar = barHeightPx
+                    if (root <= 0f || bar <= 0f || bounds.height >= root) return null
+                    // 高度从条形(BarH)到全屏(RootH)的进度 → 圆角 16dp→0 的进度
+                    val progress = ((root - bounds.height) / (root - bar)).coerceIn(0f, 1f)
+                    val radius = with(density) { MiniBarTopCornerRadius.toPx() } * progress
+                    if (radius < 0.5f) return null
+                    clipPath.reset()
+                    clipPath.addRoundRect(
+                        RoundRect(
+                            left = 0f,
+                            top = 0f,
+                            right = bounds.width,
+                            // 底边随背景一起外延 MorphBottomOverhang，否则裁剪会把
+                            // 盖亚像素缝的那 2dp 又切掉
+                            bottom = bounds.height + with(density) { MorphBottomOverhang.toPx() },
+                            topLeftCornerRadius = CornerRadius(radius, radius),
+                            topRightCornerRadius = CornerRadius(radius, radius),
                         )
-                    }
+                    )
+                    clipPath.translate(bounds.topLeft)
+                    return clipPath
                 }
+            }
+        }
 
-                // 从列表点歌：记录曲目 id（供封面配对）并展开播放页
-                val openPlayerFromTrack: (String) -> Unit = { trackId ->
-                    openedFromTrackId = trackId
-                    showFullPlayer = true
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .onGloballyPositioned { rootHeightPx = it.size.height.toFloat() },
+        ) {
+            // ===== 第一层：音乐主界面（常驻组合，永不淡出）=====
+            // 曲目行封面槽：固定 40dp 槽位 + 每行自己的 AnimatedVisibility。
+            // - 槽位固定：morph 期间行内不留洞、不回流（封面只是"被借走"飞行）
+            // - 行作用域：被点行打开播放页时退场成为大封面 morph 的起点；
+            //   收起时行封面只在原位淡入，不再接住大封面（目的地固定为播放栏）。
+            //   入场 key 在点击前常驻注册，避免配对方迟到导致动画跳终态。
+            val trackCoverSlot: @Composable (
+                    trackId: String,
+                    coverContent: @Composable () -> Unit,
+                ) -> Unit = { trackId, coverContent ->
+                    Box(modifier = Modifier.size(40.dp)) {
+                        AnimatedVisibility(
+                            visible = !(showFullPlayer && openedFromTrackId == trackId),
+                            enter = fadeIn(tween(120, easing = FastOutSlowInEasing)),
+                            exit = fadeOut(tween(120, easing = FastOutSlowInEasing)),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .then(
+                                        // 收起时先释放来源行的配对身份，只让播放栏成为进入方；
+                                        // 即使入场尚未结束就收起，也不会有两个小封面争抢终点。
+                                        if (!showFullPlayer && openedFromTrackId == trackId) {
+                                            Modifier
+                                        } else with(sharedScope) {
+                                            Modifier.sharedElement(
+                                                sharedContentState = rememberSharedContentState("music_track_cover_$trackId"),
+                                                animatedVisibilityScope = this@AnimatedVisibility,
+                                                boundsTransform = { _, _ ->
+                                                    tween(MorphDurationMillis, easing = FastOutSlowInEasing)
+                                                },
+                                            )
+                                        },
+                                    ),
+                            ) {
+                                coverContent()
+                            }
+                        }
+                    }
                 }
 
                 // 专辑|歌单视图切换状态（纯 UI 状态）：提升到页面级，由 TopAppBar 标题行
@@ -306,7 +427,7 @@ fun MusicScreen(
                                             // 展开时旋转 90°（> 变 ∨），收起复原
                                             val chevronRotation by animateFloatAsState(
                                                 targetValue = if (viewExpanded) 90f else 0f,
-                                                animationSpec = tween(1440),
+                                                animationSpec = tween(180),
                                                 label = "viewChevron",
                                             )
                                             Icon(
@@ -350,7 +471,7 @@ fun MusicScreen(
                         // 0→全宽镜像展开，图标飞行入选中格；收起完全镜像 =====
                         val viewRowHeight by animateDpAsState(
                             targetValue = if (viewExpanded) 40.dp else 0.dp,
-                            animationSpec = tween(1440),
+                            animationSpec = tween(180),
                             label = "viewRowH",
                         )
                         BoxWithConstraints(
@@ -412,14 +533,14 @@ fun MusicScreen(
                                 val direction = if (targetState.order > initialState.order) 1 else -1
                                 (
                                     slideInHorizontally(
-                                        animationSpec = tween(2400, easing = FastOutSlowInEasing),
+                                        animationSpec = tween(300, easing = FastOutSlowInEasing),
                                         initialOffsetX = { fullWidth -> direction * fullWidth / 3 },
-                                    ) + fadeIn(tween(1600, delayMillis = 50))
+                                    ) + fadeIn(tween(200, delayMillis = 50))
                                     ) togetherWith (
                                     slideOutHorizontally(
-                                        animationSpec = tween(2400, easing = FastOutSlowInEasing),
+                                        animationSpec = tween(300, easing = FastOutSlowInEasing),
                                         targetOffsetX = { fullWidth -> -direction * fullWidth / 3 },
-                                    ) + fadeOut(tween(1200))
+                                    ) + fadeOut(tween(150))
                                     ) using SizeTransform(clip = false)
                             },
                             label = "musicSource",
@@ -429,43 +550,98 @@ fun MusicScreen(
                                 MusicSource.LOCAL -> LocalMusicContent(
                                     vm = vm,
                                     showPlaylists = showPlaylists,
-                                    trackCoverModifier = trackCoverModifier,
-                                    onPlayFromList = openPlayerFromTrack,
+                                    trackCoverSlot = trackCoverSlot,
+                                    onPlayFromList = openFromTrack,
                                 )
                                 // 服务器：未配置时显示引导配置表单，配置后进入曲库浏览
                                 MusicSource.BRAINGIRL -> ServerMusicContent(
                                     vm = vm,
                                     showPlaylists = showPlaylists,
                                     isCustom = false,
-                                    trackCoverModifier = trackCoverModifier,
-                                    onPlayFromList = openPlayerFromTrack,
+                                    trackCoverSlot = trackCoverSlot,
+                                    onPlayFromList = openFromTrack,
                                 )
                                 MusicSource.CUSTOM -> ServerMusicContent(
                                     vm = vm,
                                     showPlaylists = showPlaylists,
                                     isCustom = true,
-                                    trackCoverModifier = trackCoverModifier,
-                                    onPlayFromList = openPlayerFromTrack,
+                                    trackCoverSlot = trackCoverSlot,
+                                    onPlayFromList = openFromTrack,
                                 )
                             }
                         }
 
                         // ===== 迷你播放条（有正在播放的曲目时显示）=====
+                        // 包在自己的 AnimatedVisibility(!showFullPlayer) 里：
+                        // 展开时它退场、播放页进场，容器/封面配对的 morph 由这两个
+                        // 作用域驱动；收回时反向。退场 fade 只负责"组合计时"与
+                        // 未配对内容的淡出，视觉几何全部在共享 overlay 里完成
                         vm.currentTrack?.let { track ->
-                            MiniPlayerBar(
-                                vm = vm,
-                                track = track,
-                                // 点击播放条主体 → 展开完整播放页（封面与迷你条封面配对飞行）
-                                onExpand = {
-                                    openedFromTrackId = null
-                                    showFullPlayer = true
+                            AnimatedVisibility(
+                                visible = !showFullPlayer,
+                                enter = fadeIn(tween(120, easing = FastOutSlowInEasing)),
+                                exit = fadeOut(tween(120, easing = FastOutSlowInEasing)),
+                                // 顺带量出条形高度：容器 morph 顶角圆角插值的端点
+                                modifier = Modifier.onGloballyPositioned {
+                                    barHeightPx = it.size.height.toFloat()
                                 },
-                                sharedTransitionScope = sharedScope,
-                                animatedVisibilityScope = playerAnimatedScope,
-                            )
+                            ) {
+                                MiniPlayerBar(
+                                    vm = vm,
+                                    track = track,
+                                    // 点歌入场时播放栏不与来源行争抢起点；收起时接手
+                                    // 大封面的现有 key，终点始终是播放栏的小封面。
+                                    coverSharedKey = if (showFullPlayer) "music_player_cover" else playerCoverKey,
+                                    backdrop = backdrop,
+                                    rootHeightPx = { rootHeightPx },
+                                    containerCornerClip = containerCornerClip,
+                                    // 点击播放条主体 → 展开完整播放页（封面与迷你条封面配对飞行）
+                                    onExpand = openFromMini,
+                                    sharedTransitionScope = sharedScope,
+                                    animatedVisibilityScope = this@AnimatedVisibility,
+                                )
+                            }
                         }
                     }
                 }
+
+            // ===== 最后一层：完整播放页浮层 =====
+            // 进退场 = 自底边（导航栏顶边）垂直展开/收回，与容器 morph 同一 tween：
+            // - 有迷你条可配对（已有曲目在播）：背景层/封面是 sharedElement，在共享
+            //   overlay 里渲染、不受此处裁剪，几何完全由 bounds morph 承担；
+            // - 无迷你条可配对（首次点歌，点击前没有迷你条）：背景层无配对方，
+            //   退化为本层的"自下而上铺开"—— 依旧贴着导航栏生长，绝不整屏淡入；
+            // - 收起时它同时是"组合计时器"：把播放页组合保持到 morph 结束才移除，
+            //   vm.playerBackdrop 随之置空 ⇒ 播放条与导航栏落定后才同步褪回。
+            // align(BottomCenter)：展开中的裁剪区域贴根底边，而非贴顶部
+            AnimatedVisibility(
+                visible = showFullPlayer,
+                enter = expandVertically(
+                    animationSpec = tween(MorphDurationMillis, easing = FastOutSlowInEasing),
+                    expandFrom = Alignment.Bottom,
+                ),
+                exit = shrinkVertically(
+                    animationSpec = tween(MorphDurationMillis, easing = FastOutSlowInEasing),
+                    shrinkTowards = Alignment.Bottom,
+                ),
+                modifier = Modifier.align(Alignment.BottomCenter),
+            ) {
+                // AnimatedVisibility 保留内容直到退场完成；此时再释放来源，
+                // 不会在飞行途中换 key，且下一次列表入场之前来源行已恢复注册。
+                DisposableEffect(Unit) {
+                    onDispose { openedFromTrackId = null }
+                }
+                FullPlayerOverlay(
+                    vm = vm,
+                    onClose = { showFullPlayer = false },
+                    coverSharedKey = playerCoverKey,
+                    backdrop = backdrop,
+                    rootHeightPx = { rootHeightPx },
+                    barHeightPx = { barHeightPx },
+                    containerCornerClip = containerCornerClip,
+                    sharedTransitionScope = sharedScope,
+                    animatedVisibilityScope = this@AnimatedVisibility,
+                )
             }
         }
     }
@@ -492,8 +668,8 @@ private fun LocalMusicContent(
     vm: MusicViewModel,
     // 专辑|歌单视图切换（状态提升至 MusicScreen，由 TopAppBar 分段控件驱动）
     showPlaylists: Boolean,
-    // 曲目行小封面 sharedElement 工厂（由 MusicScreen 创建，key 带曲目 id）
-    trackCoverModifier: @Composable (String) -> Modifier,
+    // 曲目行封面槽（由 MusicScreen 创建：固定槽位 + 每行自己的退场作用域）
+    trackCoverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit,
     // 从列表点歌回调：传入被点曲目 id，由上层展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
 ) {
@@ -557,7 +733,7 @@ private fun LocalMusicContent(
         else -> LocalLibraryContent(
             vm = vm,
             showPlaylists = showPlaylists,
-            trackCoverModifier = trackCoverModifier,
+            trackCoverSlot = trackCoverSlot,
             onPlayFromList = onPlayFromList,
         )
     }
@@ -574,8 +750,8 @@ private fun LocalLibraryContent(
     vm: MusicViewModel,
     // 专辑|歌单视图切换（状态提升至 MusicScreen，由 TopAppBar 分段控件驱动）
     showPlaylists: Boolean,
-    // 曲目行小封面 sharedElement 工厂（由 MusicScreen 创建，key 带曲目 id）
-    trackCoverModifier: @Composable (String) -> Modifier,
+    // 曲目行封面槽（由 MusicScreen 创建：固定槽位 + 每行自己的退场作用域）
+    trackCoverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit,
     // 从列表点歌回调：传入被点曲目 id，由上层展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
 ) {
@@ -608,20 +784,20 @@ private fun LocalLibraryContent(
                 if (targetState) {
                     // 进入歌单视图：歌单从右滑入，专辑向左滑出
                     (
-                        slideInHorizontally(tween(2400, easing = FastOutSlowInEasing)) { it / 3 } +
-                            fadeIn(tween(2400))
+                        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } +
+                            fadeIn(tween(300))
                     ) togetherWith (
-                        slideOutHorizontally(tween(2400, easing = FastOutSlowInEasing)) { -it / 3 } +
-                            fadeOut(tween(1600))
+                        slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeOut(tween(200))
                     )
                 } else {
                     // 回到专辑视图：专辑从左滑入，歌单向右滑出
                     (
-                        slideInHorizontally(tween(2400, easing = FastOutSlowInEasing)) { -it / 3 } +
-                            fadeIn(tween(2400))
+                        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeIn(tween(300))
                     ) togetherWith (
-                        slideOutHorizontally(tween(2400, easing = FastOutSlowInEasing)) { it / 3 } +
-                            fadeOut(tween(1600))
+                        slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } +
+                            fadeOut(tween(200))
                     )
                 }
             },
@@ -632,7 +808,7 @@ private fun LocalLibraryContent(
                 // ===== 歌单视图：列表/详情 morph + 右下角新建 FAB（与云端共用）=====
                 PlaylistViewWithFab(
                     vm = vm,
-                    trackCoverModifier = trackCoverModifier,
+                    trackCoverSlot = trackCoverSlot,
                     onPlayFromList = onPlayFromList,
                 )
             } else {
@@ -649,13 +825,13 @@ private fun LocalLibraryContent(
                         // 避免 scrim 淡入期间透明导致底层列表透出
                         (
                             EnterTransition.None togetherWith
-                                fadeOut(tween(2000, easing = FastOutSlowInEasing))
+                                fadeOut(tween(250, easing = FastOutSlowInEasing))
                             ) using SizeTransform(clip = false)
                     } else {
                         // 收回：列表快速淡入，详情缓慢淡出
                         (
-                            fadeIn(tween(2000, easing = FastOutSlowInEasing)) togetherWith
-                                fadeOut(tween(2500, easing = FastOutSlowInEasing))
+                            fadeIn(tween(250, easing = FastOutSlowInEasing)) togetherWith
+                                fadeOut(tween(400, easing = FastOutSlowInEasing))
                             ) using SizeTransform(clip = false)
                     }
                 },
@@ -668,7 +844,7 @@ private fun LocalLibraryContent(
                         album = album,
                         sharedTransitionScope = this@SharedTransitionLayout,
                         animatedVisibilityScope = this@AnimatedContent,
-                        trackCoverModifier = trackCoverModifier,
+                        trackCoverSlot = trackCoverSlot,
                         onPlayFromList = onPlayFromList,
                     )
                 } else {
@@ -678,7 +854,7 @@ private fun LocalLibraryContent(
                             vm = vm,
                             sharedTransitionScope = this@SharedTransitionLayout,
                             animatedVisibilityScope = this@AnimatedContent,
-                            trackCoverModifier = trackCoverModifier,
+                            trackCoverSlot = trackCoverSlot,
                             onPlayFromList = onPlayFromList,
                         )
                         // 空态：保留刷新按钮（强制重查 MediaStore）
@@ -728,8 +904,8 @@ private fun ServerMusicContent(
     isCustom: Boolean,
     // 专辑|歌单视图切换（状态提升至 MusicScreen，由 TopAppBar 分段控件驱动）
     showPlaylists: Boolean,
-    // 曲目行小封面 sharedElement 工厂（由 MusicScreen 创建，key 带曲目 id）
-    trackCoverModifier: @Composable (String) -> Modifier,
+    // 曲目行封面槽（由 MusicScreen 创建：固定槽位 + 每行自己的退场作用域）
+    trackCoverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit,
     // 从列表点歌回调：传入被点曲目 id，由上层展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
 ) {
@@ -770,19 +946,19 @@ private fun ServerMusicContent(
             transitionSpec = {
                 if (targetState) {
                     (
-                        slideInHorizontally(tween(2400, easing = FastOutSlowInEasing)) { it / 3 } +
-                            fadeIn(tween(2400))
+                        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } +
+                            fadeIn(tween(300))
                     ) togetherWith (
-                        slideOutHorizontally(tween(2400, easing = FastOutSlowInEasing)) { -it / 3 } +
-                            fadeOut(tween(1600))
+                        slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeOut(tween(200))
                     )
                 } else {
                     (
-                        slideInHorizontally(tween(2400, easing = FastOutSlowInEasing)) { -it / 3 } +
-                            fadeIn(tween(2400))
+                        slideInHorizontally(tween(300, easing = FastOutSlowInEasing)) { -it / 3 } +
+                            fadeIn(tween(300))
                     ) togetherWith (
-                        slideOutHorizontally(tween(2400, easing = FastOutSlowInEasing)) { it / 3 } +
-                            fadeOut(tween(1600))
+                        slideOutHorizontally(tween(300, easing = FastOutSlowInEasing)) { it / 3 } +
+                            fadeOut(tween(200))
                     )
                 }
             },
@@ -793,7 +969,7 @@ private fun ServerMusicContent(
                 // ===== 歌单视图：列表/详情 morph + 右下角新建 FAB（与本地音源共用）=====
                 PlaylistViewWithFab(
                     vm = vm,
-                    trackCoverModifier = trackCoverModifier,
+                    trackCoverSlot = trackCoverSlot,
                     onPlayFromList = onPlayFromList,
                 )
             } else {
@@ -814,13 +990,13 @@ private fun ServerMusicContent(
                         // 避免 scrim 淡入期间透明导致底层列表透出
                         (
                             EnterTransition.None togetherWith
-                                fadeOut(tween(2000, easing = FastOutSlowInEasing))
+                                fadeOut(tween(250, easing = FastOutSlowInEasing))
                             ) using SizeTransform(clip = false)
                     } else {
                         // 收回：列表快速淡入，详情缓慢淡出
                         (
-                            fadeIn(tween(2000, easing = FastOutSlowInEasing)) togetherWith
-                                fadeOut(tween(2500, easing = FastOutSlowInEasing))
+                            fadeIn(tween(250, easing = FastOutSlowInEasing)) togetherWith
+                                fadeOut(tween(400, easing = FastOutSlowInEasing))
                             ) using SizeTransform(clip = false)
                     }
                 },
@@ -833,7 +1009,7 @@ private fun ServerMusicContent(
                         album = album,
                         sharedTransitionScope = this@SharedTransitionLayout,
                         animatedVisibilityScope = this@AnimatedContent,
-                        trackCoverModifier = trackCoverModifier,
+                        trackCoverSlot = trackCoverSlot,
                         onPlayFromList = onPlayFromList,
                     )
                 } else {
@@ -843,7 +1019,7 @@ private fun ServerMusicContent(
                             vm = vm,
                             sharedTransitionScope = this@SharedTransitionLayout,
                             animatedVisibilityScope = this@AnimatedContent,
-                            trackCoverModifier = trackCoverModifier,
+                            trackCoverSlot = trackCoverSlot,
                             onPlayFromList = onPlayFromList,
                         )
                         // 专辑列表（加载中显示居中转圈）
@@ -935,19 +1111,19 @@ private fun ToolbarZone(
     // 条内容淡入淡出：收起时快速淡出（文字不滑过图标露残影）
     val stripAlpha by animateFloatAsState(
         targetValue = if (expanded) 1f else 0f,
-        animationSpec = tween(960),
+        animationSpec = tween(120),
         label = "stripAlpha",
     )
     // ✕ 淡入淡出：图标飞离角落后浮现（最右侧收起钮）
     val closeAlpha by animateFloatAsState(
         targetValue = if (expanded) 1f else 0f,
-        animationSpec = tween(960),
+        animationSpec = tween(120),
         label = "closeAlpha",
     )
     // 让位淡出：他区展开时本区图标随推动淡出，回位淡入
     val iconAlpha by animateFloatAsState(
         targetValue = if (expanded || collapsedWidth > 0.dp) 1f else 0f,
-        animationSpec = tween(1200),
+        animationSpec = tween(150),
         label = "iconAlpha",
     )
     Row(
@@ -1084,8 +1260,8 @@ private fun SelectorCell(
 @Composable
 private fun PlaylistViewWithFab(
     vm: MusicViewModel,
-    // 曲目行小封面 sharedElement 工厂（点歌时飞成播放页大封面）
-    trackCoverModifier: @Composable (String) -> Modifier,
+    // 曲目行封面槽（点歌时飞成播放页大封面）
+    trackCoverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit,
     // 从列表点歌回调：展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
 ) {
@@ -1108,15 +1284,15 @@ private fun PlaylistViewWithFab(
             }
             PlaylistPanel(
                 vm = vm,
-                trackCoverModifier = trackCoverModifier,
+                trackCoverSlot = trackCoverSlot,
                 onPlayFromList = onPlayFromList,
             )
         }
         // 新建歌单 FAB：任务页同款（仅歌单列表态显示，详情态淡出）
         AnimatedVisibility(
             visible = vm.currentPlaylist == null,
-            enter = fadeIn(tween(2000, easing = FastOutSlowInEasing)),
-            exit = fadeOut(tween(1440, easing = FastOutSlowInEasing)),
+            enter = fadeIn(tween(250, easing = FastOutSlowInEasing)),
+            exit = fadeOut(tween(180, easing = FastOutSlowInEasing)),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 8.dp, bottom = 8.dp),
@@ -1288,7 +1464,7 @@ private fun DetailToolsBar(
     // 排序图标颜色：展开 灰→主色（延迟与条揭示同步），收起渐回灰
     val sortIconTint by animateColorAsState(
         targetValue = if (sortOpen) priColor else grayColor,
-        animationSpec = tween(1440, delayMillis = if (sortOpen) 80 else 0),
+        animationSpec = tween(180, delayMillis = if (sortOpen) 80 else 0),
         label = "detailSortIconTint",
     )
 
@@ -1429,8 +1605,8 @@ private fun AlbumDetailContent(
     // 专辑卡 morph：详情头部的 sharedElement 与列表行同 key 配对
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
-    // 曲目行小封面 sharedElement 工厂（点歌时飞成播放页大封面）
-    trackCoverModifier: @Composable (String) -> Modifier,
+    // 曲目行封面槽（点歌时飞成播放页大封面）
+    trackCoverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit,
     // 从列表点歌回调：展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
 ) {
@@ -1464,7 +1640,7 @@ private fun AlbumDetailContent(
                                 animatedVisibilityScope = animatedVisibilityScope,
                                 // 临界弹簧：柔和无过冲的尺寸/位置过渡
                                 boundsTransform = { _, _ ->
-                                    androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
+                                    spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
                                 },
                             )
                         },
@@ -1486,7 +1662,7 @@ private fun AlbumDetailContent(
                                     sharedContentState = rememberSharedContentState("music_album_cover_${album.id}"),
                                     animatedVisibilityScope = animatedVisibilityScope,
                                     boundsTransform = { _, _ ->
-                                        androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
+                                        spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
                                     },
                                 )
                             },
@@ -1548,7 +1724,7 @@ private fun AlbumDetailContent(
                     track = entry.value,
                     index = entry.index,
                     isCurrent = vm.currentTrack?.id == entry.value.id,
-                    coverModifier = trackCoverModifier,
+                    coverSlot = trackCoverSlot,
                     onClick = {
                         vm.playQueue(vm.albumSongs, entry.index)
                         // 点歌后展开播放页，该行小封面飞成播放页大封面
@@ -1570,8 +1746,8 @@ private fun SearchResultContent(
     // 专辑卡 morph：搜索结果里的专辑行与详情页配对
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
-    // 曲目行小封面 sharedElement 工厂（点歌时飞成播放页大封面）
-    trackCoverModifier: @Composable (String) -> Modifier,
+    // 曲目行封面槽（点歌时飞成播放页大封面）
+    trackCoverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit,
     // 从列表点歌回调：展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
 ) {
@@ -1597,7 +1773,7 @@ private fun SearchResultContent(
                     track = track,
                     index = index,
                     isCurrent = vm.currentTrack?.id == track.id,
-                    coverModifier = trackCoverModifier,
+                    coverSlot = trackCoverSlot,
                     // 搜索结果播放队列 = 搜索到的歌曲列表
                     onClick = {
                         vm.playQueue(result.songs, index)
@@ -1634,8 +1810,8 @@ private fun SearchResultContent(
 @Composable
 private fun PlaylistPanel(
     vm: MusicViewModel,
-    // 曲目行小封面 sharedElement 工厂（点歌时飞成播放页大封面）
-    trackCoverModifier: @Composable (String) -> Modifier,
+    // 曲目行封面槽（点歌时飞成播放页大封面）
+    trackCoverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit,
     // 从列表点歌回调：展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
 ) {
@@ -1649,12 +1825,12 @@ private fun PlaylistPanel(
                 if (targetState != null) {
                     (
                         EnterTransition.None togetherWith
-                            fadeOut(tween(2000, easing = FastOutSlowInEasing))
+                            fadeOut(tween(250, easing = FastOutSlowInEasing))
                         ) using SizeTransform(clip = false)
                 } else {
                     (
-                        fadeIn(tween(2000, easing = FastOutSlowInEasing)) togetherWith
-                            fadeOut(tween(2500, easing = FastOutSlowInEasing))
+                        fadeIn(tween(250, easing = FastOutSlowInEasing)) togetherWith
+                            fadeOut(tween(400, easing = FastOutSlowInEasing))
                         ) using SizeTransform(clip = false)
                 }
             },
@@ -1667,7 +1843,7 @@ private fun PlaylistPanel(
                     playlist = playlist,
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedVisibilityScope = this@AnimatedContent,
-                    trackCoverModifier = trackCoverModifier,
+                    trackCoverSlot = trackCoverSlot,
                     onPlayFromList = onPlayFromList,
                 )
             } else {
@@ -1750,7 +1926,7 @@ private fun PlaylistRow(
                         sharedContentState = rememberSharedContentState("music_playlist_${playlist.id}"),
                         animatedVisibilityScope = animatedVisibilityScope,
                         boundsTransform = { _, _ ->
-                            androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
+                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
                         },
                     )
                 },
@@ -1803,8 +1979,8 @@ private fun PlaylistDetailContent(
     // 歌单行 morph：头部 sharedElement 与列表行同 key 配对
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
-    // 曲目行小封面 sharedElement 工厂（点歌时飞成播放页大封面）
-    trackCoverModifier: @Composable (String) -> Modifier,
+    // 曲目行封面槽（点歌时飞成播放页大封面）
+    trackCoverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit,
     // 从列表点歌回调：展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
 ) {
@@ -1838,7 +2014,7 @@ private fun PlaylistDetailContent(
                                 sharedContentState = rememberSharedContentState("music_playlist_${playlist.id}"),
                                 animatedVisibilityScope = animatedVisibilityScope,
                                 boundsTransform = { _, _ ->
-                                    androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
+                                    spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
                                 },
                             )
                         },
@@ -1937,7 +2113,7 @@ private fun PlaylistDetailContent(
                     track = entry.value,
                     index = entry.index,
                     isCurrent = vm.currentTrack?.id == entry.value.id,
-                    coverModifier = trackCoverModifier,
+                    coverSlot = trackCoverSlot,
                     onClick = {
                         vm.playQueue(vm.playlistTracks, entry.index)
                         onPlayFromList(entry.value.id)
@@ -2189,8 +2365,19 @@ private fun ServerConfigForm(vm: MusicViewModel, isCustom: Boolean) {
  * 结构：细进度条（当前曲进度）+ 封面缩略图 + 曲名/艺术家 + 播放暂停 + 下一首。
  * 点击条主体（按钮区域除外）展开完整播放页。
  *
+ * morph 参与方式（与 FullPlayerOverlay 对称）：
+ * - 背景层挂容器 sharedElement（key "music_player_bar"），与播放页背景层配对；
+ * - 封面挂 sharedElement：从迷你条展开时用自身 key；点歌入场时不参与配对，
+ *   随条整体淡出；收起时接手播放页现有的 key，始终作为大封面的落点；
+ * - 内容行抬进共享 overlay 渲染（zIndex 高于 morph 矩形），由显式 alpha 淡出
+ *   —— 不会被渐变矩形瞬间盖掉（无"啪"地消失）。
+ *
  * @param vm 共享的音乐 ViewModel
  * @param track 当前播放曲目
+ * @param coverSharedKey 当前封面配对身份：收起时与播放页一致，点歌入场时与来源行分离
+ * @param backdrop 本页常驻取色结果（一体色与渐变切片的色源）
+ * @param rootHeightPx 根高度（morph 目标高度）：底锚定整屏渐变的总高
+ * @param containerCornerClip 容器 morph 顶角圆角 16dp→0 的插值裁剪（两端共用）
  * @param onExpand 点击播放条主体时触发（展开完整播放页）
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -2198,17 +2385,39 @@ private fun ServerConfigForm(vm: MusicViewModel, isCustom: Boolean) {
 private fun MiniPlayerBar(
     vm: MusicViewModel,
     track: PlayableTrack,
+    coverSharedKey: String,
+    backdrop: PlayerBackdropColors,
+    rootHeightPx: () -> Float,
+    containerCornerClip: SharedTransitionScope.OverlayClip,
     onExpand: () -> Unit,
     // 迷你条 ↔ 播放页 morph：容器 sharedElement + 封面 sharedElement 均需这两个作用域
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
 ) {
-    // 结构去嵌套：sharedElement 只挂在纯色背景层上，内容（含封面 sharedElement）
-    // 作为平级兄弟叠在其上 —— 封面不再被容器罩住，能独立飞行
+    // 条内容（文字/按钮）淡入淡出：overlay 渲染的内容不受父层（AnimatedVisibility
+    // 的 fade）变换，故由同一 transition 显式驱动 alpha —— 展开时条内容平滑淡出，
+    // 收回时平滑淡入；封面是 sharedElement，配对期间不在此层绘制、不受影响
+    val barContentAlpha by animatedVisibilityScope.transition.animateFloat(
+        transitionSpec = { tween(120, easing = FastOutSlowInEasing) },
+        label = "barContentAlpha",
+    ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
+
+    // 常态底色：与导航栏同一来源同一曲线的一体色（immersiveUnitColor：
+    // 沉浸激活瞬时取歌曲色、退出同步淡回主题色），仅非沉浸时实际可见
+    val restingColor = immersiveUnitColor(
+        active = vm.playerBackdrop != null,
+        song = backdrop.bottom,
+        fallback = MaterialTheme.colorScheme.surfaceContainer,
+    )
+
     Box {
         Box(
-            // 背景 = 容器配对方：与播放页渐变背景配对（条形色块 ↔ 全屏渐变）。
-            // 底边与导航栏顶边重合，morph 全程无位移、无缝隙
+            // 背景 = 容器配对方（条形端）。两种画法：
+            // - 沉浸激活（打开/收回 morph 中）：绘制"底锚定整屏渐变"的底部切片
+            //   （startY = size.height - rootH 为负值）⇒ morph 中任何中间高度显示的
+            //   都是最终整屏渐变的对应切片，与播放页端像素同源、无压扁无跳变；
+            //   切片最底像素 = backdrop.bottom = 导航栏色，交界无缝
+            // - 常态：一体色纯色 + 顶部 16dp 圆角（morph 中的圆角由 overlay clip 插值）
             modifier = Modifier
                 .matchParentSize()
                 .then(
@@ -2217,21 +2426,41 @@ private fun MiniPlayerBar(
                             sharedContentState = rememberSharedContentState("music_player_bar"),
                             animatedVisibilityScope = animatedVisibilityScope,
                             boundsTransform = { _, _ ->
-                                androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
+                                tween(MorphDurationMillis, easing = FastOutSlowInEasing)
                             },
+                            clipInOverlayDuringTransition = containerCornerClip,
                         )
                     },
                 )
-                .background(
-                    // 播放条与导航栏作为整体取歌曲色（immersiveUnitColor：
-                    // 同一来源同一曲线，激活瞬时切换、退出同步淡回）
-                    immersiveUnitColor(
-                        active = vm.playerBackdrop != null,
-                        song = vm.playerBackdrop?.bottom ?: Color.Transparent,
-                        fallback = MaterialTheme.colorScheme.surfaceContainer,
-                    ),
-                    RoundedCornerShape(topStart = 16.dp, topEnd = 16.dp),
-                ),
+                .drawBehind {
+                    if (vm.playerBackdrop != null) {
+                        // 底边外延 MorphBottomOverhang：盖住过渡中亚像素底边漏出的
+                        // 最后一行（渐变 clamp 平铺，外延部分即 backdrop.bottom）
+                        drawRect(
+                            Brush.verticalGradient(
+                                listOf(backdrop.top, backdrop.bottom),
+                                startY = size.height - rootHeightPx(),
+                                endY = size.height,
+                            ),
+                            size = size.copy(height = size.height + MorphBottomOverhang.toPx()),
+                        )
+                    } else {
+                        val radius = MiniBarTopCornerRadius.toPx()
+                        val cornerPath = Path().apply {
+                            addRoundRect(
+                                RoundRect(
+                                    left = 0f,
+                                    top = 0f,
+                                    right = size.width,
+                                    bottom = size.height,
+                                    topLeftCornerRadius = CornerRadius(radius, radius),
+                                    topRightCornerRadius = CornerRadius(radius, radius),
+                                )
+                            )
+                        }
+                        drawPath(cornerPath, restingColor)
+                    }
+                },
         )
         Column(modifier = Modifier.clickable(onClick = onExpand)) {
             // 底边进度：宽度按 position/duration 比例；时长未知时透明占位保持行高稳定
@@ -2241,17 +2470,22 @@ private fun MiniPlayerBar(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                    // 过渡期间整行抬进共享 overlay（zIndex 高于 morph 矩形与飞行封面）：
+                    // 条内容不被矩形瞬间盖掉，随 barContentAlpha 平滑淡出；
+                    // 常态（无过渡）原位渲染，视觉不变。alpha 放在 renderIn 内侧，
+                    // 确保被录进 overlay 图层
+                    .then(
+                        with(sharedTransitionScope) {
+                            Modifier.renderInSharedTransitionScopeOverlay(zIndexInOverlay = 1f)
+                        },
+                    )
+                    .graphicsLayer { alpha = barContentAlpha },
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 // 封面缩略图（无封面时用音符图标占位）。
-                // sharedElement key "music_player_cover"：从迷你条展开播放页时，
-                // 小封面飞成播放页大封面（点歌打开时播放页封面改配对行内封面，此处不参与）
-                // 诊断：迷你条封面配对状态
-                val miniCoverState = with(sharedTransitionScope) { rememberSharedContentState("music_player_cover") }
-                LaunchedEffect(miniCoverState.isMatchFound) {
-                    android.util.Log.d("MorphLog", "miniCoverMatch=${miniCoverState.isMatchFound}")
-                }
+                // 入场按来源选择是否参与配对；收起统一接住当前大封面，
+                // key 由上层传入，避免把“从哪打开”误当成“收回哪里”。
                 CoverArt(
                     coverUrl = track.coverArtUrl,
                     albumArtUri = track.albumArtUri,
@@ -2260,10 +2494,13 @@ private fun MiniPlayerBar(
                         .then(
                             with(sharedTransitionScope) {
                                 Modifier.sharedElement(
-                                    sharedContentState = miniCoverState,
+                                    sharedContentState = rememberSharedContentState(coverSharedKey),
                                     animatedVisibilityScope = animatedVisibilityScope,
+                                    // 封面在背景(0)之上、控件(1)之下；不能依赖配对方的注册顺序，
+                                    // 收起时先注册的播放栏封面否则会被后注册的退出背景遮住。
+                                    zIndexInOverlay = 0.5f,
                                     boundsTransform = { _, _ ->
-                                        androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
+                                        tween(MorphDurationMillis, easing = FastOutSlowInEasing)
                                     },
                                 )
                             },
@@ -2303,8 +2540,15 @@ private fun MiniPlayerBar(
                     )
                 }
             }
-            // 自绘底边进度条：直角贴底全宽，不会被顶部圆角裁切
-            Box(modifier = Modifier.fillMaxWidth().height(2.dp)) {
+            // 自绘底边进度条：直角贴底全宽，不会被顶部圆角裁切。
+            // 与条内容同一 barContentAlpha 淡出/淡入：它贴在迷你条最底边（= 导航栏
+            // 顶边），过渡中若不淡出，会在 morph 矩形底部留下一条 2dp 的橙/亮色线
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(2.dp)
+                    .graphicsLayer { alpha = barContentAlpha },
+            ) {
                 if (progress != null) {
                     Box(
                         modifier = Modifier
@@ -2327,93 +2571,183 @@ private fun MiniPlayerBar(
  * 进度条交互：拖动期间显示本地 dragPosition（避免 500ms 轮询把滑块拽回去），
  * 松手时一次性 seek 到目标位置并清空本地值。
  *
+ * morph 参与方式（与 MiniPlayerBar 对称）：背景层挂容器 sharedElement
+ * （key "music_player_bar"），与迷你条背景层配对 —— 过渡期间由"进入方"在
+ * 共享 overlay 里渲染动画矩形；它画的是底锚定整屏渐变的当前切片，与迷你条端
+ * 像素同源 ⇒ 展开与收回严格互为镜像。控件层不参与几何，只做透明度。
+ *
  * @param vm 共享的音乐 ViewModel
  * @param onClose 收起播放页（回到音乐列表页）时触发
+ * @param coverSharedKey 本次封面飞行的固定身份；入场对接来源，收起对接播放栏，切歌不改身份
+ * @param backdrop 本页常驻取色结果（渐变与深色配色的唯一色源，由 MusicScreen 传入）
+ * @param rootHeightPx 根高度（morph 目标高度）：底锚定整屏渐变的总高
+ * @param barHeightPx 迷你条高度（morph 起点高度）：控件列按矩形实时顶边裁剪时用
+ * @param containerCornerClip 容器 morph 顶角圆角 16dp→0 的插值裁剪（两端共用）
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun FullPlayerOverlay(
     vm: MusicViewModel,
     onClose: () -> Unit,
-    // 迷你条/曲目行 ↔ 播放页 morph：容器 sharedBounds + 封面 sharedElement 均需这两个作用域
+    // 当前页封面的配对身份在整次展开/收起期间保持不变，避免切换目的地时跳帧。
+    coverSharedKey: String,
+    backdrop: PlayerBackdropColors,
+    rootHeightPx: () -> Float,
+    barHeightPx: () -> Float,
+    containerCornerClip: SharedTransitionScope.OverlayClip,
+    // 迷你条/曲目行 ↔ 播放页 morph：容器 + 封面 sharedElement 均需这两个作用域
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
-    // 打开来源：非空 = 从曲目行点开（值为该行 trackId），null = 从迷你条展开。
-    // 决定各页封面 sharedElement 的配对 key（见 Pager 内注释）
-    openedFromTrackId: String?,
 ) {
     val track = vm.currentTrack
-    // 封面取色：渐变背景 + 播放页专用深色配色（嵌套 MaterialTheme 生效），
+    // 播放页专用深色配色（嵌套 MaterialTheme 生效），色源同 backdrop，
     // 切歌时颜色 600ms 平滑过渡 —— 汽水音乐式沉浸播放面
-    val backdrop = rememberPlayerBackdrop(track)
     val playerScheme = rememberPlayerColorScheme(backdrop)
-    // 发布沉浸色给 NionApp（底部导航栏染色）；播放页离开组合时清空
+
+    // 沉浸色发布（NionApp 导航栏 + 迷你条一体色的唯一来源）：
+    // - LaunchedEffect(backdrop)：取色完成/切歌渐变时实时同步 —— 不能只在打开
+    //   瞬间写一次，否则首次点歌（取色尚未完成）会把兜底色永久冻结在导航栏上；
+    // - onDispose 置空：本组合由 AnimatedVisibility(showFullPlayer) 承载，收起时
+    //   组合一直保持到退场 morph 结束才销毁 ⇒ 收回全程保持歌曲色、不出现
+    //   "收起首帧过渡尚未激活就被置空"的整屏米色闪帧；落定后播放条与导航栏
+    //   同一帧开始同步褪回主题色
     LaunchedEffect(backdrop) { vm.playerBackdrop = backdrop }
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        onDispose { vm.playerBackdrop = null }
-    }
-    // 诊断：容器配对状态 + morph 矩形逐帧
-    val containerState = with(sharedTransitionScope) { rememberSharedContentState("music_player_bar") }
-    LaunchedEffect(containerState.isMatchFound) {
-        android.util.Log.d("MorphLog", "containerMatch=${containerState.isMatchFound}")
-    }
-    LaunchedEffect(Unit) {
-        androidx.compose.runtime.snapshotFlow { containerState.clipPathInOverlay?.getBounds().toString() }
-            .distinctUntilChanged()
-            .collect { android.util.Log.d("MorphLog", "containerClip=$it") }
-    }
-    LaunchedEffect(Unit) { android.util.Log.d("MorphLog", "player composed") }
-    androidx.compose.runtime.DisposableEffect(Unit) {
-        onDispose { android.util.Log.d("MorphLog", "player disposed") }
-    }
+    DisposableEffect(Unit) { onDispose { vm.playerBackdrop = null } }
 
     // 播放队列默认收起：顶部按钮呼出（常驻列表会挤占沉浸滑切区）
     var queueVisible by remember { mutableStateOf(false) }
-    // 播放页 UI 淡入淡出：morph（背景+封面）负责几何，控件层在接近终态时
-    // 淡入/淡出，避免整组控件随矩形缩放变形被长时间看到
-    val contentAlpha by animatedVisibilityScope.transition.animateFloat(
-        transitionSpec = { tween(1200) },
-        label = "playerContentAlpha",
+
+    // 控件层入场/退场进度（0=隐藏 1=就位）。几何全部由容器/封面 morph 承担，
+    // 控件只做"透明度 + 轻微上浮"，绝不缩放：
+    // - 展开：morph 起步不久即开始浮现，跨越整个 morph 并在铺满后再收尾一小段
+    //   （旧实现 150ms 延迟 250ms，真机上只占 2~3 帧 —— 控件在铺满那一刻"啪"地
+    //   整块冒出来，这是入场突兀的主因）；
+    // - 收起：起步即快速淡出（矩形还盖着大半屏时控件就已退场）
+    // 用 State 对象而非 by 委托：只在 graphicsLayer 绘制阶段读取，动画每帧只
+    // 触发图层更新，不会让整页播放页（含 VerticalPager）每帧重组
+    val controlsProgress = animatedVisibilityScope.transition.animateFloat(
+        transitionSpec = {
+            if (targetState == EnterExitState.Visible) {
+                tween(
+                    durationMillis = ControlsEnterDurationMillis,
+                    delayMillis = ControlsEnterDelayMillis,
+                    easing = LinearOutSlowInEasing,
+                )
+            } else {
+                tween(120, easing = FastOutSlowInEasing)
+            }
+        },
+        label = "playerControlsProgress",
     ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
-    LaunchedEffect(contentAlpha) {
-        android.util.Log.d("MorphLog", "contentAlpha=" + "%.3f".format(contentAlpha))
+
+    // morph 几何进度镜像（0=条形 1=铺满）：与容器 boundsTransform 同一 transition、
+    // 同一 tween 规格 ⇒ 与背景矩形逐帧同步（不是第二套几何，只是读出同一时钟）。
+    // 用途：① 控件列按矩形当前顶边裁剪 —— 控件抬进 overlay 后不再画到矩形外的
+    // 米色列表上；② 矩形顶边触到状态栏下沿的那一帧，状态栏条接上歌曲色
+    val morphProgress = animatedVisibilityScope.transition.animateFloat(
+        transitionSpec = { tween(MorphDurationMillis, easing = FastOutSlowInEasing) },
+        label = "playerMorphProgress",
+    ) { state -> if (state == EnterExitState.Visible) 1f else 0f }
+
+    // morph 时钟发布给 NionApp 的状态栏条：NionApp 在"绘制阶段"直接读这个 State，
+    // 与容器矩形同一帧判定"是否铺到顶"。不能走 LaunchedEffect → VM → 重组 的链路：
+    // 那条链路要晚 2~3 帧，收起起步时矩形顶边已下移几个像素、状态栏条却还是歌曲色，
+    // 两者之间露出一条几像素的米色缝（逐帧实测）
+    DisposableEffect(morphProgress) {
+        vm.playerMorphProgress = morphProgress
+        onDispose { vm.playerMorphProgress = null }
     }
-    // 真 sharedElement：迷你条 ↔ 播放页容器配对，过渡时只有播放页内容
-    // 在 morph（bounds 条形→全屏）；颜色由一体色体系保证
-    // 结构去嵌套（与迷你条对称）：sharedElement 只挂在渐变背景层，控件
-    //（含大封面 sharedElement）为平级兄弟 —— 封面独立飞行不被容器罩住
+
+    // 状态栏图标深浅用的"已铺满"标志（只在翻转时重组；图标切换本身由系统栏
+    // 绘制，晚一两帧肉眼不可辨，所以走普通状态即可）
+    val morphReachedTop = remember { derivedStateOf { morphProgress.value >= 1f } }
+    val settledOpen = morphReachedTop.value
+    LaunchedEffect(settledOpen) { vm.isFullPlayerSettled = settledOpen }
+    DisposableEffect(Unit) { onDispose { vm.isFullPlayerSettled = false } }
+
+    // 分组错落（自下而上，与矩形自底边向上生长同向）：进度条与播放按钮 → 曲目信息
+    // → 顶部按钮行。矩形扫过哪一组、哪一组就开始浮现，顶部按钮行在铺满时最后落定。
+    // 收起时三组同步（progress 整体快速归零）。均为 lambda：延迟到绘制阶段读取
+    val transportProgress = { staggered(controlsProgress.value, start = 0f, end = 0.55f) }
+    val infoProgress = { staggered(controlsProgress.value, start = 0.15f, end = 0.75f) }
+    val topRowProgress = { staggered(controlsProgress.value, start = 0.45f, end = 1f) }
+
     Box(modifier = Modifier.fillMaxSize()) {
         Box(
-            // 背景 = 容器配对方：与迷你条色块配对，bounds 条形→全屏 morph；
-            // 底边与导航栏顶边全程重合，无亚像素缝隙
+            // 背景 = 容器配对方（全屏端）：与迷你条背景层同 key 配对。
+            // 始终画"底锚定整屏渐变"的当前切片（常态下 size == rootH，即整屏渐变；
+            // morph 中被重测为动画中的中间尺寸，切片随高度连续取值）——
+            // 与迷你条端同一公式，展开/收回像素镜像；底边 = 根底边 = 导航栏顶边，
+            // morph 全程底边零位移
             modifier = Modifier
                 .fillMaxSize()
                 .then(
                     with(sharedTransitionScope) {
                         Modifier.sharedElement(
-                            sharedContentState = containerState,
+                            sharedContentState = rememberSharedContentState("music_player_bar"),
                             animatedVisibilityScope = animatedVisibilityScope,
                             boundsTransform = { _, _ ->
-                                androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
+                                tween(MorphDurationMillis, easing = FastOutSlowInEasing)
                             },
+                            clipInOverlayDuringTransition = containerCornerClip,
                         )
                     },
                 )
-                .background(
-                    Brush.verticalGradient(listOf(backdrop.top, backdrop.bottom)),
-                ),
+                .drawBehind {
+                    // 底边外延 MorphBottomOverhang（原因见常量注释）：morph 中矩形底边
+                    // 落在亚像素位置时，最后一行由外延部分盖住，不再透出下层亮色
+                    drawRect(
+                        Brush.verticalGradient(
+                            listOf(backdrop.top, backdrop.bottom),
+                            startY = size.height - rootHeightPx(),
+                            endY = size.height,
+                        ),
+                        size = size.copy(height = size.height + MorphBottomOverhang.toPx()),
+                    )
+                },
         )
         MaterialTheme(colorScheme = playerScheme) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .graphicsLayer { alpha = contentAlpha }
-                    .padding(horizontal = 24.dp)
-                    .statusBarsPadding()
-                    .navigationBarsPadding(),
+                    // 控件列在过渡期间抬进共享 overlay（zIndex 高于 morph 背景矩形与飞行
+                    // 封面）：背景 sharedElement 过渡中在 overlay 里绘制、盖在普通内容之上，
+                    // 不抬上去的话控件的淡入/上浮全程被渐变矩形挡住，直到 morph 结束背景
+                    // 落回原层，控件才"啪"地整块露出 —— 这正是入场突兀的根因。
+                    // 非过渡时原位渲染，常态零开销
+                    .then(
+                        with(sharedTransitionScope) {
+                            Modifier.renderInSharedTransitionScopeOverlay(zIndexInOverlay = 1f)
+                        },
+                    )
+                    // 按矩形当前顶边裁剪（矩形底锚定，顶边 = 高度 × (1 - morph 进度) 处的
+                    // 条形→全屏插值）：控件抬进 overlay 后只在渐变矩形内部可见，绝不画到
+                    // 上方米色列表上；铺满后零裁剪
+                    .drawWithContent {
+                        val p = morphProgress.value
+                        if (p >= 1f) {
+                            drawContent()
+                        } else {
+                            val barH = barHeightPx()
+                            val top = (size.height - barH) * (1f - p)
+                            clipRect(top = top) { this@drawWithContent.drawContent() }
+                        }
+                    }
+                    // 控件入场不再整列统一淡入：顶部按钮行/曲目信息/进度与按钮三组各自
+                    // 经 controlsEnter 错落浮现（见上方 topRow/info/transportProgress）。
+                    // 不再叠加 statusBars/navigationBars 内边距：本页根（NionApp
+                    // Scaffold 的内容区）已经把系统栏排除在外 —— 此前两处 padding
+                    // 是双重计入，控件被整体压离上下边缘（米色线排查时的疑点之一）
+                    .padding(horizontal = 24.dp),
             ) {
                     // ===== 顶部收起按钮 =====
-                    Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    // 入场第一组：最先浮现（封面还在飞时它已半透明出现，提示可收起）
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .controlsEnter(topRowProgress),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
                         IconButton(onClick = onClose) {
                             Icon(
                                 LucideIcons.ChevronDown,
@@ -2498,18 +2832,9 @@ private fun FullPlayerOverlay(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.Center,
                                 ) {
-                                    // 每页封面 sharedElement key：
-                                    // - 迷你条展开：仅当前页用 "music_player_cover"
-                                    //   与迷你条封面配对；
-                                    // - 曲目行点开：各页用自己的
-                                    //   "music_track_cover_<id>"，打开瞬间只有被点行
-                                    //   的 key 存在可见配对方，morph 自然成立
-                                    val coverKey =
-                                        if (openedFromTrackId == null && page == pagerState.currentPage) {
-                                            "music_player_cover"
-                                        } else {
-                                            "music_track_cover_${pageTrack.id}"
-                                        }
+                                    // 仅当前页参与封面 morph：入场配对来源，收起配对播放栏。
+                                    // 切歌只更换封面内容，不把 key 改成新歌的列表行；
+                                    // 相邻预加载页不注册共享元素，避免出现额外配对方。
                                     // 大封面即 morph 目标本身：不再包外层底座，
                                     // 圆角由 CoverArt 的 cornerRadius 统一裁剪
                                     CoverArt(
@@ -2518,31 +2843,40 @@ private fun FullPlayerOverlay(
                                         modifier = Modifier
                                             .size(280.dp)
                                             .then(
-                                                with(sharedTransitionScope) {
+                                                if (page == pagerState.currentPage) with(sharedTransitionScope) {
                                                     Modifier.sharedElement(
-                                                        sharedContentState = rememberSharedContentState(coverKey),
+                                                        sharedContentState = rememberSharedContentState(coverSharedKey),
                                                         animatedVisibilityScope = animatedVisibilityScope,
+                                                        // 封面在背景(0)之上、控件(1)之下；不能依赖配对方的注册顺序，
+                                                        // 收起时先注册的播放栏封面否则会被后注册的退出背景遮住。
+                                                        zIndexInOverlay = 0.5f,
                                                         boundsTransform = { _, _ ->
-                                                            androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
+                                                            tween(MorphDurationMillis, easing = FastOutSlowInEasing)
                                                         },
                                                     )
-                                                },
+                                                } else Modifier,
                                             ),
                                         placeHolderSize = 96.dp,
                                         cornerRadius = 12.dp,
                                     )
 
                                     // ===== 曲名 / 艺术家 / 专辑（跟随页面曲目） =====
+                                    // 入场第二组：封面落定前后浮现在封面下方
                                     Column(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(top = 16.dp),
+                                            .padding(top = 16.dp)
+                                            .controlsEnter(infoProgress),
                                         horizontalAlignment = Alignment.CenterHorizontally,
                                     ) {
                                         Text(
                                             pageTrack.title,
                                             style = MaterialTheme.typography.titleLarge,
                                             fontWeight = FontWeight.Bold,
+                                            // 显式取播放页深色配色的 onSurface：此处不在 Surface 内，
+                                            // 不设颜色会继承外层浅色主题的深色 LocalContentColor，
+                                            // 曲名在深色渐变上几乎不可见（艺术家行显式设色所以正常）
+                                            color = MaterialTheme.colorScheme.onSurface,
                                             textAlign = TextAlign.Center,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
@@ -2584,13 +2918,16 @@ private fun FullPlayerOverlay(
                             valueRange = 0f..sliderMax,
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 8.dp),
+                                .padding(horizontal = 8.dp)
+                                // 入场第三组（进度条 + 时间 + 播放按钮）：最后浮现
+                                .controlsEnter(transportProgress),
                             enabled = vm.durationMs > 0,
                         )
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 8.dp),
+                                .padding(horizontal = 8.dp)
+                                .controlsEnter(transportProgress),
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             Text(
@@ -2609,7 +2946,8 @@ private fun FullPlayerOverlay(
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(vertical = 12.dp),
+                                .padding(vertical = 12.dp)
+                                .controlsEnter(transportProgress),
                             horizontalArrangement = Arrangement.Center,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
@@ -2652,8 +2990,8 @@ private fun FullPlayerOverlay(
                     // ===== 播放队列面板（入口：右上角按钮；底部滑入） =====
                     AnimatedVisibility(
                         visible = queueVisible,
-                        enter = fadeIn(tween(2240)) + slideInVertically(tween(2240)) { it / 3 },
-                        exit = fadeOut(tween(1600)) + slideOutVertically(tween(1600)) { it / 3 },
+                        enter = fadeIn(tween(280)) + slideInVertically(tween(280)) { it / 3 },
+                        exit = fadeOut(tween(200)) + slideOutVertically(tween(200)) { it / 3 },
                         modifier = Modifier.fillMaxSize(),
                     ) {
                         Box(
@@ -2670,8 +3008,8 @@ private fun FullPlayerOverlay(
                                 Column(
                                     modifier = Modifier
                                         .fillMaxSize()
-                                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                                        .navigationBarsPadding(),
+                                        // 同控件层：根已排除系统栏，不再叠 navigationBarsPadding
+                                        .padding(horizontal = 20.dp, vertical = 12.dp),
                                 ) {
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
@@ -2750,7 +3088,7 @@ private fun AnimatedPlayPauseIcon(
     LaunchedEffect(isPlaying) { spin += 360 }
     val rotation by animateFloatAsState(
         targetValue = spin.toFloat(),
-        animationSpec = tween(2000, easing = FastOutSlowInEasing),
+        animationSpec = tween(250, easing = FastOutSlowInEasing),
         label = "playPauseSpin",
     )
     AnimatedContent(
@@ -2760,14 +3098,14 @@ private fun AnimatedPlayPauseIcon(
             // 全部 tween + FastOutSlowInEasing，与全 app 动画语言一致
             (
                 scaleIn(
-                    animationSpec = tween(1600, easing = FastOutSlowInEasing),
+                    animationSpec = tween(200, easing = FastOutSlowInEasing),
                     initialScale = 0.5f,
-                ) + fadeIn(tween(1200, easing = FastOutSlowInEasing))
+                ) + fadeIn(tween(150, easing = FastOutSlowInEasing))
                 ) togetherWith (
                 scaleOut(
-                    animationSpec = tween(1200, easing = FastOutSlowInEasing),
+                    animationSpec = tween(150, easing = FastOutSlowInEasing),
                     targetScale = 0.5f,
-                ) + fadeOut(tween(800, easing = FastOutSlowInEasing))
+                ) + fadeOut(tween(100, easing = FastOutSlowInEasing))
                 )
         },
         label = "playPause",
@@ -2788,12 +3126,13 @@ private fun AnimatedPlayPauseIcon(
  * 单个曲目行：封面缩略图 + 曲名/艺术家 + 时长。
  *
  * 封面来源双通道：本地曲目用专辑内嵌封面（albumArtUri），服务器曲目用 coverUrl；
- * 缩略图可挂 sharedElement（key 带曲目 id），从列表点歌时飞成播放页大封面。
+ * 封面装在 coverSlot 里（固定槽位 + 每行自己的退场作用域），从列表点歌时
+ * 行内小封面飞成播放页大封面，morph 期间槽位不塌、行不回流。
  *
  * @param track 曲目数据
  * @param index 序号（仅用于点击回调时的队列下标）
- * @param isCurrent 是否为当前播放曲目（高亮标题 + 封面角标音符图标）
- * @param coverModifier 行内小封面的 sharedElement 工厂（传入曲目 id 生成 key）
+ * @param isCurrent 是否为当前播放曲目（高亮标题标识当前曲）
+ * @param coverSlot 行内封面槽（传入曲目 id 与封面内容，由 MusicScreen 注入 morph 结构）
  * @param onClick 点击整行时触发（开始播放该曲）
  */
 @Composable
@@ -2801,7 +3140,7 @@ private fun TrackRow(
     track: PlayableTrack,
     index: Int,
     isCurrent: Boolean,
-    coverModifier: @Composable (String) -> Modifier = { Modifier },
+    coverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit = { _, content -> content() },
     // 行尾移除按钮回调；null（默认）不显示 —— 歌单详情传入以支持单首移除
     onRemove: (() -> Unit)? = null,
     onClick: () -> Unit,
@@ -2815,15 +3154,16 @@ private fun TrackRow(
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // 封面缩略图：本地曲目显示专辑内嵌封面，服务器曲目显示服务器封面，
-        // 均无时显示专辑图标占位（当前曲仅由标题高亮标识，封面不加角标）
-        CoverArt(
-            coverUrl = track.coverArtUrl,
-            albumArtUri = track.albumArtUri,
-            modifier = Modifier
-                .size(40.dp)
-                .then(coverModifier(track.id)),
-            cornerRadius = 12.dp,
-        )
+        // 均无时显示专辑图标占位（当前曲仅由标题高亮标识，封面不加角标）。
+        // 经 coverSlot 包裹：槽位固定 40dp，morph 时封面“被借走”飞行、行不回流
+        coverSlot(track.id) {
+            CoverArt(
+                coverUrl = track.coverArtUrl,
+                albumArtUri = track.albumArtUri,
+                modifier = Modifier.size(40.dp),
+                cornerRadius = 12.dp,
+            )
+        }
         Spacer(modifier = Modifier.width(10.dp))
         Column(modifier = Modifier.weight(1f)) {
             Text(
@@ -2959,7 +3299,7 @@ private fun AlbumRow(
                         animatedVisibilityScope = animatedVisibilityScope,
                         // 临界弹簧：柔和无过冲的尺寸/位置过渡
                         boundsTransform = { _, _ ->
-                            androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
+                            spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
                         },
                     )
                 },
@@ -2981,7 +3321,7 @@ private fun AlbumRow(
                             sharedContentState = rememberSharedContentState("music_album_cover_${album.id}"),
                             animatedVisibilityScope = animatedVisibilityScope,
                             boundsTransform = { _, _ ->
-                                androidx.compose.animation.core.tween(2500, easing = androidx.compose.animation.core.LinearEasing)
+                                spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
                             },
                         )
                     },

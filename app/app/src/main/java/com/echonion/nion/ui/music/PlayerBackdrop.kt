@@ -3,11 +3,14 @@ package com.echonion.nion.ui.music
 import android.graphics.Bitmap
 import android.util.LruCache
 import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.AnimationSpec
+import androidx.compose.animation.core.snap
 import androidx.compose.animation.core.tween
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -42,6 +45,27 @@ data class PlayerBackdropColors(
 /** 提取结果 LruCache：key 与 CoverArtCache 一致（"local:<uri>" 或封面 URL） */
 private val backdropCache = object : LruCache<String, PlayerBackdropColors>(32) {}
 
+/** 封面缓存 key：与 CoverArt / CoverArtCache 完全一致（本地封面优先） */
+private fun backdropKey(track: PlayableTrack?): String? =
+    track?.albumArtUri?.let { "local:$it" } ?: track?.coverArtUrl
+
+/**
+ * 同步取色（主线程可调，不做任何 IO）：
+ * 1. 取色缓存命中 → 直接返回；
+ * 2. 否则若列表/迷你条已把封面位图解码进 [CoverArtCache]（点歌时被点的行
+ *    封面必然已显示过）→ 当场 Palette 提取（512px 位图约数毫秒）并回写缓存；
+ * 3. 都没有 → null（调用方走异步加载）。
+ *
+ * 用途：点歌/点迷你条的回调里拿到"本首歌的真实颜色"，让 morph 首帧起整块
+ * 就是歌曲色 —— 不再先以米色兜底展开、过半秒才异步渐变成歌曲色
+ */
+internal fun peekBackdrop(track: PlayableTrack?): PlayerBackdropColors? {
+    val key = backdropKey(track) ?: return null
+    backdropCache.get(key)?.let { return it }
+    val bitmap = CoverArtCache.get(key) ?: return null
+    return extractBackdrop(bitmap).also { backdropCache.put(key, it) }
+}
+
 /**
  * 提取封面背景色：上=深鲜艳色，下=主色压暗，accent=鲜艳色提亮。
  *
@@ -65,34 +89,42 @@ private fun extractBackdrop(bitmap: Bitmap): PlayerBackdropColors {
 }
 
 /**
- * 当前曲目的动态背景色（带 600ms 颜色过渡动画）。
+ * 当前曲目的动态背景色。
  *
  * 封面位图复用 [CoverArtCache] / [loadCoverBitmap]（与列表封面同一来源与
- * 缓存）：先查取色缓存 → 未命中异步加载封面提取 → 回写两份缓存。
- * 无封面/加载失败时保持主题背景色兜底。
+ * 缓存）：先同步查两级缓存（[peekBackdrop]）→ 未命中异步加载封面提取 →
+ * 回写两份缓存。无封面/加载失败时保持主题背景色兜底。
+ *
+ * @param track 当前曲目（null = 无播放，返回兜底色）
+ * @param animateChanges 切歌换色是否 600ms 渐变：播放页打开期间传 true（上下滑
+ *   切歌平滑过渡）；播放页关闭时传 false —— 打开那一帧的换歌直接取新色，
+ *   morph 首帧就是新歌颜色
  */
 @Composable
-internal fun rememberPlayerBackdrop(track: PlayableTrack?): PlayerBackdropColors {
+internal fun rememberPlayerBackdrop(track: PlayableTrack?, animateChanges: Boolean): PlayerBackdropColors {
     val context = LocalContext.current
     val fallback = PlayerBackdropColors(
         top = MaterialTheme.colorScheme.surfaceContainerHigh,
         bottom = MaterialTheme.colorScheme.background,
     )
     // 缓存 key 与 CoverArt 完全一致：本地封面优先
-    val cacheKey = track?.albumArtUri?.let { "local:$it" } ?: track?.coverArtUrl
+    val cacheKey = backdropKey(track)
 
-    var target by remember {
-        mutableStateOf(cacheKey?.let { backdropCache.get(it) } ?: fallback)
+    // target：本曲目标色。remember(cacheKey) —— 切歌的同一次组合里就同步换成
+    // 新曲目的颜色（peekBackdrop 命中取色缓存或封面位图缓存时零延迟），不会有
+    // "新歌第一帧还是旧色"的帧。两级缓存都未命中时沿用上一首的已定颜色
+    // （lastResolved）等异步结果 —— 不退回米色兜底，否则"下一首/自动连播"时
+    // 播放页背景会先朝米色渐变再变回歌曲色；只有无封面曲目才用兜底色
+    val lastResolved = remember { Ref<PlayerBackdropColors?>(null) }
+    var target by remember(cacheKey) {
+        mutableStateOf(
+            if (cacheKey == null) fallback else peekBackdrop(track) ?: lastResolved.value ?: fallback,
+        )
     }
+    SideEffect { lastResolved.value = target }
     LaunchedEffect(cacheKey) {
-        val key = cacheKey ?: run {
-            target = fallback
-            return@LaunchedEffect
-        }
-        backdropCache.get(key)?.let {
-            target = it
-            return@LaunchedEffect
-        }
+        val key = cacheKey ?: return@LaunchedEffect
+        if (backdropCache.get(key) != null) return@LaunchedEffect
         val bitmap = withContext(Dispatchers.IO) {
             loadCoverBitmap(context, track?.coverArtUrl, track?.albumArtUri)
         }?.also { CoverArtCache.put(key, it) }
@@ -101,11 +133,24 @@ internal fun rememberPlayerBackdrop(track: PlayableTrack?): PlayerBackdropColors
         target = extracted
     }
 
-    // 切歌时背景色平滑过渡，避免硬切
-    val top by animateColorAsState(target.top, tween(2000), label = "backdropTop")
-    val bottom by animateColorAsState(target.bottom, tween(2000), label = "backdropBottom")
-    return PlayerBackdropColors(top, bottom, target.accent)
+    // 本次换色是否渐变：取"切歌前一帧"的 animateChanges（非快照的普通标志位，
+    // 读写不触发重组）。播放页内上下滑切歌 → 600ms 渐变；点歌/点迷你条打开
+    // 的那一帧换歌（前一帧播放页还关着）→ 当帧直接取新色，morph 首帧即新歌
+    // 颜色 —— 否则会从上一首/米色兜底慢慢渐变，整块容器带着灰米色铺开
+    val lastAnimateChanges = remember { Ref(false) }
+    val animateThisKey = remember(cacheKey) { lastAnimateChanges.value }
+    SideEffect { lastAnimateChanges.value = animateChanges }
+
+    // 渐变动画状态始终跟踪 target（非渐变时 snap，保证下次渐变从正确颜色起步）
+    val spec: AnimationSpec<Color> = if (animateThisKey) tween(600) else snap()
+    val top by animateColorAsState(target.top, spec, label = "backdropTop")
+    val bottom by animateColorAsState(target.bottom, spec, label = "backdropBottom")
+    // 非渐变时直接返回 target（animateColorAsState 的 snap 要晚一帧才生效）
+    return if (animateThisKey) PlayerBackdropColors(top, bottom, target.accent) else target
 }
+
+/** 组合间传递的普通可变引用（刻意不用 MutableState：只做记录，读写不驱动重组） */
+private class Ref<T>(var value: T)
 
 /**
  * 播放条/导航栏共用的"一体色"：唯一颜色源 [rememberPlayerBackdrop] 的底端色。
@@ -117,7 +162,7 @@ internal fun rememberPlayerBackdrop(track: PlayableTrack?): PlayerBackdropColors
 internal fun immersiveUnitColor(active: Boolean, song: Color, fallback: Color): Color {
     val faded by animateColorAsState(
         targetValue = if (active) song else fallback,
-        animationSpec = tween(2000),
+        animationSpec = tween(250),
         label = "immersiveUnit",
     )
     return if (active) song else faded

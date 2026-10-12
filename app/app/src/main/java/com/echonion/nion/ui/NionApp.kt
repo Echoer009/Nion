@@ -5,8 +5,12 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.windowInsetsTopHeight
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -15,12 +19,14 @@ import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
@@ -201,9 +207,11 @@ fun NionApp() {
                 coroutineScope.launch { dualState.closePanel() }
             }
 
-            // 音乐沉浸态唯一权威：playerBackdrop（播放页组合期间非空，含收起
-            // 退场全程）。染色的只有播放条与底部导航栏（同一来源同一曲线，
-            // immersiveUnitColor），其余界面一律不参与染色
+            // 音乐沉浸态唯一权威：playerBackdrop 非空。它在点击展开的回调里先行
+            // 写入（首帧即歌曲色），由 FullPlayerOverlay 随取色实时更新，并在播放页
+            // 组合销毁（= 收回 morph 完全结束）时置空 ⇒ 收回全程保持歌曲色，落定后
+            // 播放条与导航栏同帧开始褪回。染色的只有播放条与底部导航栏（同一来源
+            // 同一曲线，immersiveUnitColor），其余界面一律不参与染色
             val musicImmersive = currentRoute == "music" && musicVm.playerBackdrop != null
             val appScheme = MaterialTheme.colorScheme
 
@@ -222,12 +230,12 @@ fun NionApp() {
                         } else {
                             appScheme.primary
                         },
-                        animationSpec = androidx.compose.animation.core.tween(2000),
+                        animationSpec = androidx.compose.animation.core.tween(250),
                         label = "navPrimary",
                     )
                     val navUnselected by androidx.compose.animation.animateColorAsState(
                         targetValue = if (musicImmersive) Color(0xFFCAC4D0) else appScheme.onSurfaceVariant,
-                        animationSpec = androidx.compose.animation.core.tween(2000),
+                        animationSpec = androidx.compose.animation.core.tween(250),
                         label = "navUnselected",
                     )
                     MaterialTheme(
@@ -343,6 +351,37 @@ fun NionApp() {
                         }
                     }
                 }
+            }
+
+            // 音乐播放页的状态栏条：各页 Scaffold 用 contentWindowInsets = statusBars
+            // 把内容推到状态栏下方，状态栏区域露出的是窗口米色底 —— 播放页铺满后
+            // 顶部会留一条米色带（与底部导航栏的同类问题对称）。播放页铺满期间在状态栏
+            // 高度盖一条歌曲渐变顶端色（与渐变首像素同色，交界无缝）；展开/收回途中状态栏
+            // 正下方是米色列表，状态栏保持米色才与之连续。
+            // 可见性在绘制阶段读 morph 进度 State 本体（vm.playerMorphProgress），与容器
+            // 矩形同一帧判定"是否铺到顶" —— 走重组链路会晚 2~3 帧，收起起步时状态栏下
+            // 露出几像素米色缝。仅音乐路由组合，其他页面完全不受影响
+            if (currentRoute == "music") {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .windowInsetsTopHeight(WindowInsets.statusBars)
+                        .drawBehind {
+                            val color = musicVm.playerBackdrop?.top ?: return@drawBehind
+                            if ((musicVm.playerMorphProgress?.value ?: 0f) >= 1f) drawRect(color)
+                        },
+                )
+            }
+            // 系统栏图标深浅：状态栏图标随状态栏条（铺满时为深色歌曲色 → 白图标）；
+            // 导航栏手势条随底部导航栏（沉浸全程为歌曲色 → 白手势条）。退出后恢复
+            // NionTheme 的深色图标。SideEffect 在 NionTheme 之后执行，覆盖其设置
+            val playerSettled = currentRoute == "music" && musicVm.isFullPlayerSettled
+            val systemBarView = androidx.compose.ui.platform.LocalView.current
+            SideEffect {
+                val window = (systemBarView.context as? android.app.Activity)?.window ?: return@SideEffect
+                val controller = androidx.core.view.WindowCompat.getInsetsController(window, systemBarView)
+                controller.isAppearanceLightStatusBars = !playerSettled
+                controller.isAppearanceLightNavigationBars = !musicImmersive
             }
 
             // 全局悬浮层

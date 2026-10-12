@@ -8,6 +8,7 @@ import android.util.Log
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -73,7 +74,17 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        // 导航栏透明 + 不强制对比度遮罩（SystemBarStyle.light 使 isNavigationBarContrastEnforced=false）。
+        // 默认 enableEdgeToEdge() 会让系统在三键导航（及部分 ROM 的手势条）区域叠一层
+        // 90% 白色对比度遮罩：米色主题下看不出来，但音乐播放页沉浸（深色歌曲色）时，
+        // 屏幕最底部会出现一条盖在应用之上的浅色/米色带 —— 应用内任何几何/颜色修改
+        // 都盖不住它（它画在系统层）。关闭后该区域直接显示应用底部导航栏的容器色
+        enableEdgeToEdge(
+            navigationBarStyle = SystemBarStyle.light(
+                android.graphics.Color.TRANSPARENT,
+                android.graphics.Color.TRANSPARENT,
+            ),
+        )
 
         // 请求通知权限（Android 13+）
         requestNotificationPermission()

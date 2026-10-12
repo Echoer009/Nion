@@ -201,6 +201,19 @@ class MusicViewModel(
     var playerBackdrop by mutableStateOf<PlayerBackdropColors?>(null)
 
     /**
+     * 播放页"已铺满"（容器 morph 进度到 1）：NionApp 据此切换状态栏图标深浅
+     * （铺满时状态栏是深色歌曲色 → 白图标）。收起时矩形一离开顶部即为 false
+     */
+    var isFullPlayerSettled by mutableStateOf(false)
+
+    /**
+     * 播放页容器 morph 进度（0=条形 1=铺满）的 State 本体；播放页组合期间非空。
+     * NionApp 状态栏条在绘制阶段读取它，与容器矩形同帧判定是否铺到顶 ——
+     * 走普通重组链路会晚 2~3 帧，收起起步时状态栏与矩形之间露出几像素米色缝
+     */
+    var playerMorphProgress by mutableStateOf<androidx.compose.runtime.State<Float>?>(null)
+
+    /**
      * 是否处于"播放中"的视觉状态（含缓冲）。
      * 不直接采用 player.isPlaying：seek 时 ExoPlayer 会短暂进入 BUFFERING，
      * isPlaying 瞬间 false→true，会造成播放/暂停图标闪一次切换动画。
