@@ -31,6 +31,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import uniffi.nion_core.NionCore
 
@@ -710,6 +711,57 @@ class MusicViewModel(
     private fun filterOwnPlaylists(list: List<LibraryPlaylist>, username: String): List<LibraryPlaylist> =
         list.filter { it.owner == null || it.owner == username }
 
+    // ── 视口内歌单预取 ──
+    // 本会话已预取（或在途）的歌单 id：滚动时同一行反复进出组合只触发一次
+    private val prefetchedPlaylists = mutableSetOf<String>()
+
+    // 预取并发上限：快速滚动长列表时也不打爆网关（与正常操作共用连接池）
+    private val playlistPrefetchSemaphore = kotlinx.coroutines.sync.Semaphore(2)
+
+    /**
+     * 预取歌单详情到磁盘缓存 —— 歌单行进入视口（LazyColumn 组合）时由 UI 调用。
+     * 拉取 getPlaylist 原始 JSON 写入 [SubsonicJsonCache]（openPlaylist 命中即秒开），
+     * 并预热前 [PREFETCH_COVER_COUNT] 首曲目的 web 封面（点进来封面直接就位，
+     * 不逐行弹出）。纯后台预热：不改任何 UI 状态、失败静默（下次组合可重试）。
+     * 本地歌单打开零耗时，直接跳过。
+     *
+     * @param id 统一歌单 id
+     */
+    fun prefetchPlaylist(id: String) {
+        if (localPlaylistDbId(id) != null) return
+        synchronized(prefetchedPlaylists) {
+            if (id in prefetchedPlaylists) return
+            prefetchedPlaylists += id
+        }
+        viewModelScope.launch {
+            runCatching {
+                val client = buildClient() ?: return@launch
+                val cacheKey = "playlist:$id"
+                val raw: String = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
+                    // 已有缓存（早前打开过）不重复拉 JSON，只补封面
+                    ?: playlistPrefetchSemaphore.withPermit {
+                        // 统一持有原始 JSON 字符串（磁盘缓存与解析共用同一形态）
+                        client.getPlaylistRaw(id).toString().also {
+                            withContext(Dispatchers.IO) { SubsonicJsonCache.write(app, cacheKey, it) }
+                        }
+                    }
+                // 封面预热：详情页首屏前几首的 web 封面逐个写入三级缓存
+                //（与 CoverArt 展示用同一个稳定 key，打开时直接命中）
+                val (_, songs) = client.parsePlaylistResponse(JSONObject(raw))
+                songs.take(PREFETCH_COVER_COUNT)
+                    .filter { it.coverArtUrl?.startsWith("http") == true }
+                    .forEach { track ->
+                        withContext(Dispatchers.IO) {
+                            loadCoverBitmapCached(app, track.coverArtUrl, null)
+                        }
+                    }
+            }.onFailure {
+                // 失败移出去重集合：该行下次进视口可重试（网络波动不该毁掉整个会话的预取）
+                synchronized(prefetchedPlaylists) { prefetchedPlaylists -= id }
+            }
+        }
+    }
+
     /**
      * 加载当前音源的歌单列表。
      * - 云端：getPlaylists → 统一映射为 [LibraryPlaylist]
@@ -1237,6 +1289,9 @@ class MusicViewModel(
 
         /** 两次建单的最小间隔（毫秒）：客户端限流窗口，防手抖连点重复建单 */
         const val PLAYLIST_CREATE_MIN_INTERVAL_MS = 5_000L
+
+        /** 歌单预取时预热封面的曲目数：约等于详情页一屏半可见行数 */
+        const val PREFETCH_COVER_COUNT = 16
 
         /** 类脑娘服务器网页注册入口 —— 配置引导表单「注册账号」按钮用 ACTION_VIEW 打开；
          *  注册完成后网页重定向 nion://musicauth 深链回传账密，App 自动完成配置 */

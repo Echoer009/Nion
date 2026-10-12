@@ -2059,6 +2059,9 @@ private fun PlaylistListContent(
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(vm.playlists, key = { "playlist-${it.id}" }) { playlist ->
+            // 视口预取：行进入组合（可见或即将可见）即后台拉取详情与首批封面，
+            // 点进来歌曲和封面直接呈现、无加载等待。本地歌单在 VM 内部跳过
+            LaunchedEffect(playlist.id) { vm.prefetchPlaylist(playlist.id) }
             PlaylistRow(
                 playlist = playlist,
                 selected = playlist.id in selectedIds,
