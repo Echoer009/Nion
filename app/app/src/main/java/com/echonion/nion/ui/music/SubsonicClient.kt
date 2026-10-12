@@ -3,6 +3,8 @@ package com.echonion.nion.ui.music
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.HttpUrl.Companion.toHttpUrl
+import android.content.Context
+import java.io.File
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONObject
@@ -37,11 +39,10 @@ class SubsonicClient(
     private val username: String,
     private val password: String,
 ) {
-    /** 单例共享的 HTTP 客户端：音乐接口无需 Cookie，全App共用连接池即可 */
-    private val http: OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .build()
+    // HTTP 客户端见 companion.sharedHttpClient：必须全 App 唯一 —— 每个
+    // SubsonicClient 实例各建一个 OkHttpClient 的话，连接池互不相通，
+    // 每次 API 调用都重新 TCP+TLS 握手（实测慢 100~300ms，之前 buildClient()
+    // 每次调用都 new 客户端，正是"打开歌单/专辑偏慢"的元凶之一）
 
     /** 规范化后的服务器根 URL（保证以 http(s):// 开头、不以 / 结尾） */
     val baseUrl: String = normalizeBaseUrl(baseUrl)
@@ -98,14 +99,18 @@ class SubsonicClient(
      * @param size 返回条数上限（Subsonic 默认 10，最大一般 500）
      * @return 专辑列表（不含歌曲明细）
      */
-    suspend fun getAlbumList2(type: String, size: Int = 30): List<SubsonicAlbum> =
+    suspend fun getAlbumList2Raw(type: String, size: Int = 30): JSONObject =
         withContext(Dispatchers.IO) {
-            val body = execute("getAlbumList2.view", "type" to type, "size" to size.toString())
-            // albumList2.album 可能缺省（无专辑时），回退空列表
-            val albums = body.optJSONObject("albumList2")?.optJSONArray("album")
-                ?: return@withContext emptyList()
-            parseAlbumArray(albums)
+            execute("getAlbumList2.view", "type" to type, "size" to size.toString())
         }
+
+    /** 解析 getAlbumList2 响应 —— 网络结果与磁盘缓存走同一解析路径 */
+    internal fun parseAlbumListResponse(body: JSONObject): List<SubsonicAlbum> {
+        // albumList2.album 可能缺省（无专辑时），回退空列表
+        val albums = body.optJSONObject("albumList2")?.optJSONArray("album")
+            ?: return emptyList()
+        return parseAlbumArray(albums)
+    }
 
     /**
      * 获取专辑详情（含曲目列表）。
@@ -113,16 +118,20 @@ class SubsonicClient(
      * @param albumId 专辑 ID（来自 getAlbumList2 / search3）
      * @return 专辑元信息 + 已转换为 [PlayableTrack] 的歌曲列表
      */
-    suspend fun getAlbum(albumId: String): SubsonicAlbumDetail = withContext(Dispatchers.IO) {
-        val body = execute("getAlbum.view", "id" to albumId)
+    suspend fun getAlbumRaw(albumId: String): JSONObject = withContext(Dispatchers.IO) {
+        execute("getAlbum.view", "id" to albumId)
+    }
+
+    /** 解析 getAlbum 响应（专辑元信息 + 曲目列表）—— 网络与磁盘缓存共用 */
+    internal fun parseAlbumResponse(body: JSONObject): SubsonicAlbumDetail {
         val albumJson = body.getJSONObject("album")
         val album = parseAlbum(albumJson)
         // 专辑内歌曲：song 数组，服务端已按音轨号排序
-        val songsJson = albumJson.optJSONArray("song") ?: return@withContext SubsonicAlbumDetail(album, emptyList())
+        val songsJson = albumJson.optJSONArray("song") ?: return SubsonicAlbumDetail(album, emptyList())
         val songs = (0 until songsJson.length()).map { i ->
             parseSong(songsJson.getJSONObject(i))
         }
-        SubsonicAlbumDetail(album, songs)
+        return SubsonicAlbumDetail(album, songs)
     }
 
     /**
@@ -188,12 +197,16 @@ class SubsonicClient(
      *
      * @return 歌单列表（不含内含曲目明细，只有 songCount/duration 等汇总信息）
      */
-    suspend fun getPlaylists(): List<SubsonicPlaylist> = withContext(Dispatchers.IO) {
-        val body = execute("getPlaylists.view")
+    suspend fun getPlaylistsRaw(): JSONObject = withContext(Dispatchers.IO) {
+        execute("getPlaylists.view")
+    }
+
+    /** 解析 getPlaylists 响应 —— 网络与磁盘缓存共用同一解析路径 */
+    internal fun parsePlaylistsResponse(body: JSONObject): List<SubsonicPlaylist> {
         // 结构：playlists.playlist[]；服务器上没有歌单时 playlist 数组可能缺省，回退空列表
         val arr = body.optJSONObject("playlists")?.optJSONArray("playlist")
-            ?: return@withContext emptyList()
-        (0 until arr.length()).map { parsePlaylist(arr.getJSONObject(it)) }
+            ?: return emptyList()
+        return (0 until arr.length()).map { parsePlaylist(arr.getJSONObject(it)) }
     }
 
     /**
@@ -222,7 +235,7 @@ class SubsonicClient(
             if (direct != null) return@withContext direct
 
             // 路径二：回查歌单列表，取同名最新的一条（服务端返回顺序中新歌单在前）兜底
-            val fallback = getPlaylists()
+            val fallback = parsePlaylistsResponse(getPlaylistsRaw())
                 .filter { it.name == name && (it.owner.isBlank() || it.owner == username) }
                 .firstOrNull()
                 ?: throw SubsonicException("创建歌单后未能定位新歌单: $name")
@@ -278,17 +291,20 @@ class SubsonicClient(
      * @param playlistId 歌单 id
      * @return 歌单元信息 + 内含曲目（服务端保证曲目按添加顺序排列）
      */
-    suspend fun getPlaylist(playlistId: String): Pair<SubsonicPlaylist, List<PlayableTrack>> =
-        withContext(Dispatchers.IO) {
-            val body = execute("getPlaylist.view", "id" to playlistId)
-            val playlistJson = body.getJSONObject("playlist")
-            val playlist = parsePlaylist(playlistJson)
-            // entry 数组可能缺省（空歌单），回退空列表
-            val entries = playlistJson.optJSONArray("entry")
-                ?: return@withContext playlist to emptyList()
-            val songs = (0 until entries.length()).map { parseSong(entries.getJSONObject(it)) }
-            playlist to songs
-        }
+    suspend fun getPlaylistRaw(playlistId: String): JSONObject = withContext(Dispatchers.IO) {
+        execute("getPlaylist.view", "id" to playlistId)
+    }
+
+    /** 解析 getPlaylist 响应（歌单元信息 + 曲目列表）—— 网络与磁盘缓存共用 */
+    internal fun parsePlaylistResponse(body: JSONObject): Pair<SubsonicPlaylist, List<PlayableTrack>> {
+        val playlistJson = body.getJSONObject("playlist")
+        val playlist = parsePlaylist(playlistJson)
+        // entry 数组可能缺省（空歌单），回退空列表
+        val entries = playlistJson.optJSONArray("entry")
+            ?: return playlist to emptyList()
+        val songs = (0 until entries.length()).map { parseSong(entries.getJSONObject(it)) }
+        return playlist to songs
+    }
 
     // ──────────────────────────────────────────────────────
     // 内部实现
@@ -304,7 +320,7 @@ class SubsonicClient(
      */
     private fun execute(endpoint: String, vararg params: Pair<String, String>): JSONObject {
         val request = Request.Builder().url(buildUrl(endpoint, *params)).build()
-        val response = http.newCall(request).execute()
+        val response = sharedHttpClient.newCall(request).execute()
         val bodyText = response.use {
             if (!it.isSuccessful) {
                 // Navidrome 对错误场景可能仍返回 200，此处兜底 HTTP 层错误
@@ -404,6 +420,16 @@ class SubsonicClient(
     )
 
     companion object {
+        /**
+         * 全 App 共享的 HTTP 客户端：所有 Subsonic API 调用与封面下载共用
+         * 同一连接池（keep-alive 复用，免重复握手）。音乐接口无 Cookie，
+         * 全局一个实例是 OkHttp 官方推荐用法
+         */
+        internal val sharedHttpClient: OkHttpClient = OkHttpClient.Builder()
+            .connectTimeout(10, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build()
+
         /** Subsonic 协议版本 —— 1.16.1 是当前主流服务端（Navidrome）支持的版本 */
         private const val PROTOCOL_VERSION = "1.16.1"
 
@@ -447,3 +473,45 @@ class SubsonicClient(
  * UI 层捕获后展示 message 引导用户检查地址/账密。
  */
 class SubsonicException(message: String) : Exception(message)
+
+/**
+ * Subsonic JSON 响应磁盘缓存 —— 歌单详情/专辑详情/列表的"秒开"层。
+ *
+ * 存储内容是服务端原始响应体（subsonic-response 内层 JSON 字符串），读取后经
+ * [SubsonicClient] 的各 parse*Response 复用同一套解析器，不引入序列化依赖。
+ * key 由调用方拼（如 "playlist:<id>" / "albums:newest:30"），文件名取 md5。
+ * 目录 cacheDir/subsonic-json：系统磁盘紧张时可整体回收，不进备份。
+ *
+ * 使用姿势（stale-while-revalidate）：打开时先读缓存立即上屏，再发网络请求
+ * 刷新并回写；数据变更（增删曲目/改名/删歌单）时精确 remove 对应 key。
+ */
+internal object SubsonicJsonCache {
+    private const val DIR_NAME = "subsonic-json"
+    private var dir: File? = null
+
+    private fun dirOf(context: Context): File =
+        dir ?: File(context.applicationContext.cacheDir, DIR_NAME).apply { mkdirs() }
+            .also { dir = it }
+
+    private fun fileName(key: String): String {
+        val digest = java.security.MessageDigest.getInstance("MD5")
+            .digest(key.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) } + ".json"
+    }
+
+    /** 读缓存；无缓存返回 null */
+    fun read(context: Context, key: String): String? {
+        val file = File(dirOf(context), fileName(key))
+        return runCatching { file.readText() }.getOrNull()
+    }
+
+    /** 写缓存（整文件覆盖） */
+    fun write(context: Context, key: String, json: String) {
+        runCatching { File(dirOf(context), fileName(key)).writeText(json) }
+    }
+
+    /** 精确失效：数据变更时删除对应缓存 */
+    fun remove(context: Context, key: String) {
+        runCatching { File(dirOf(context), fileName(key)).delete() }
+    }
+}

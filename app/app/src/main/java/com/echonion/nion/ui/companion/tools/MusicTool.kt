@@ -336,7 +336,7 @@ track_id 来源：search_music、list_all_songs、get_playlist_tracks 返回的 
             }
         } else {
             val c = client ?: return cloudUnconfiguredHint(source)
-            c.getPlaylists().map {
+            c.parsePlaylistsResponse(c.getPlaylistsRaw()).map {
                 JSONObject()
                     .put("playlist_id", it.id)
                     .put("name", it.name)
@@ -385,7 +385,7 @@ track_id 来源：search_music、list_all_songs、get_playlist_tracks 返回的 
             JSONObject().put("playlist_id", playlistId).put("total", items.size).put("tracks", arr).toString()
         } else {
             val c = client ?: return cloudUnconfiguredHint(source)
-            val (_, songs) = c.getPlaylist(playlistId)
+            val (_, songs) = c.parsePlaylistResponse(c.getPlaylistRaw(playlistId))
             val arr = JSONArray()
             songs.forEachIndexed { i, track ->
                 arr.put(track.toJSON().put("position", i + 1))
@@ -470,7 +470,7 @@ track_id 来源：search_music、list_all_songs、get_playlist_tracks 返回的 
             items.mapNotNull { lib[it.trackId.toString()] }
         } else {
             val c = client ?: return cloudUnconfiguredHint(source)
-            c.getPlaylist(playlistId).second
+            c.parsePlaylistResponse(c.getPlaylistRaw(playlistId)).second
         }
         if (tracks.isEmpty()) return """{"error":"歌单内没有可播放的曲目（本地曲目可能已从设备移除）"}"""
         MusicControllerFacade.setQueueAndPlay(tracks, 0)

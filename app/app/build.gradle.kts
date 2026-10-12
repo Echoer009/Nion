@@ -126,6 +126,9 @@ dependencies {
 
     // Media3 —— 音乐模块播放器：ExoPlayer 播放内核 + MediaSession 通知栏控制 + UI 组件
     implementation("androidx.media3:media3-exoplayer:1.11.1")
+    // SimpleCache 的 DatabaseProvider（缓存索引持久化）在此 artifact；media3-datasource
+    // 只以 implementation 依赖它，不透出，需显式声明
+    implementation("androidx.media3:media3-database:1.11.1")
     implementation("androidx.media3:media3-session:1.11.1")
     implementation("androidx.media3:media3-ui:1.11.1")
 

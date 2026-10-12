@@ -173,6 +173,13 @@ object MusicControllerFacade {
         return MediaItem.Builder()
             .setMediaId(track.id)
             .setUri(track.playbackUri)
+            // 音频缓存键与 MusicViewModel.playQueue 保持一致："song:<trackId>"
+            //（stream URL 的认证盐每次启动随机，不能当缓存键）；本地曲目不设
+            .apply {
+                if (track.playbackUri?.startsWith("http") == true) {
+                    setCustomCacheKey("song:${track.id}")
+                }
+            }
             .setMediaMetadata(
                 MediaMetadata.Builder()
                     .setTitle(track.title)

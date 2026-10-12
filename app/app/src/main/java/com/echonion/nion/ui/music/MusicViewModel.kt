@@ -3,12 +3,15 @@ package com.echonion.nion.ui.music
 import android.app.Application
 import android.content.ComponentName
 import android.net.Uri
+import org.json.JSONObject
 import com.echonion.nion.core
 import com.echonion.nion.dataEvents
 import com.echonion.nion.ui.companion.tools.DataType
 import android.provider.MediaStore
 import androidx.core.content.ContextCompat
 import androidx.media3.common.C
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.cache.CacheDataSource
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.Player
@@ -273,6 +276,8 @@ class MusicViewModel(
             // 切歌立即清零进度：旧歌进度会残留一帧渲染成"播完"满格，
             // 等 500ms 轮询到来才闪回，这里主线程回调直接重置
             positionMs = 0L
+            // 切歌后预取新的下一首到音频缓存（后台静默，见 prefetchNextTrack）
+            prefetchNextTrack()
             durationMs = 0L
         }
 
@@ -548,10 +553,26 @@ class MusicViewModel(
         isLoadingServer = true
         serverError = null
         viewModelScope.launch {
-            runCatching { client.getAlbumList2(type = "newest", size = 30) }
-                // 服务器专辑统一映射成 LibraryAlbum，UI 层不感知 Subsonic 类型
-                .onSuccess { albums = it.map { album -> album.toLibraryAlbum() } }
-                .onFailure { serverError = it.message ?: "加载失败" }
+            // ① 磁盘缓存先显（跨启动冷启动不再空屏转圈）；缓存键含音源参数，
+            //    专辑库是全服务器共享的，不按用户区分
+            val cacheKey = "albums:newest:30"
+            runCatching {
+                val raw = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
+                raw?.let { client.parseAlbumListResponse(JSONObject(it)) }
+            }.getOrNull()?.takeIf { albums.isEmpty() }?.let { cached ->
+                albums = cached.map { album -> album.toLibraryAlbum() }
+            }
+            // ② 网络刷新（stale-while-revalidate）：成功后覆盖上屏并回写缓存
+            runCatching { client.getAlbumList2Raw(type = "newest", size = 30) }
+                .onSuccess { raw ->
+                    withContext(Dispatchers.IO) { SubsonicJsonCache.write(app, cacheKey, raw.toString()) }
+                    // 服务器专辑统一映射成 LibraryAlbum，UI 层不感知 Subsonic 类型
+                    albums = client.parseAlbumListResponse(raw).map { album -> album.toLibraryAlbum() }
+                }
+                // 无缓存且网络失败才报错（有缓存顶着时静默，下次进入再试）
+                .onFailure {
+                    if (albums.isEmpty()) serverError = it.message ?: "加载失败"
+                }
             isLoadingServer = false
         }
     }
@@ -580,9 +601,24 @@ class MusicViewModel(
         isLoadingServer = true
         serverError = null
         viewModelScope.launch {
-            runCatching { client.getAlbum(album.id) }
-                .onSuccess { albumSongs = it.songs }
-                .onFailure { serverError = it.message ?: "加载失败" }
+            // ① 磁盘缓存先显（打开过一次的专辑秒开）；命中即上屏，加载态随之结束
+            val cacheKey = "album:${album.id}"
+            runCatching {
+                val raw = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
+                raw?.let { client.parseAlbumResponse(JSONObject(it)) }
+            }.getOrNull()?.let { cached ->
+                albumSongs = cached.songs
+                isLoadingServer = false
+            }
+            // ② 网络刷新（SWR）：成功后更新上屏并回写缓存；有缓存顶着时失败静默
+            runCatching { client.getAlbumRaw(album.id) }
+                .onSuccess { raw ->
+                    withContext(Dispatchers.IO) { SubsonicJsonCache.write(app, cacheKey, raw.toString()) }
+                    albumSongs = client.parseAlbumResponse(raw).songs
+                }
+                .onFailure {
+                    if (albumSongs.isEmpty()) serverError = it.message ?: "加载失败"
+                }
             isLoadingServer = false
         }
     }
@@ -710,11 +746,31 @@ class MusicViewModel(
         isLoadingPlaylists = true
         playlistError = null
         viewModelScope.launch {
-            runCatching { client.getPlaylists() }
-                .onSuccess {
-                    // 映射后过可见性策略：他人的公开歌单不进列表（见 filterOwnPlaylists）
+            // ① 磁盘缓存先显（跨启动冷启动秒出列表，不用转圈等网络）；
+            //    键含用户名 —— 不同账号各见各的，缓存互不串台
+            val cacheKey = "playlists:${currentServerUsername()}"
+            runCatching {
+                val raw = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
+                raw?.let { client.parsePlaylistsResponse(JSONObject(it)) }
+            }.getOrNull()?.takeIf { playlists.isEmpty() }?.let { cached ->
+                // 映射 + 可见性过滤与网络路径完全一致（他人公开歌单同样被滤掉）
+                playlists = filterOwnPlaylists(
+                    cached.map { p ->
+                        p.toLibraryPlaylist().let { lib ->
+                            lib.copy(coverArtUrl = client.coverArtUrl("pl-${lib.id}"))
+                        }
+                    },
+                    currentServerUsername(),
+                )
+            }
+            // ② 网络刷新（stale-while-revalidate）：成功覆盖上屏并回写缓存
+            runCatching { client.getPlaylistsRaw() }
+                .onSuccess { raw ->
+                    withContext(Dispatchers.IO) {
+                        SubsonicJsonCache.write(app, cacheKey, raw.toString())
+                    }
                     playlists = filterOwnPlaylists(
-                        it.map { p ->
+                        client.parsePlaylistsResponse(raw).map { p ->
                             p.toLibraryPlaylist().let { lib ->
                                 lib.copy(coverArtUrl = client.coverArtUrl("pl-${lib.id}"))
                             }
@@ -722,7 +778,10 @@ class MusicViewModel(
                         currentServerUsername(),
                     )
                 }
-                .onFailure { playlistError = it.message ?: "加载歌单失败" }
+                // 无缓存且网络失败才报错（有缓存顶着时静默，下次再试）
+                .onFailure {
+                    if (playlists.isEmpty()) playlistError = it.message ?: "加载歌单失败"
+                }
             isLoadingPlaylists = false
         }
     }
@@ -775,12 +834,34 @@ class MusicViewModel(
         isLoadingPlaylists = true
         playlistError = null
         viewModelScope.launch {
-            runCatching { client.getPlaylist(id) }
-                .onSuccess { (meta, songs) ->
-                    currentPlaylist = meta.toLibraryPlaylist()
-                    playlistTracks = songs
+            // ① 磁盘缓存先显（打开过一次的歌单秒开，含完整曲目）；命中即上屏，
+            //    加载态结束 —— 列表页带过来的元信息先被缓存的完整元信息替换
+            val cacheKey = "playlist:$id"
+            runCatching {
+                val raw = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
+                raw?.let { client.parsePlaylistResponse(JSONObject(it)) }
+            }.getOrNull()?.let { (meta, songs) ->
+                currentPlaylist = meta.toLibraryPlaylist()
+                playlistTracks = songs
+                isLoadingPlaylists = false
+            }
+            // ② 网络刷新（stale-while-revalidate）：成功后更新上屏并回写缓存。
+            //    用户可能已切走（currentPlaylist 变了），只更新仍是本歌单时的状态
+            runCatching { client.getPlaylistRaw(id) }
+                .onSuccess { raw ->
+                    withContext(Dispatchers.IO) { SubsonicJsonCache.write(app, cacheKey, raw.toString()) }
+                    if (currentPlaylist?.id == id) {
+                        val (meta, songs) = client.parsePlaylistResponse(raw)
+                        currentPlaylist = meta.toLibraryPlaylist()
+                        playlistTracks = songs
+                    }
                 }
-                .onFailure { playlistError = it.message ?: "加载歌单失败" }
+                // 无缓存且网络失败才报错（有缓存顶着时静默）
+                .onFailure {
+                    if (currentPlaylist == null || playlistTracks.isEmpty() && currentPlaylist?.id == id) {
+                        playlistError = it.message ?: "加载歌单失败"
+                    }
+                }
             isLoadingPlaylists = false
         }
     }
@@ -850,6 +931,11 @@ class MusicViewModel(
                     client.deletePlaylist(id)
                 }
             }.onSuccess {
+                if (localPlaylistDbId(id) == null) {
+                // 云端变更：精确失效该歌单的详情缓存（下次打开走网络取新数据，
+                // 避免 stale-while-revalidate 先闪一帧旧曲目列表）
+                SubsonicJsonCache.remove(app, "playlist:$id")
+                }
                 if (currentPlaylist?.id == id) closePlaylist()
                 loadPlaylists(force = true)
             }.onFailure { playlistError = it.message ?: "删除歌单失败" }
@@ -882,6 +968,11 @@ class MusicViewModel(
                     client.updatePlaylist(id, name, comment, emptyList(), emptyList())
                 }
             }.onSuccess {
+                if (localPlaylistDbId(id) == null) {
+                // 云端变更：精确失效该歌单的详情缓存（下次打开走网络取新数据，
+                // 避免 stale-while-revalidate 先闪一帧旧曲目列表）
+                SubsonicJsonCache.remove(app, "playlist:$id")
+                }
                 loadPlaylists(force = true)
                 // 立即同步当前打开歌单的头部元信息（loadPlaylists 异步完成，避免头部滞后）
                 currentPlaylist = currentPlaylist?.let { open ->
@@ -926,6 +1017,11 @@ class MusicViewModel(
                     )
                 }
             }.onSuccess {
+                if (localPlaylistDbId(id) == null) {
+                // 云端变更：精确失效该歌单的详情缓存（下次打开走网络取新数据，
+                // 避免 stale-while-revalidate 先闪一帧旧曲目列表）
+                SubsonicJsonCache.remove(app, "playlist:$id")
+                }
                 loadPlaylists(force = true)
                 if (currentPlaylist?.id == id) openPlaylist(id)
             }.onFailure { playlistError = it.message ?: "添加曲目失败" }
@@ -951,6 +1047,11 @@ class MusicViewModel(
                     client.updatePlaylist(id, null, null, emptyList(), listOf(index))
                 }
             }.onSuccess {
+                if (localPlaylistDbId(id) == null) {
+                // 云端变更：精确失效该歌单的详情缓存（下次打开走网络取新数据，
+                // 避免 stale-while-revalidate 先闪一帧旧曲目列表）
+                SubsonicJsonCache.remove(app, "playlist:$id")
+                }
                 loadPlaylists(force = true)
                 if (currentPlaylist?.id == id) openPlaylist(id)
             }.onFailure { playlistError = it.message ?: "移除曲目失败" }
@@ -982,6 +1083,14 @@ class MusicViewModel(
             MediaItem.Builder()
                 .setMediaId(track.id)
                 .setUri(track.playbackUri)
+                // 音频缓存键：stream URL 带每次启动随机的认证盐，按 URL 缓存跨启动
+                // 必失效；改用 "song:<trackId>"（跨启动稳定），听过的曲秒开。
+                // 本地曲目（content://）不走网络缓存，不设 key
+                .apply {
+                    if (track.playbackUri?.startsWith("http") == true) {
+                        setCustomCacheKey("song:${track.id}")
+                    }
+                }
                 .setMediaMetadata(
                     MediaMetadata.Builder()
                         .setTitle(track.title)
@@ -997,6 +1106,8 @@ class MusicViewModel(
         c.setMediaItems(items, startIndex, 0L)
         c.prepare()
         c.play()
+        // 起播即预取下一首：当前曲还在缓冲时，下一首已在后台写入缓存
+        prefetchNextTrack()
     }
 
     /** 播放/暂停切换；队列未加载时静默忽略 */
@@ -1029,6 +1140,52 @@ class MusicViewModel(
         controller?.seekTo(positionMs.coerceAtLeast(0L))
         // 立即回写一次位置，避免 500ms 轮询窗口内进度条回跳
         this.positionMs = positionMs
+    }
+
+    // ── 下一首预取 ──
+    // 预取协程：当前曲播放时后台把下一首整首写入音频缓存（读穿 CacheDataSource，
+    // 字节丢弃、落盘交给缓存 sink），切歌时命中缓存即秒播。取消只是不再发起新
+    // 读取，已在途的阻塞读最多多下一首的流量（简单起见不做中断）
+    private var prefetchJob: Job? = null
+
+    /**
+     * 预取下一首到音频磁盘缓存（仅云端曲目）。触发点：起播（playQueue）与
+     * 播放器切歌（onMediaItemTransition）—— 任何时候当前曲变更后，后台
+     * 静默拉取队列中的下一首；已完整缓存或本地曲目直接跳过
+     */
+    private fun prefetchNextTrack() {
+        val next = queue.getOrNull(currentIndex + 1) ?: return
+        val uri = next.playbackUri ?: return
+        if (!uri.startsWith("http")) return
+        val cacheKey = "song:${next.id}"
+        prefetchJob?.cancel()
+        prefetchJob = viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                val cache = PlaybackService.audioCache(app)
+                // 已完整缓存的曲目跳过，避免每次切歌重复读盘
+                if (cache.isCached(cacheKey, 0, Long.MAX_VALUE)) return@launch
+                val source = CacheDataSource.Factory()
+                    .setCache(cache)
+                    .setUpstreamDataSourceFactory(DefaultDataSource.Factory(app))
+                    // 缓存键固定用 "song:<trackId>"（与播放侧 MediaItem.customCacheKey
+                    // 同值）：stream URL 带每次启动随机的盐，不能作键
+                    .setCacheKeyFactory { _ -> cacheKey }
+                    .setFlags(CacheDataSource.FLAG_IGNORE_CACHE_ON_ERROR)
+                    .createDataSource()
+                source.open(
+                    androidx.media3.datasource.DataSpec(android.net.Uri.parse(uri)),
+                )
+                try {
+                    val buffer = ByteArray(64 * 1024)
+                    // 读到流末尾即整首落盘；字节本身丢弃（消费方是缓存 sink）
+                    while (coroutineContext.isActive) {
+                        if (source.read(buffer, 0, buffer.size) == C.RESULT_END_OF_INPUT) break
+                    }
+                } finally {
+                    source.close()
+                }
+            }
+        }
     }
 
     /** 队列列表点击某曲 → 跳转到该曲并播放 */

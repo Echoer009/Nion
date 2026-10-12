@@ -3860,7 +3860,8 @@ internal fun loadCoverBitmapCached(context: Context, coverUrl: String?, albumArt
  * 专为封面 URL 设计（不含 Subsonic 业务解析逻辑）。
  */
 private object CoverArtLoader {
-    private val client = OkHttpClient()
+    // 与 Subsonic API 共享同一 OkHttp 单例：封面与接口同主机，keep-alive 连接复用
+    private val client = SubsonicClient.sharedHttpClient
 
     /** 下载并解码封面；失败返回 null */
     fun load(url: String): Bitmap? = runCatching {
