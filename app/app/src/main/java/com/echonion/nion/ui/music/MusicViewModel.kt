@@ -569,8 +569,10 @@ class MusicViewModel(
             runCatching { client.getAlbumList2Raw(type = "newest", size = 30) }
                 .onSuccess { raw ->
                     withContext(Dispatchers.IO) { SubsonicJsonCache.write(app, cacheKey, raw.toString()) }
-                    // 服务器专辑统一映射成 LibraryAlbum，UI 层不感知 Subsonic 类型
-                    albums = client.parseAlbumListResponse(raw).map { album -> album.toLibraryAlbum() }
+                    // 服务器专辑统一映射成 LibraryAlbum，UI 层不感知 Subsonic 类型；
+                    // SWR 判等：内容没变不赋值
+                    val fresh = client.parseAlbumListResponse(raw).map { album -> album.toLibraryAlbum() }
+                    if (albums != fresh) albums = fresh
                 }
                 // 无缓存且网络失败才报错（有缓存顶着时静默，下次进入再试）
                 .onFailure {
@@ -610,14 +612,20 @@ class MusicViewModel(
                 val raw = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
                 raw?.let { client.parseAlbumResponse(JSONObject(it)) }
             }.getOrNull()?.let { cached ->
-                albumSongs = cached.songs
-                isLoadingServer = false
+                // 守卫：迟到的缓存结果不得覆盖用户已切去的新目标（同 openPlaylist）
+                if (currentAlbum?.id == album.id) {
+                    if (albumSongs != cached.songs) albumSongs = cached.songs
+                    isLoadingServer = false
+                }
             }
             // ② 网络刷新（SWR）：成功后更新上屏并回写缓存；有缓存顶着时失败静默
             runCatching { client.getAlbumRaw(album.id) }
                 .onSuccess { raw ->
                     withContext(Dispatchers.IO) { SubsonicJsonCache.write(app, cacheKey, raw.toString()) }
-                    albumSongs = client.parseAlbumResponse(raw).songs
+                    if (currentAlbum?.id == album.id) {
+                        val fresh = client.parseAlbumResponse(raw).songs
+                        if (albumSongs != fresh) albumSongs = fresh
+                    }
                 }
                 .onFailure {
                     if (albumSongs.isEmpty()) serverError = it.message ?: "加载失败"
@@ -864,7 +872,7 @@ class MusicViewModel(
                     withContext(Dispatchers.IO) {
                         SubsonicJsonCache.write(app, cacheKey, raw.toString())
                     }
-                    playlists = filterOwnPlaylists(
+                    val fresh = filterOwnPlaylists(
                         client.parsePlaylistsResponse(raw).map { p ->
                             p.toLibraryPlaylist().let { lib ->
                                 lib.copy(coverArtUrl = client.coverArtUrl("pl-${lib.id}"))
@@ -872,6 +880,8 @@ class MusicViewModel(
                         },
                         currentServerUsername(),
                     )
+                    // SWR 判等：内容没变不赋值，列表纹丝不动
+                    if (playlists != fresh) playlists = fresh
                 }
                 // 无缓存且网络失败才报错（有缓存顶着时静默，下次再试）
                 .onFailure {
@@ -936,9 +946,14 @@ class MusicViewModel(
                 val raw = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
                 raw?.let { client.parsePlaylistResponse(JSONObject(it)) }
             }.getOrNull()?.let { (meta, songs) ->
-                currentPlaylist = meta.toLibraryPlaylist()
-                playlistTracks = songs
-                isLoadingPlaylists = false
+                // 守卫：磁盘读是挂起的，恢复时用户可能已切到别的歌单/回列表 ——
+                // 迟到的缓存结果不得覆盖新目标（判等则跳过赋值，避免无谓重组闪动）
+                if (currentPlaylist?.id == id) {
+                    val full = meta.toLibraryPlaylist()
+                    if (currentPlaylist != full) currentPlaylist = full
+                    if (playlistTracks != songs) playlistTracks = songs
+                    isLoadingPlaylists = false
+                }
             }
             // ② 网络刷新（stale-while-revalidate）：成功后更新上屏并回写缓存。
             //    用户可能已切走（currentPlaylist 变了），只更新仍是本歌单时的状态
@@ -947,8 +962,10 @@ class MusicViewModel(
                     withContext(Dispatchers.IO) { SubsonicJsonCache.write(app, cacheKey, raw.toString()) }
                     if (currentPlaylist?.id == id) {
                         val (meta, songs) = client.parsePlaylistResponse(raw)
-                        currentPlaylist = meta.toLibraryPlaylist()
-                        playlistTracks = songs
+                        // SWR 判等：与屏上一致就不赋值（后台刷新不再触发无谓重组）
+                        val full = meta.toLibraryPlaylist()
+                        if (currentPlaylist != full) currentPlaylist = full
+                        if (playlistTracks != songs) playlistTracks = songs
                     }
                 }
                 // 无缓存且网络失败才报错（有缓存顶着时静默）

@@ -67,6 +67,7 @@ import androidx.compose.foundation.layout.requiredSize
 import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
@@ -93,7 +94,6 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.FilledIconButton
-import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
@@ -423,6 +423,33 @@ fun MusicScreen(
                     selectedPlaylistIds = emptySet()
                     actionRowId = null
                 }
+                // 多选批量删除确认框：选择栏右上角垃圾桶触发（本地/服务器文案一致：
+                // 都不可恢复；云端还会连带删服务器歌单，用计数话术统一提示）
+                if (pendingPlaylistBatchDelete) {
+                    androidx.compose.material3.AlertDialog(
+                        onDismissRequest = { pendingPlaylistBatchDelete = false },
+                        title = { Text("删除歌单") },
+                        text = { Text("确定删除选中的 ${selectedPlaylistIds.size} 个歌单？该操作不可恢复。") },
+                        confirmButton = {
+                            androidx.compose.material3.TextButton(
+                                onClick = {
+                                    // 逐个删除（VM 内各自分发本地/云端）；删完清空选中退出操作态
+                                    selectedPlaylistIds.forEach { vm.deletePlaylist(it) }
+                                    selectedPlaylistIds = emptySet()
+                                    actionRowId = null
+                                    pendingPlaylistBatchDelete = false
+                                },
+                            ) {
+                                Text("删除", color = MaterialTheme.colorScheme.error)
+                            }
+                        },
+                        dismissButton = {
+                            androidx.compose.material3.TextButton(
+                                onClick = { pendingPlaylistBatchDelete = false },
+                            ) { Text("取消") }
+                        },
+                    )
+                }
 
                 Scaffold(
                     contentWindowInsets = WindowInsets.statusBars,
@@ -599,6 +626,12 @@ fun MusicScreen(
                                     showPlaylists = showPlaylists,
                                     trackCoverSlot = trackCoverSlot,
                                     onPlayFromList = openFromTrack,
+                                    // 歌单操作态（长按进入）：状态在 MusicScreen 持有，
+                                    // 穿透到 PlaylistViewWithFab 驱动行高亮/行内按钮/多选
+                                    playlistSelectedIds = selectedPlaylistIds,
+                                    playlistActionRowId = actionRowId,
+                                    onPlaylistSelectedIdsChange = { selectedPlaylistIds = it },
+                                    onPlaylistActionRowIdChange = { actionRowId = it },
                                 )
                                 // 服务器：未配置时显示引导配置表单，配置后进入曲库浏览
                                 MusicSource.BRAINGIRL -> ServerMusicContent(
@@ -607,6 +640,10 @@ fun MusicScreen(
                                     isCustom = false,
                                     trackCoverSlot = trackCoverSlot,
                                     onPlayFromList = openFromTrack,
+                                    playlistSelectedIds = selectedPlaylistIds,
+                                    playlistActionRowId = actionRowId,
+                                    onPlaylistSelectedIdsChange = { selectedPlaylistIds = it },
+                                    onPlaylistActionRowIdChange = { actionRowId = it },
                                 )
                                 MusicSource.CUSTOM -> ServerMusicContent(
                                     vm = vm,
@@ -614,6 +651,10 @@ fun MusicScreen(
                                     isCustom = true,
                                     trackCoverSlot = trackCoverSlot,
                                     onPlayFromList = openFromTrack,
+                                    playlistSelectedIds = selectedPlaylistIds,
+                                    playlistActionRowId = actionRowId,
+                                    onPlaylistSelectedIdsChange = { selectedPlaylistIds = it },
+                                    onPlaylistActionRowIdChange = { actionRowId = it },
                                 )
                             }
                         }
@@ -719,6 +760,15 @@ private fun LocalMusicContent(
     trackCoverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit,
     // 从列表点歌回调：传入被点曲目 id，由上层展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
+    // ── 歌单操作态（长按进入）：状态由 MusicScreen 持有，穿透转发到歌单视图 ──
+    // 选中的歌单 id 集合（空 = 普通模式）
+    playlistSelectedIds: Set<String>,
+    // 单选时挂行内「编辑/删除」按钮的行 id
+    playlistActionRowId: String?,
+    // 选中集合回写（点行切换选中/长按改选/删除后清理）
+    onPlaylistSelectedIdsChange: (Set<String>) -> Unit,
+    // 操作行回写（切换单选操作行/清空）
+    onPlaylistActionRowIdChange: (String?) -> Unit,
 ) {
     val context = LocalContext.current
     // 按系统版本选择权限串：13+ 细化的媒体权限，旧版通用存储权限
@@ -776,12 +826,17 @@ private fun LocalMusicContent(
                 CircularProgressIndicator()
             }
         }
-        // 浏览态：与云端同构（搜索 + 专辑列表/详情 + morph）
+        // 浏览态：与云端同构（搜索 + 专辑列表/详情 + morph）；
+        // 歌单操作态四参原样下穿给本地曲库浏览区
         else -> LocalLibraryContent(
             vm = vm,
             showPlaylists = showPlaylists,
             trackCoverSlot = trackCoverSlot,
             onPlayFromList = onPlayFromList,
+            playlistSelectedIds = playlistSelectedIds,
+            playlistActionRowId = playlistActionRowId,
+            onPlaylistSelectedIdsChange = onPlaylistSelectedIdsChange,
+            onPlaylistActionRowIdChange = onPlaylistActionRowIdChange,
         )
     }
 }
@@ -801,12 +856,24 @@ private fun LocalLibraryContent(
     trackCoverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit,
     // 从列表点歌回调：传入被点曲目 id，由上层展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
+    // ── 歌单操作态（长按进入）：状态由 MusicScreen 持有，转发给 PlaylistViewWithFab ──
+    // 选中的歌单 id 集合（空 = 普通模式）
+    playlistSelectedIds: Set<String>,
+    // 单选时挂行内「编辑/删除」按钮的行 id
+    playlistActionRowId: String?,
+    // 选中集合回写（点行切换选中/长按改选/删除后清理）
+    onPlaylistSelectedIdsChange: (Set<String>) -> Unit,
+    // 操作行回写（切换单选操作行/清空）
+    onPlaylistActionRowIdChange: (String?) -> Unit,
 ) {
-    // 专辑详情打开时拦截系统返回：先回到专辑列表（与云端一致）
-    BackHandler(enabled = vm.currentAlbum != null) { vm.closeAlbum() }
+    // 专辑详情打开时拦截系统返回：先回到专辑列表（与云端一致）。
+    // && !isFullPlayerOpen：播放页盖在详情之上时，返回必须先收播放页 —— 否则本
+    // handler（组合更晚、优先级更高）会在播放页背后悄悄 closeAlbum，屏幕被播放页
+    // 盖着看起来"第一次返回失效"（根因见修复记录）
+    BackHandler(enabled = vm.currentAlbum != null && !vm.isFullPlayerOpen) { vm.closeAlbum() }
 
-    // 歌单详情打开时拦截系统返回：先回到歌单列表（与专辑详情一致）
-    BackHandler(enabled = vm.currentPlaylist != null) { vm.closePlaylist() }
+    // 歌单详情打开时拦截系统返回：先回到歌单列表（与专辑详情一致）。同理门控播放页
+    BackHandler(enabled = vm.currentPlaylist != null && !vm.isFullPlayerOpen) { vm.closePlaylist() }
 
     // 首次进入加载当前音源的歌单列表（loadPlaylists 内部有"已有数据不重查"保护）
     LaunchedEffect(Unit) { vm.loadPlaylists() }
@@ -857,6 +924,11 @@ private fun LocalLibraryContent(
                     vm = vm,
                     trackCoverSlot = trackCoverSlot,
                     onPlayFromList = onPlayFromList,
+                    // 歌单操作态（长按进入）：状态在 MusicScreen 持有，映射到组件形参
+                    selectedIds = playlistSelectedIds,
+                    actionRowId = playlistActionRowId,
+                    onSelectedIdsChange = onPlaylistSelectedIdsChange,
+                    onActionRowIdChange = onPlaylistActionRowIdChange,
                 )
             } else {
                 Column(modifier = Modifier.fillMaxSize()) {
@@ -956,6 +1028,15 @@ private fun ServerMusicContent(
     trackCoverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit,
     // 从列表点歌回调：传入被点曲目 id，由上层展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
+    // ── 歌单操作态（长按进入）：状态由 MusicScreen 持有，转发给 PlaylistViewWithFab ──
+    // 选中的歌单 id 集合（空 = 普通模式）
+    playlistSelectedIds: Set<String>,
+    // 单选时挂行内「编辑/删除」按钮的行 id
+    playlistActionRowId: String?,
+    // 选中集合回写（点行切换选中/长按改选/删除后清理）
+    onPlaylistSelectedIdsChange: (Set<String>) -> Unit,
+    // 操作行回写（切换单选操作行/清空）
+    onPlaylistActionRowIdChange: (String?) -> Unit,
 ) {
     val configured = if (isCustom) vm.isCustomConfigured else vm.isBraingirlConfigured
 
@@ -968,11 +1049,12 @@ private fun ServerMusicContent(
     // 已配置：首次进入自动加载专辑列表（loadAlbums 内部有"已有数据不重复请求"保护）
     LaunchedEffect(Unit) { vm.loadAlbums() }
 
-    // 专辑详情打开时拦截系统返回：先回到专辑列表
-    BackHandler(enabled = vm.currentAlbum != null) { vm.closeAlbum() }
+    // 专辑详情打开时拦截系统返回：先回到专辑列表。
+    // && !isFullPlayerOpen：播放页盖在详情之上时，返回先收播放页（根因同本地音源）
+    BackHandler(enabled = vm.currentAlbum != null && !vm.isFullPlayerOpen) { vm.closeAlbum() }
 
-    // 歌单详情打开时拦截系统返回：先回到歌单列表（与本地音源一致）
-    BackHandler(enabled = vm.currentPlaylist != null) { vm.closePlaylist() }
+    // 歌单详情打开时拦截系统返回：先回到歌单列表（与本地音源一致）。同理门控播放页
+    BackHandler(enabled = vm.currentPlaylist != null && !vm.isFullPlayerOpen) { vm.closePlaylist() }
 
     // 首次进入加载当前账号的歌单列表（loadPlaylists 内部有"已有数据不重查"保护）
     LaunchedEffect(Unit) { vm.loadPlaylists() }
@@ -1019,6 +1101,11 @@ private fun ServerMusicContent(
                     vm = vm,
                     trackCoverSlot = trackCoverSlot,
                     onPlayFromList = onPlayFromList,
+                    // 歌单操作态（长按进入）：状态在 MusicScreen 持有，映射到组件形参
+                    selectedIds = playlistSelectedIds,
+                    actionRowId = playlistActionRowId,
+                    onSelectedIdsChange = onPlaylistSelectedIdsChange,
+                    onActionRowIdChange = onPlaylistActionRowIdChange,
                 )
             } else {
                 Column(modifier = Modifier.fillMaxSize()) {
@@ -1301,6 +1388,44 @@ private fun SelectorCell(
 
 
 /**
+ * 歌单多选(>1)时的选择栏 —— 就地替换音源标题行（与任务页 SelectionTopBar 同一语言）。
+ * 左 ✕ 清空选中退出操作态，中间显示已选计数，右垃圾桶弹批量删除确认框。
+ * 容器透明：音乐页 TopAppBar 本就透明覆在米色列表上，保持无缝。
+ *
+ * @param selectedCount 当前选中的歌单数量
+ * @param onClear 点 ✕ 时触发（清空选中、退出操作态）
+ * @param onDelete 点垃圾桶时触发（弹批量删除确认框）
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MusicSelectionTopBar(
+    selectedCount: Int,
+    onClear: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    TopAppBar(
+        navigationIcon = {
+            IconButton(onClick = onClear) {
+                Icon(LucideIcons.X, contentDescription = "取消选择")
+            }
+        },
+        title = {
+            Text(
+                "已选择 $selectedCount 项",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.SemiBold,
+            )
+        },
+        actions = {
+            IconButton(onClick = onDelete) {
+                Icon(LucideIcons.Trash2, contentDescription = "删除选中", tint = MaterialTheme.colorScheme.error)
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.Transparent),
+    )
+}
+
+/**
  * 歌单视图（含新建 FAB）—— 歌单列表 ↔ 详情 morph 面板 + 右下角新建按钮。
  * FAB 复用任务页同款样式（圆角 16 / 主色 / Add 图标，淡入淡出显隐），
  * 仅在歌单列表态（未打开详情）显示；点击弹新建歌单对话框。
@@ -1313,7 +1438,16 @@ private fun PlaylistViewWithFab(
     trackCoverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit,
     // 从列表点歌回调：展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
+    // ── 歌单操作态（长按进入）——状态由 MusicScreen 持有 ──
+    // 选中集合（空=普通模式）/ 单选操作行 id；批量删除由 MusicScreen 顶部选择栏接管，
+    // 本组件只负责读状态渲染 + 回写（点行/长按），单删/重命名对话框仍本地弹
+    selectedIds: Set<String>,
+    actionRowId: String?,
+    onSelectedIdsChange: (Set<String>) -> Unit,
+    onActionRowIdChange: (String?) -> Unit,
 ) {
+    // 操作模式判定：选中集合非空（点行改为切换选中；FAB 隐藏）
+    val playlistActionMode = selectedIds.isNotEmpty()
     // 新建歌单对话框开关（与 FAB 同生命周期）
     var showCreateDialog by remember { mutableStateOf(false) }
     if (showCreateDialog) {
@@ -1329,18 +1463,6 @@ private fun PlaylistViewWithFab(
                 vm.createPlaylist(name, comment)
             },
         )
-    }
-    // ── 歌单操作态（长按行进入）──
-    // 选中的歌单 id 集合：空 = 普通模式（点行开详情）；非空 = 操作模式（点行改为切换选中）
-    var selectedPlaylistIds by remember { mutableStateOf(setOf<String>()) }
-    // 操作行 id：单选时行尾展开「编辑/删除」两个按钮（随行 sharedElement 飞行）；
-    // 选中 >1（多选）后按钮整体收回，由右上角批量删除接管
-    var actionRowId by remember { mutableStateOf<String?>(null) }
-    val playlistActionMode = selectedPlaylistIds.isNotEmpty()
-    // 操作模式下的系统返回：清空选中退出操作态（而非退出页面）
-    BackHandler(enabled = playlistActionMode) {
-        selectedPlaylistIds = emptySet()
-        actionRowId = null
     }
     // 行内「编辑」的目标歌单：非空弹重命名对话框（与详情页铅笔同一对话框）
     var renameTarget by remember { mutableStateOf<LibraryPlaylist?>(null) }
@@ -1375,9 +1497,9 @@ private fun PlaylistViewWithFab(
                     onClick = {
                         vm.deletePlaylist(target.id)
                         pendingDelete = null
-                        // 该行退出选中；若操作态因此清空也随之退出
-                        selectedPlaylistIds -= target.id
-                        if (actionRowId == target.id) actionRowId = null
+                        // 该行退出选中；若操作态因此清空也随之退出（回写上层状态）
+                        onSelectedIdsChange(selectedIds - target.id)
+                        if (actionRowId == target.id) onActionRowIdChange(null)
                     },
                 ) {
                     Text("删除", color = MaterialTheme.colorScheme.error)
@@ -1385,32 +1507,6 @@ private fun PlaylistViewWithFab(
             },
             dismissButton = {
                 androidx.compose.material3.TextButton(onClick = { pendingDelete = null }) {
-                    Text("取消")
-                }
-            },
-        )
-    }
-    // 多选批量删除确认：非空 selectedPlaylistIds>1 时由右上角按钮触发
-    var pendingBatchDelete by remember { mutableStateOf(false) }
-    if (pendingBatchDelete) {
-        androidx.compose.material3.AlertDialog(
-            onDismissRequest = { pendingBatchDelete = false },
-            title = { Text("删除歌单") },
-            text = { Text("确定删除选中的 ${selectedPlaylistIds.size} 个歌单？该操作不可恢复。") },
-            confirmButton = {
-                androidx.compose.material3.TextButton(
-                    onClick = {
-                        selectedPlaylistIds.forEach { vm.deletePlaylist(it) }
-                        selectedPlaylistIds = emptySet()
-                        actionRowId = null
-                        pendingBatchDelete = false
-                    },
-                ) {
-                    Text("删除", color = MaterialTheme.colorScheme.error)
-                }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { pendingBatchDelete = false }) {
                     Text("取消")
                 }
             },
@@ -1426,55 +1522,31 @@ private fun PlaylistViewWithFab(
                 vm = vm,
                 trackCoverSlot = trackCoverSlot,
                 onPlayFromList = onPlayFromList,
-                // 操作态下穿给列表：高亮/行内按钮/多选右上角删除均由它驱动
-                selectedIds = selectedPlaylistIds,
+                // 操作态下穿给列表：行高亮/行内按钮/多选判定均由它驱动
+                selectedIds = selectedIds,
                 actionRowId = actionRowId,
                 // 点行：普通模式开详情；操作模式切换选中（退到单选时按钮随行落位，选空退出）
                 onRowClick = { id ->
                     if (playlistActionMode) {
-                        selectedPlaylistIds =
-                            if (id in selectedPlaylistIds) selectedPlaylistIds - id
-                            else selectedPlaylistIds + id
-                        actionRowId = selectedPlaylistIds.singleOrNull()
+                        // 操作模式：点行切换选中；退回单选时该行成为操作行，选空退出
+                        val next = if (id in selectedIds) selectedIds - id else selectedIds + id
+                        onSelectedIdsChange(next)
+                        onActionRowIdChange(next.singleOrNull())
                     } else {
                         vm.openPlaylist(id)
                     }
                 },
                 // 长按行：进入/切换操作行（按钮经 sharedElement 从旧行飞到新行）
                 onRowLongPress = { id ->
-                    selectedPlaylistIds = setOf(id)
-                    actionRowId = id
+                    // 长按进入/切换操作行（按钮经 sharedElement 从旧行飞到新行）
+                    onSelectedIdsChange(setOf(id))
+                    onActionRowIdChange(id)
                 },
                 onRowEdit = { renameTarget = it },
                 onRowDelete = { pendingDelete = it },
             )
         }
-        // 多选时的右上角批量删除（仅选中 >1 出现；单选由行内按钮负责）：
-        // 悬浮小圆钮 + errorContainer 底色，出现/收起带轻微下滑/上滑
-        AnimatedVisibility(
-            visible = selectedPlaylistIds.size > 1,
-            enter = fadeIn(tween(180, easing = FastOutSlowInEasing)) +
-                slideInVertically(tween(220, easing = FastOutSlowInEasing)) { -it / 2 },
-            exit = fadeOut(tween(150, easing = FastOutSlowInEasing)) +
-                slideOutVertically(tween(180, easing = FastOutSlowInEasing)) { -it / 2 },
-            modifier = Modifier
-                .align(Alignment.TopEnd)
-                .padding(top = 8.dp, end = 8.dp),
-        ) {
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = MaterialTheme.colorScheme.errorContainer,
-                shadowElevation = 4.dp,
-            ) {
-                IconButton(onClick = { pendingBatchDelete = true }) {
-                    Icon(
-                        LucideIcons.Trash2,
-                        contentDescription = "删除所选歌单",
-                        tint = MaterialTheme.colorScheme.onErrorContainer,
-                    )
-                }
-            }
-        }
+        // （多选批量删除已上移：由 MusicScreen 顶部 MusicSelectionTopBar 的垃圾桶接管）
         // 新建歌单 FAB：任务页同款（歌单列表态且非操作模式显示，详情态/多选态淡出）
         AnimatedVisibility(
             visible = vm.currentPlaylist == null && !playlistActionMode,
@@ -2052,7 +2124,7 @@ private fun PlaylistPanel(
                     onPlayFromList = onPlayFromList,
                 )
             } else {
-                // 歌单列表分支（长按行进入操作态：行内编辑/删除，多选右上角批量删除；
+                // 歌单列表分支（长按行进入操作态：行内编辑/删除，多选由顶部选择栏接管；
                 // 新建入口由外层 FAB 承担）
                 PlaylistListContent(
                     vm = vm,
@@ -2073,7 +2145,7 @@ private fun PlaylistPanel(
 /**
  * 歌单列表内容 —— 歌单行（名称 + 曲数 + 说明摘要）。
  * 长按行进入操作态：单选时行尾 sharedElement 展开「编辑/删除」；
- * 多选时按钮收回、行高亮，批量删除由外层右上角按钮承担。
+ * 多选时按钮收回、行描边高亮，批量删除由 MusicScreen 顶部选择栏承担。
  * 加载中/空态与 [AlbumListContent] 同构（新建歌单由外层 FAB 触发）。
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -2142,7 +2214,7 @@ private fun PlaylistListContent(
  * 本地/空=与专辑行同款灰底占位）+ 名称/曲数/说明摘要。
  * 交互：普通模式点行开详情；长按进入操作态（行高亮），单选时行尾经
  * sharedElement 展开「编辑/删除」两个按钮（切换操作行时按钮飞行迁移），
- * 多选时按钮收回、由外层右上角批量删除接管。本地/服务器共用。
+ * 多选时按钮收回、由 MusicScreen 顶部选择栏的垃圾桶批量删除接管。本地/服务器共用。
  *
  * @param playlist 行内展示的歌单元数据
  * @param selected 本行是否处于选中态（操作模式下高亮）
@@ -2172,11 +2244,12 @@ private fun PlaylistRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            // 选中态高亮：操作模式下被选行铺 secondaryContainer 浅底，
-            // 与常态行一眼可分；普通模式透明不影响
-            .background(
-                if (selected) MaterialTheme.colorScheme.secondaryContainer
-                else Color.Transparent,
+            // 选中态高亮：1.5dp 主色描边（替掉 secondaryContainer 平铺），透明底、克制精致
+            .then(
+                if (selected) Modifier.border(
+                    BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
+                    RoundedCornerShape(12.dp),
+                ) else Modifier,
             )
             // combinedClickable：单击走 onClick（上层按模式分发），
             // 长按进入操作态 —— 选中/展开全部由长按起步，点按绝不误触发
@@ -2230,7 +2303,7 @@ private fun PlaylistRow(
         // 过渡作用域，内层容器挂 sharedElement（key 全行共用 "playlist_action_bar"）——
         // 长按另一行切换操作行时，旧行退出/新行进场同帧发生，两个小按钮经
         // shared overlay 从旧行飞到新行；进入多选时全部退出（按钮收回），
-        // 批量删除交给外层右上角
+        // 批量删除交给 MusicScreen 顶部选择栏
         AnimatedVisibility(
             visible = showActions,
             enter = fadeIn(tween(180, easing = FastOutSlowInEasing)) +
@@ -2253,29 +2326,23 @@ private fun PlaylistRow(
                         },
                     ),
             ) {
-                // 编辑：默认 tonal 底（中性），点击由上层弹重命名对话框
-                FilledTonalIconButton(
-                    onClick = onEdit,
-                    modifier = Modifier.size(36.dp),
-                ) {
+                // 编辑：无底 ghost 图标钮，点击由上层弹重命名对话框
+                IconButton(onClick = onEdit, modifier = Modifier.size(40.dp)) {
                     Icon(
                         LucideIcons.Pencil,
                         contentDescription = "编辑歌单",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
                     )
                 }
-                Spacer(modifier = Modifier.width(8.dp))
-                // 删除：errorContainer 底色提示破坏性，点击由上层弹确认框
-                FilledTonalIconButton(
-                    onClick = onDelete,
-                    modifier = Modifier.size(36.dp),
-                    colors = IconButtonDefaults.filledTonalIconButtonColors(
-                        containerColor = MaterialTheme.colorScheme.errorContainer,
-                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
-                    ),
-                ) {
+                Spacer(modifier = Modifier.width(2.dp))
+                // 删除：无底 ghost 图标钮，error 色提示破坏性，点击由上层弹确认框
+                IconButton(onClick = onDelete, modifier = Modifier.size(40.dp)) {
                     Icon(
                         LucideIcons.Trash2,
                         contentDescription = "删除歌单",
+                        tint = MaterialTheme.colorScheme.error,
+                        modifier = Modifier.size(20.dp),
                     )
                 }
             }
@@ -3266,8 +3333,27 @@ private fun FullPlayerOverlay(
                         // ===== 进度条 =====
                         // 拖动期间非空；null=跟随播放进度。key 绑定曲目 id，切歌重置拖动态
                         var dragPosition by remember(track.id) { mutableStateOf<Float?>(null) }
+                        // 进度平滑：轮询每 500ms 一个点，两点之间线性补间 —— 播放中
+                        // 滑块与时间连续爬行而非半秒跳一格。补间只驱动本行重组
+                        //（滑块+时间文本），整页零开销。回退或大幅前跳（seek/切歌）
+                        // 直接落位不补间，避免滑块"扫"过整条轨道
+                        val progressAnim = remember(track.id) {
+                            androidx.compose.animation.core.Animatable(vm.positionMs.toFloat())
+                        }
+                        LaunchedEffect(vm.positionMs) {
+                            val target = vm.positionMs.toFloat()
+                            val delta = target - progressAnim.value
+                            if (delta < 0f || delta > 2500f) {
+                                progressAnim.snapTo(target)
+                            } else {
+                                progressAnim.animateTo(
+                                    target,
+                                    tween(500, easing = androidx.compose.animation.core.LinearEasing),
+                                )
+                            }
+                        }
                         // 拖动中显示 dragPosition；总时长未知时滑块不可交互（duration=0）
-                        val sliderValue = dragPosition ?: vm.positionMs.toFloat()
+                        val sliderValue = dragPosition ?: progressAnim.value
                         val sliderMax = vm.durationMs.toFloat().coerceAtLeast(1f)
                         Slider(
                             value = sliderValue.coerceIn(0f, sliderMax),
@@ -3293,7 +3379,7 @@ private fun FullPlayerOverlay(
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             Text(
-                                formatTrackDuration((dragPosition?.toLong() ?: vm.positionMs) / 1000),
+                                formatTrackDuration((dragPosition?.toLong() ?: progressAnim.value.toLong()) / 1000),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
