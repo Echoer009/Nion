@@ -242,6 +242,9 @@ data class LibraryPlaylist(
     // 歌单封面：服务器歌单 = getCoverArt?pl-<id>（Navidrome 服务端拼贴）；
     // 本地歌单无服务端封面 → null，UI 用与专辑行同款占位块
     val coverArtUrl: String? = null,
+    // 归属用户名：服务器歌单 = Subsonic owner 字段（空串归一化为 null）；
+    // 本地歌单恒为 null。可见性过滤与未来的公共歌单分组都以它为依据
+    val owner: String? = null,
 )
 
 /**
@@ -253,6 +256,8 @@ fun SubsonicPlaylist.toLibraryPlaylist(): LibraryPlaylist = LibraryPlaylist(
     id = id,
     name = name,
     comment = comment,
+    // 归属用户名透传：空串（服务端缺省）归一化为 null，配合可见性过滤的兜底规则
+    owner = owner.takeIf { it.isNotBlank() },
     songCount = songCount,
     durationSeconds = durationSeconds,
     isLocal = false,

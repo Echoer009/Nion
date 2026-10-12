@@ -653,6 +653,27 @@ class MusicViewModel(
     /** 从统一歌单 id 解析本地歌单的库内自增 id（"local-<id>" → id）；非本地 id 返回 null */
     private fun localPlaylistDbId(id: String): Long? = id.removePrefix(LOCAL_PLAYLIST_ID_PREFIX).toLongOrNull()
 
+    /** 当前服务器音源的登录用户名（本地音源返回空串），歌单可见性过滤用 */
+    private fun currentServerUsername(): String = when (source) {
+        MusicSource.BRAINGIRL -> braingirlUsername.trim()
+        MusicSource.CUSTOM -> customUsername.trim()
+        MusicSource.LOCAL -> ""
+    }
+
+    /**
+     * 歌单可见性策略的唯一权威点 —— 当前策略：每人只看自己的歌单。
+     *
+     * 规则：`owner == null`（部分 Subsonic 兼容服务端不回该字段，宁可多显示
+     * 也不吞掉用户自己的歌单）或 `owner == 当前登录用户名` → 可见；
+     * 其余（他人的公开歌单）→ 过滤，不进列表（编辑/删除/多选因此天然
+     * 只作用于自己的歌单，UI 层无需再按归属判断）。
+     *
+     * 未来公共歌单功能在此扩展：被本函数过滤掉的 `owner != 我` 分组
+     * 即公共歌单的数据源，不需要改 UI 层。
+     */
+    private fun filterOwnPlaylists(list: List<LibraryPlaylist>, username: String): List<LibraryPlaylist> =
+        list.filter { it.owner == null || it.owner == username }
+
     /**
      * 加载当前音源的歌单列表。
      * - 云端：getPlaylists → 统一映射为 [LibraryPlaylist]
@@ -691,11 +712,15 @@ class MusicViewModel(
         viewModelScope.launch {
             runCatching { client.getPlaylists() }
                 .onSuccess {
-                    playlists = it.map { p ->
-                        p.toLibraryPlaylist().let { lib ->
-                            lib.copy(coverArtUrl = client.coverArtUrl("pl-${lib.id}"))
-                        }
-                    }
+                    // 映射后过可见性策略：他人的公开歌单不进列表（见 filterOwnPlaylists）
+                    playlists = filterOwnPlaylists(
+                        it.map { p ->
+                            p.toLibraryPlaylist().let { lib ->
+                                lib.copy(coverArtUrl = client.coverArtUrl("pl-${lib.id}"))
+                            }
+                        },
+                        currentServerUsername(),
+                    )
                 }
                 .onFailure { playlistError = it.message ?: "加载歌单失败" }
             isLoadingPlaylists = false
