@@ -39,7 +39,9 @@ import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.expandVertically
+import androidx.compose.animation.expandHorizontally
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.shrinkHorizontally
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.FloatingActionButtonDefaults
@@ -67,6 +69,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.foundation.background
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -90,6 +93,7 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.IconButton
@@ -142,6 +146,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import java.io.File
+import java.security.MessageDigest
 import com.echonion.nion.ui.icons.LucideIcons
 
 // ── 播放条 ↔ 播放页 morph 的统一时钟（毫秒）──
@@ -1268,11 +1274,102 @@ private fun PlaylistViewWithFab(
     // 新建歌单对话框开关（与 FAB 同生命周期）
     var showCreateDialog by remember { mutableStateOf(false) }
     if (showCreateDialog) {
-        CreatePlaylistDialog(
+        // 新建场景的元信息对话框：空初始值、确认即建单（受 VM 客户端限流保护）
+        PlaylistMetaDialog(
+            title = "新建歌单",
+            confirmLabel = "创建",
+            initialName = "",
+            initialComment = "",
             onDismiss = { showCreateDialog = false },
             onConfirm = { name, comment ->
                 showCreateDialog = false
                 vm.createPlaylist(name, comment)
+            },
+        )
+    }
+    // ── 歌单操作态（长按行进入）──
+    // 选中的歌单 id 集合：空 = 普通模式（点行开详情）；非空 = 操作模式（点行改为切换选中）
+    var selectedPlaylistIds by remember { mutableStateOf(setOf<String>()) }
+    // 操作行 id：单选时行尾展开「编辑/删除」两个按钮（随行 sharedElement 飞行）；
+    // 选中 >1（多选）后按钮整体收回，由右上角批量删除接管
+    var actionRowId by remember { mutableStateOf<String?>(null) }
+    val playlistActionMode = selectedPlaylistIds.isNotEmpty()
+    // 操作模式下的系统返回：清空选中退出操作态（而非退出页面）
+    BackHandler(enabled = playlistActionMode) {
+        selectedPlaylistIds = emptySet()
+        actionRowId = null
+    }
+    // 行内「编辑」的目标歌单：非空弹重命名对话框（与详情页铅笔同一对话框）
+    var renameTarget by remember { mutableStateOf<LibraryPlaylist?>(null) }
+    renameTarget?.let { target ->
+        PlaylistMetaDialog(
+            title = "重命名歌单",
+            confirmLabel = "保存",
+            initialName = target.name,
+            initialComment = target.comment,
+            onDismiss = { renameTarget = null },
+            onConfirm = { name, comment ->
+                renameTarget = null
+                vm.renamePlaylist(target.id, name, comment)
+            },
+        )
+    }
+    // 行内「删除」的目标歌单：非空弹单删确认框
+    var pendingDelete by remember { mutableStateOf<LibraryPlaylist?>(null) }
+    pendingDelete?.let { target ->
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除歌单") },
+            text = {
+                Text(
+                    "确定删除「${target.name}」？" +
+                        if (target.isLocal) "该操作不可恢复。"
+                        else "服务器上的歌单及其曲目列表会被删除，该操作不可恢复。"
+                )
+            },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        vm.deletePlaylist(target.id)
+                        pendingDelete = null
+                        // 该行退出选中；若操作态因此清空也随之退出
+                        selectedPlaylistIds -= target.id
+                        if (actionRowId == target.id) actionRowId = null
+                    },
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { pendingDelete = null }) {
+                    Text("取消")
+                }
+            },
+        )
+    }
+    // 多选批量删除确认：非空 selectedPlaylistIds>1 时由右上角按钮触发
+    var pendingBatchDelete by remember { mutableStateOf(false) }
+    if (pendingBatchDelete) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { pendingBatchDelete = false },
+            title = { Text("删除歌单") },
+            text = { Text("确定删除选中的 ${selectedPlaylistIds.size} 个歌单？该操作不可恢复。") },
+            confirmButton = {
+                androidx.compose.material3.TextButton(
+                    onClick = {
+                        selectedPlaylistIds.forEach { vm.deletePlaylist(it) }
+                        selectedPlaylistIds = emptySet()
+                        actionRowId = null
+                        pendingBatchDelete = false
+                    },
+                ) {
+                    Text("删除", color = MaterialTheme.colorScheme.error)
+                }
+            },
+            dismissButton = {
+                androidx.compose.material3.TextButton(onClick = { pendingBatchDelete = false }) {
+                    Text("取消")
+                }
             },
         )
     }
@@ -1286,11 +1383,58 @@ private fun PlaylistViewWithFab(
                 vm = vm,
                 trackCoverSlot = trackCoverSlot,
                 onPlayFromList = onPlayFromList,
+                // 操作态下穿给列表：高亮/行内按钮/多选右上角删除均由它驱动
+                selectedIds = selectedPlaylistIds,
+                actionRowId = actionRowId,
+                // 点行：普通模式开详情；操作模式切换选中（退到单选时按钮随行落位，选空退出）
+                onRowClick = { id ->
+                    if (playlistActionMode) {
+                        selectedPlaylistIds =
+                            if (id in selectedPlaylistIds) selectedPlaylistIds - id
+                            else selectedPlaylistIds + id
+                        actionRowId = selectedPlaylistIds.singleOrNull()
+                    } else {
+                        vm.openPlaylist(id)
+                    }
+                },
+                // 长按行：进入/切换操作行（按钮经 sharedElement 从旧行飞到新行）
+                onRowLongPress = { id ->
+                    selectedPlaylistIds = setOf(id)
+                    actionRowId = id
+                },
+                onRowEdit = { renameTarget = it },
+                onRowDelete = { pendingDelete = it },
             )
         }
-        // 新建歌单 FAB：任务页同款（仅歌单列表态显示，详情态淡出）
+        // 多选时的右上角批量删除（仅选中 >1 出现；单选由行内按钮负责）：
+        // 悬浮小圆钮 + errorContainer 底色，出现/收起带轻微下滑/上滑
         AnimatedVisibility(
-            visible = vm.currentPlaylist == null,
+            visible = selectedPlaylistIds.size > 1,
+            enter = fadeIn(tween(180, easing = FastOutSlowInEasing)) +
+                slideInVertically(tween(220, easing = FastOutSlowInEasing)) { -it / 2 },
+            exit = fadeOut(tween(150, easing = FastOutSlowInEasing)) +
+                slideOutVertically(tween(180, easing = FastOutSlowInEasing)) { -it / 2 },
+            modifier = Modifier
+                .align(Alignment.TopEnd)
+                .padding(top = 8.dp, end = 8.dp),
+        ) {
+            Surface(
+                shape = RoundedCornerShape(20.dp),
+                color = MaterialTheme.colorScheme.errorContainer,
+                shadowElevation = 4.dp,
+            ) {
+                IconButton(onClick = { pendingBatchDelete = true }) {
+                    Icon(
+                        LucideIcons.Trash2,
+                        contentDescription = "删除所选歌单",
+                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                    )
+                }
+            }
+        }
+        // 新建歌单 FAB：任务页同款（歌单列表态且非操作模式显示，详情态/多选态淡出）
+        AnimatedVisibility(
+            visible = vm.currentPlaylist == null && !playlistActionMode,
             enter = fadeIn(tween(250, easing = FastOutSlowInEasing)),
             exit = fadeOut(tween(180, easing = FastOutSlowInEasing)),
             modifier = Modifier
@@ -1814,6 +1958,19 @@ private fun PlaylistPanel(
     trackCoverSlot: @Composable (trackId: String, coverContent: @Composable () -> Unit) -> Unit,
     // 从列表点歌回调：展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
+    // ── 歌单列表操作态（由 PlaylistViewWithFab 提升持有）──
+    // 选中的歌单 id 集合（空 = 普通模式）
+    selectedIds: Set<String>,
+    // 单选时挂行内「编辑/删除」按钮的行 id
+    actionRowId: String?,
+    // 点行：普通模式由上层开详情；操作模式由上层切换选中
+    onRowClick: (String) -> Unit,
+    // 长按行：进入/切换操作行
+    onRowLongPress: (String) -> Unit,
+    // 行内「编辑」按钮回调
+    onRowEdit: (LibraryPlaylist) -> Unit,
+    // 行内「删除」按钮回调（上层弹确认框）
+    onRowDelete: (LibraryPlaylist) -> Unit,
 ) {
     // 局部 SharedTransitionLayout + AnimatedContent(currentPlaylist)：
     // 歌单行与详情头部通过同 key 的 sharedElement（"music_playlist_<id>"）配对，
@@ -1847,11 +2004,18 @@ private fun PlaylistPanel(
                     onPlayFromList = onPlayFromList,
                 )
             } else {
-                // 歌单列表分支（歌单行 + 删除；新建入口由外层 FAB 承担）
+                // 歌单列表分支（长按行进入操作态：行内编辑/删除，多选右上角批量删除；
+                // 新建入口由外层 FAB 承担）
                 PlaylistListContent(
                     vm = vm,
                     sharedTransitionScope = this@SharedTransitionLayout,
                     animatedVisibilityScope = this@AnimatedContent,
+                    selectedIds = selectedIds,
+                    actionRowId = actionRowId,
+                    onRowClick = onRowClick,
+                    onRowLongPress = onRowLongPress,
+                    onRowEdit = onRowEdit,
+                    onRowDelete = onRowDelete,
                 )
             }
         }
@@ -1859,7 +2023,9 @@ private fun PlaylistPanel(
 }
 
 /**
- * 歌单列表内容 —— 歌单行（名称 + 曲数 + 说明摘要 + 删除按钮）。
+ * 歌单列表内容 —— 歌单行（名称 + 曲数 + 说明摘要）。
+ * 长按行进入操作态：单选时行尾 sharedElement 展开「编辑/删除」；
+ * 多选时按钮收回、行高亮，批量删除由外层右上角按钮承担。
  * 加载中/空态与 [AlbumListContent] 同构（新建歌单由外层 FAB 触发）。
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
@@ -1869,6 +2035,18 @@ private fun PlaylistListContent(
     // 歌单行 morph：需这两个作用域生成 sharedElement key
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
+    // 选中的歌单 id 集合（空 = 普通模式；非空行高亮、点行切换选中）
+    selectedIds: Set<String>,
+    // 单选时挂行内编辑/删除按钮的行 id（selectedIds.size==1 时该行显示按钮）
+    actionRowId: String?,
+    // 点行回调（普通模式开详情 / 操作模式切换选中，由上层分发）
+    onRowClick: (String) -> Unit,
+    // 长按行回调（进入/切换操作行）
+    onRowLongPress: (String) -> Unit,
+    // 行内「编辑」按钮回调
+    onRowEdit: (LibraryPlaylist) -> Unit,
+    // 行内「删除」按钮回调（上层弹确认框）
+    onRowDelete: (LibraryPlaylist) -> Unit,
 ) {
     if (vm.isLoadingPlaylists && vm.playlists.isEmpty()) {
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1883,7 +2061,13 @@ private fun PlaylistListContent(
         items(vm.playlists, key = { "playlist-${it.id}" }) { playlist ->
             PlaylistRow(
                 playlist = playlist,
-                onClick = { vm.openPlaylist(playlist.id) },
+                selected = playlist.id in selectedIds,
+                // 行内按钮只在"单选且正是操作行"时展开；多选时全部收回
+                showActions = selectedIds.size == 1 && actionRowId == playlist.id,
+                onClick = { onRowClick(playlist.id) },
+                onLongClick = { onRowLongPress(playlist.id) },
+                onEdit = { onRowEdit(playlist) },
+                onDelete = { onRowDelete(playlist) },
                 sharedTransitionScope = sharedTransitionScope,
                 animatedVisibilityScope = animatedVisibilityScope,
             )
@@ -1903,14 +2087,32 @@ private fun PlaylistListContent(
 }
 
 /**
- * 歌单行：与专辑行完全同构 —— 52dp 封面块（服务器歌单=服务端拼贴封面，
- * 本地/空=与专辑行同款灰底占位）+ 名称/曲数/说明摘要。本地/服务器共用。
+ * 歌单行：与专辑行同构 —— 52dp 封面块（服务器歌单=服务端拼贴封面，
+ * 本地/空=与专辑行同款灰底占位）+ 名称/曲数/说明摘要。
+ * 交互：普通模式点行开详情；长按进入操作态（行高亮），单选时行尾经
+ * sharedElement 展开「编辑/删除」两个按钮（切换操作行时按钮飞行迁移），
+ * 多选时按钮收回、由外层右上角批量删除接管。本地/服务器共用。
+ *
+ * @param playlist 行内展示的歌单元数据
+ * @param selected 本行是否处于选中态（操作模式下高亮）
+ * @param showActions 是否展开行内「编辑/删除」按钮（仅单选且本行为操作行）
+ * @param onClick 点击行时触发（普通模式开详情 / 操作模式切换选中，由上层分发）
+ * @param onLongClick 长按行时触发（进入/切换操作行）
+ * @param onEdit 点击行内「编辑」按钮时触发（上层弹重命名对话框）
+ * @param onDelete 点击行内「删除」按钮时触发（上层弹确认框，此处不直接删除）
+ * @param sharedTransitionScope 行容器 morph + 行内按钮飞行的作用域
+ * @param animatedVisibilityScope 与歌单详情头部配对的过渡作用域
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
 private fun PlaylistRow(
     playlist: LibraryPlaylist,
+    selected: Boolean,
+    showActions: Boolean,
     onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
     // 行容器 morph：与歌单详情头部配对（key "music_playlist_<id>"）
     sharedTransitionScope: SharedTransitionScope,
     animatedVisibilityScope: AnimatedVisibilityScope,
@@ -1919,7 +2121,15 @@ private fun PlaylistRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(12.dp))
-            .clickable(onClick = onClick)
+            // 选中态高亮：操作模式下被选行铺 secondaryContainer 浅底，
+            // 与常态行一眼可分；普通模式透明不影响
+            .background(
+                if (selected) MaterialTheme.colorScheme.secondaryContainer
+                else Color.Transparent,
+            )
+            // combinedClickable：单击走 onClick（上层按模式分发），
+            // 长按进入操作态 —— 选中/展开全部由长按起步，点按绝不误触发
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .then(
                 with(sharedTransitionScope) {
                     Modifier.sharedElement(
@@ -1964,12 +2174,67 @@ private fun PlaylistRow(
                 )
             }
         }
+        // 行尾操作区：仅"单选且本行为操作行"时展开。AnimatedVisibility 自持
+        // 过渡作用域，内层容器挂 sharedElement（key 全行共用 "playlist_action_bar"）——
+        // 长按另一行切换操作行时，旧行退出/新行进场同帧发生，两个小按钮经
+        // shared overlay 从旧行飞到新行；进入多选时全部退出（按钮收回），
+        // 批量删除交给外层右上角
+        AnimatedVisibility(
+            visible = showActions,
+            enter = fadeIn(tween(180, easing = FastOutSlowInEasing)) +
+                expandHorizontally(tween(220, easing = FastOutSlowInEasing)),
+            exit = fadeOut(tween(140, easing = FastOutSlowInEasing)) +
+                shrinkHorizontally(tween(180, easing = FastOutSlowInEasing)),
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .then(
+                        with(sharedTransitionScope) {
+                            Modifier.sharedElement(
+                                sharedContentState = rememberSharedContentState("playlist_action_bar"),
+                                animatedVisibilityScope = this@AnimatedVisibility,
+                                boundsTransform = { _, _ ->
+                                    spring(dampingRatio = 1.0f, stiffness = Spring.StiffnessMediumLow)
+                                },
+                            )
+                        },
+                    ),
+            ) {
+                // 编辑：默认 tonal 底（中性），点击由上层弹重命名对话框
+                FilledTonalIconButton(
+                    onClick = onEdit,
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        LucideIcons.Pencil,
+                        contentDescription = "编辑歌单",
+                    )
+                }
+                Spacer(modifier = Modifier.width(8.dp))
+                // 删除：errorContainer 底色提示破坏性，点击由上层弹确认框
+                FilledTonalIconButton(
+                    onClick = onDelete,
+                    modifier = Modifier.size(36.dp),
+                    colors = IconButtonDefaults.filledTonalIconButtonColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer,
+                        contentColor = MaterialTheme.colorScheme.onErrorContainer,
+                    ),
+                ) {
+                    Icon(
+                        LucideIcons.Trash2,
+                        contentDescription = "删除歌单",
+                    )
+                }
+            }
+        }
     }
 }
 
 /**
- * 歌单详情内容 —— 头部（封面块 + 名称 + 说明 + 曲目数/总时长）+ 曲目列表（可单首移除）。
- * 点击曲目以整个歌单为队列起播。本地/服务器共用：曲目读 [MusicViewModel.playlistTracks]。
+ * 歌单详情内容 —— 头部（封面块 + 名称 + 说明 + 曲目数/总时长 + 重命名按钮）+
+ * 曲目列表（可单首移除）。点击曲目以整个歌单为队列起播。
+ * 本地/服务器共用：曲目读 [MusicViewModel.playlistTracks]。
  */
 @OptIn(ExperimentalSharedTransitionApi::class)
 @Composable
@@ -1995,13 +2260,17 @@ private fun PlaylistDetailContent(
     var filterQuery by remember(playlist.id) { mutableStateOf("") }
     var searchOpen by remember(playlist.id) { mutableStateOf(false) }
     var sortMode by remember(playlist.id) { mutableStateOf(DetailSortMode.ORIGINAL) }
+    // 重命名对话框开关：头部行尾铅笔按钮打开，确认后调 VM.renamePlaylist
+    var showRenameDialog by remember(playlist.id) { mutableStateOf(false) }
     val displayTracks = remember(vm.playlistTracks, filterQuery, sortMode) {
         filterSortDetailTracks(vm.playlistTracks, filterQuery, sortMode)
     }
-    LazyColumn(
-        modifier = Modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
+    // Box 包一层：LazyColumn 之上还要挂重命名对话框（对话框不能进 LazyColumn 作用域）
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier.fillMaxSize(),
+            verticalArrangement = Arrangement.spacedBy(4.dp),
+        ) {
         // 歌单头部：容器 morph（与列表歌单行配对）+ 96dp 封面块 + 名称/说明/统计
         item(key = "playlist_header") {
             // 封面固定取第一首曲目（Navidrome 无封面写入 API，不再提供切换交互）
@@ -2082,6 +2351,15 @@ private fun PlaylistDetailContent(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                // 重命名入口：头部行尾铅笔按钮。IconButton 自行消费点击，
+                // 不会触发头部容器的 morph 语义；VM 改名成功后会同步刷新当前歌单元信息
+                IconButton(onClick = { showRenameDialog = true }) {
+                    Icon(
+                        LucideIcons.Pencil,
+                        contentDescription = "重命名歌单",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
         }
         // 工具行：过滤输入 + 排序切换（仅作用于下方展示列表）
@@ -2133,23 +2411,52 @@ private fun PlaylistDetailContent(
                 }
             }
         }
+        }
+        // 重命名对话框：预填现名/现说明，确认后调 VM（云端 updatePlaylist /
+        // 本地 rename_local_playlist，均由 VM 分发）
+        if (showRenameDialog) {
+            PlaylistMetaDialog(
+                title = "重命名歌单",
+                confirmLabel = "保存",
+                initialName = playlist.name,
+                initialComment = playlist.comment,
+                onDismiss = { showRenameDialog = false },
+                onConfirm = { name, comment ->
+                    showRenameDialog = false
+                    vm.renamePlaylist(playlist.id, name, comment)
+                },
+            )
+        }
     }
 }
 
 /**
- * 新建歌单对话框 —— 名称（必填）+ 策展说明（选填）。
- * 确认后回调 [onConfirm]，由 VM 按当前音源分发创建。
+ * 歌单元信息对话框 —— 新建/重命名共用：名称（必填）+ 策展说明（选填）。
+ * 确认后回调 [onConfirm]（name, comment），由调用方分发新建（VM.createPlaylist）
+ * 或改名（VM.renamePlaylist）。
+ *
+ * @param title 对话框标题（"新建歌单" / "重命名歌单"）
+ * @param confirmLabel 确认按钮文案（"创建" / "保存"）
+ * @param initialName 打开时预填的名称（重命名场景传现名；新建传空串）
+ * @param initialComment 打开时预填的说明（重命名场景传现说明；新建传空串）
+ * @param onDismiss 取消/点对话框外关闭时触发
+ * @param onConfirm 点击确认时触发，回传输入框内的名称与说明
  */
 @Composable
-private fun CreatePlaylistDialog(
+private fun PlaylistMetaDialog(
+    title: String,
+    confirmLabel: String,
+    initialName: String,
+    initialComment: String,
     onDismiss: () -> Unit,
     onConfirm: (name: String, comment: String) -> Unit,
 ) {
-    var nameInput by remember { mutableStateOf("") }
-    var commentInput by remember { mutableStateOf("") }
+    // remember 以 initial 为 key：同一对话框实例在初始值变化时重置输入
+    var nameInput by remember(initialName) { mutableStateOf(initialName) }
+    var commentInput by remember(initialComment) { mutableStateOf(initialComment) }
     androidx.compose.material3.AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text("新建歌单") },
+        title = { Text(title) },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
@@ -2172,7 +2479,7 @@ private fun CreatePlaylistDialog(
                 onClick = { onConfirm(nameInput, commentInput) },
                 enabled = nameInput.isNotBlank(),
             ) {
-                Text("创建")
+                Text(confirmLabel)
             }
         },
         dismissButton = {
@@ -3429,17 +3736,123 @@ private fun EmptyHint(
  * ============================================================ */
 
 /**
- * 进程内封面缓存 —— URL → Bitmap 的 LruCache（24 张），
- * 滚动列表时重复项直接命中内存，避免重复下载。
+ * 封面缓存的稳定 key —— 同一封面跨启动保持不变，三级缓存（内存/磁盘/取色）共用：
+ * - 本地封面：`local:<uri>`（content URI 本身稳定）
+ * - 服务器封面：从 URL 提取 `id` + `size` 两个查询参数拼 key。不能直接拿整条
+ *   URL 当 key —— Subsonic 认证的 t(令牌)/s(盐) 每次启动随机生成，URL 每次都
+ *   不同，拿 URL 当 key 缓存永远命不中（这正是"封面好像从不缓存"的根因）
+ * - 参数提取失败（非本客户端拼出的 URL）：兜底原始 URL
+ */
+internal fun stableCoverKey(coverUrl: String?, albumArtUri: String?): String? {
+    if (albumArtUri != null) return "local:$albumArtUri"
+    if (coverUrl == null) return null
+    val uri = runCatching { Uri.parse(coverUrl) }.getOrNull()
+    val id = uri?.let { runCatching { it.getQueryParameter("id") }.getOrNull() }
+    if (id == null) return "url:$coverUrl"
+    val size = runCatching { uri!!.getQueryParameter("size") }.getOrNull() ?: "300"
+    return "web:$id:$size"
+}
+
+/**
+ * 进程内封面缓存 —— key → Bitmap 的 LruCache，按内存字节限容（maxMemory/8，
+ * 典型设备 16~48MB）。旧实现按"张数"限 24 张：一屏专辑行 + 详情大封面就互相
+ * 挤掉，滚动回看必然重新加载；按字节限容后常用列表可整体驻留内存。
  */
 internal object CoverArtCache {
-    private val cache = object : LruCache<String, Bitmap>(24) {}
+    // maxSize 单位与 sizeOf 一致（KB）：maxMemory/8，下限 12MB 防小内存设备过度缩水
+    private val cache = object : LruCache<String, Bitmap>(
+        (Runtime.getRuntime().maxMemory() / 8 / 1024).toInt().coerceAtLeast(12 * 1024),
+    ) {
+        override fun sizeOf(key: String, value: Bitmap): Int = value.byteCount / 1024
+    }
 
     /** 查缓存；未命中返回 null */
     fun get(url: String): Bitmap? = cache.get(url)
 
     /** 写入缓存 */
     fun put(url: String, bitmap: Bitmap) = cache.put(url, bitmap)
+}
+
+/**
+ * 封面磁盘缓存 —— 仅服务 web 封面（`web:` key）：按稳定 key 的 md5 落文件
+ * （cacheDir/covers/），跨启动有效，二次进入列表零网络请求。本地封面不走
+ * 磁盘（本身就是本地数据，再存一份只浪费空间，靠扩容后的内存缓存即可）。
+ *
+ * 总量上限 64MB，写入后超限按 lastModified 从旧到新淘汰；目录用 cacheDir
+ * （系统磁盘紧张时可整体回收，无需权限，也不进应用备份）。
+ */
+private object CoverDiskCache {
+    private const val MAX_BYTES = 64L * 1024 * 1024
+    private const val DIR_NAME = "covers"
+
+    /** 目录懒初始化（首次使用时创建），进程内复用 */
+    private var dir: File? = null
+
+    private fun dirOf(context: Context): File =
+        dir ?: File(context.applicationContext.cacheDir, DIR_NAME).apply { mkdirs() }
+            .also { dir = it }
+
+    /** 稳定 key → 文件名：md5 hex，避免 key 里的非法字符进入文件系统 */
+    private fun fileName(key: String): String {
+        val digest = MessageDigest.getInstance("MD5").digest(key.toByteArray(Charsets.UTF_8))
+        return digest.joinToString("") { "%02x".format(it) } + ".img"
+    }
+
+    /** 读磁盘缓存；文件不存在/损坏返回 null（损坏时顺手删除） */
+    fun read(context: Context, key: String): Bitmap? {
+        val file = File(dirOf(context), fileName(key))
+        if (!file.isFile) return null
+        val bitmap = runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
+        if (bitmap == null) file.delete() // 半截文件：清掉，下次走网络重取
+        return bitmap
+    }
+
+    /** 写磁盘缓存（JPEG 88 重压缩）+ 超限淘汰 */
+    fun write(context: Context, key: String, bitmap: Bitmap) {
+        runCatching {
+            val file = File(dirOf(context), fileName(key))
+            file.outputStream().use { out ->
+                bitmap.compress(Bitmap.CompressFormat.JPEG, 88, out)
+            }
+            trim(context)
+        }
+    }
+
+    /** 总量超限时按 lastModified 从旧到新删除，直到回到上限内 */
+    private fun trim(context: Context) {
+        val files = dirOf(context).listFiles()?.filter { it.isFile } ?: return
+        var total = files.sumOf { it.length() }
+        if (total <= MAX_BYTES) return
+        for (f in files.sortedBy { it.lastModified() }) {
+            if (total <= MAX_BYTES) break
+            val len = f.length()
+            if (f.delete()) total -= len
+        }
+    }
+}
+
+/**
+ * 封面统一取载漏斗（IO 线程调用）：内存 → 磁盘（仅 web）→ 原始加载，逐级回填。
+ * CoverArt 列表/大封面与 PlayerBackdrop 取色共用此入口，保证三级缓存 key 一致。
+ *
+ * @return 解码成功返回 Bitmap（已回填沿途各级缓存），失败返回 null
+ */
+internal fun loadCoverBitmapCached(context: Context, coverUrl: String?, albumArtUri: String?): Bitmap? {
+    val key = stableCoverKey(coverUrl, albumArtUri) ?: return null
+    // ① 内存
+    CoverArtCache.get(key)?.let { return it }
+    // ② 磁盘（仅 web 封面；命中回填内存）
+    if (key.startsWith("web:")) {
+        CoverDiskCache.read(context, key)?.also {
+            CoverArtCache.put(key, it)
+            return it
+        }
+    }
+    // ③ 原始加载（本地 loadThumbnail / 网络 OkHttp），成功后回填内存与磁盘
+    val loaded = loadCoverBitmap(context, coverUrl, albumArtUri) ?: return null
+    if (key.startsWith("web:")) CoverDiskCache.write(context, key, loaded)
+    CoverArtCache.put(key, loaded)
+    return loaded
 }
 
 /**
@@ -3479,18 +3892,18 @@ private fun CoverArt(
     albumArtUri: String? = null,
 ) {
     val context = LocalContext.current
-    // 缓存 key：本地封面用 "local:<uri>" 前缀与服务器 URL 区分，共用同一个 LruCache
-    val cacheKey = albumArtUri?.let { "local:$it" } ?: coverUrl
-    // produceState：初值取内存缓存（同步命中无闪烁）；未命中则异步加载并写入缓存。
-    // key 绑定 cacheKey，封面来源变化（切歌/换专辑）时自动重新加载
+    // 缓存 key：与取色/磁盘缓存共用的稳定 key（剥掉 URL 里每次启动随机的认证参数）
+    val cacheKey = stableCoverKey(coverUrl, albumArtUri)
+    // produceState：初值取内存缓存（同步命中无闪烁）；未命中则异步走统一漏斗
+    // （内存 → 磁盘 → 网络/本地）。key 绑定 cacheKey，封面来源变化（切歌/换专辑）
+    // 时自动重新加载
     val bitmap by produceState<Bitmap?>(
         initialValue = cacheKey?.let { CoverArtCache.get(it) },
         key1 = cacheKey,
     ) {
         if (value == null && cacheKey != null) {
             value = withContext(Dispatchers.IO) {
-                loadCoverBitmap(context, coverUrl, albumArtUri)
-                    ?.also { CoverArtCache.put(cacheKey, it) }
+                loadCoverBitmapCached(context, coverUrl, albumArtUri)
             }
         }
     }

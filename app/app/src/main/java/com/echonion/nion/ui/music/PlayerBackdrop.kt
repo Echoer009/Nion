@@ -45,9 +45,9 @@ data class PlayerBackdropColors(
 /** 提取结果 LruCache：key 与 CoverArtCache 一致（"local:<uri>" 或封面 URL） */
 private val backdropCache = object : LruCache<String, PlayerBackdropColors>(32) {}
 
-/** 封面缓存 key：与 CoverArt / CoverArtCache 完全一致（本地封面优先） */
+/** 封面缓存 key：与 CoverArt / CoverArtCache 完全一致（稳定 key，本地封面优先） */
 private fun backdropKey(track: PlayableTrack?): String? =
-    track?.albumArtUri?.let { "local:$it" } ?: track?.coverArtUrl
+    stableCoverKey(track?.coverArtUrl, track?.albumArtUri)
 
 /**
  * 同步取色（主线程可调，不做任何 IO）：
@@ -125,9 +125,11 @@ internal fun rememberPlayerBackdrop(track: PlayableTrack?, animateChanges: Boole
     LaunchedEffect(cacheKey) {
         val key = cacheKey ?: return@LaunchedEffect
         if (backdropCache.get(key) != null) return@LaunchedEffect
+        // 走统一取载漏斗（内存→磁盘→网络）：取色与列表封面共用三级缓存，
+        // 命中时零网络请求，且与 CoverArt 的 key 严格一致
         val bitmap = withContext(Dispatchers.IO) {
-            loadCoverBitmap(context, track?.coverArtUrl, track?.albumArtUri)
-        }?.also { CoverArtCache.put(key, it) }
+            loadCoverBitmapCached(context, track?.coverArtUrl, track?.albumArtUri)
+        }
         val extracted = bitmap?.let(::extractBackdrop) ?: fallback
         backdropCache.put(key, extracted)
         target = extracted

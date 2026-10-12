@@ -23,6 +23,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.debounce
@@ -177,6 +178,15 @@ class MusicViewModel(
     /** 歌单操作错误信息；非空时 UI 显示错误条，点击重试可清除 */
     var playlistError by mutableStateOf<String?>(null)
         private set
+
+    // ── 建单限流（客户端侧）──
+    // 在途建单协程：同一时刻只允许一个建单请求。防的是对话框连点/重组期间
+    // 重复回调 —— 网络往返中再次触发会被直接忽略，不会建出重复歌单
+    private var createPlaylistJob: Job? = null
+
+    // 上次建单成功的时间戳（毫秒）；0 = 无记录。失败会复位为 0（允许立即重试），
+    // 成功后才占用冷却窗口 —— 正常失败重试不被惩罚
+    private var lastPlaylistCreateAt = 0L
 
     // ──────────────────────────────────────────────────────
     // 播放器状态（来自 MediaController 回调 + 轮询）
@@ -766,7 +776,15 @@ class MusicViewModel(
      */
     fun createPlaylist(name: String, comment: String) {
         if (name.isBlank()) return
-        viewModelScope.launch {
+        // 限流①在途去重：上一次建单尚未结束（含网络往返中）时忽略重复触发
+        if (createPlaylistJob?.isActive == true) return
+        // 限流②冷却：距上次建单成功不足间隔时拒绝。仅客户端限流 —— 防手抖连点
+        // 与异常高频请求；面向恶意调用的配额控制是服务器侧职责
+        if (System.currentTimeMillis() - lastPlaylistCreateAt < PLAYLIST_CREATE_MIN_INTERVAL_MS) {
+            playlistError = "创建太频繁，请稍后再试"
+            return
+        }
+        createPlaylistJob = viewModelScope.launch {
             runCatching {
                 if (source == MusicSource.LOCAL) {
                     withContext(Dispatchers.IO) { core.createLocalPlaylist(name.trim(), comment) }
@@ -779,8 +797,14 @@ class MusicViewModel(
                     }
                 }
             }.onSuccess {
+                // 成功才占用冷却窗口（时间锚点 = 成功时刻）
+                lastPlaylistCreateAt = System.currentTimeMillis()
                 loadPlaylists(force = true)
-            }.onFailure { playlistError = it.message ?: "新建歌单失败" }
+            }.onFailure {
+                // 失败不占用冷却窗口，允许用户立即重试
+                lastPlaylistCreateAt = 0L
+                playlistError = it.message ?: "新建歌单失败"
+            }
         }
     }
 
@@ -1028,6 +1052,9 @@ class MusicViewModel(
     companion object {
         /** 类脑娘服务器预置地址 —— Navidrome（Subsonic 协议）挂载在主站 /music 路径下 */
         const val BRAINGIRL_SERVER_URL = "https://echonion.org/music"
+
+        /** 两次建单的最小间隔（毫秒）：客户端限流窗口，防手抖连点重复建单 */
+        const val PLAYLIST_CREATE_MIN_INTERVAL_MS = 5_000L
 
         /** 类脑娘服务器网页注册入口 —— 配置引导表单「注册账号」按钮用 ACTION_VIEW 打开；
          *  注册完成后网页重定向 nion://musicauth 深链回传账密，App 自动完成配置 */
