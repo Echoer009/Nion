@@ -94,6 +94,8 @@ crate-type = ["cdylib", "lib"]  # 需要 cdylib 给 Android/iOS 用
 **关键点**：
 - `produceState` 的 key 只重启 producer，不重置 state；需要"换 key 即换初值"时用 `remember(key)`。
 - 对接 Navidrome 时不要自己拼任何 `xx-<id>` 封面 id，令牌里的哈希就是缓存失效机制。
+- 缓存 key 含 size 时，同一封面的 150/300/600 互不命中：大封面首帧要拿已解码的其它尺寸当过渡图（`CoverArtCache.getAnyVariant`），否则打开专辑详情、点歌展开播放页时 morph 飞的是占位图。
+- morph 的目标页不能整页换成转圈：专辑详情曲目加载中只把曲目区换成转圈，头部（大封面所在、morph 配对目标）照常渲染。
 
 **验证**：模拟器 + 仿 Navidrome 0.64 头部语义的本地假服务器，新旧两版对照：旧版切歌后迷你条仍是上一首封面、服务端换歌单图后仍显示旧图、占位图被存成 JPEG；新版迷你条随切歌更新、歌单图随令牌更新、冷启动只重拉 2 张 `no-store` 占位图、其余全部磁盘命中、无痕冷缓存每个 key 只请求一次。
 

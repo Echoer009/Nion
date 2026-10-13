@@ -1881,12 +1881,10 @@ private fun AlbumDetailContent(
     // 从列表点歌回调：展开播放页并配对封面 morph
     onPlayFromList: (String) -> Unit,
 ) {
-    if (vm.isLoadingServer && vm.albumSongs.isEmpty()) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
-        }
-        return
-    }
+    // 曲目尚未到手（磁盘缓存读取/网络请求中）：只把曲目区换成转圈，头部照常渲染 ——
+    // 头部的专辑名/封面在列表里就已知，且它是列表行 morph 的配对目标；整页换成转圈的话，
+    // 打开那几帧头部根本不存在，大封面要等转圈结束才开始加载（"点开专辑大封面缓冲一下"）
+    val loadingSongs = vm.isLoadingServer && vm.albumSongs.isEmpty()
     // 详情页局部过滤/排序状态：仅作用于当前列表，切换专辑即重置；
     // 刻意不写 vm.searchQuery（那是顶部全局搜索，语义不同）
     var filterQuery by remember(album.id) { mutableStateOf("") }
@@ -1979,7 +1977,17 @@ private fun AlbumDetailContent(
         }
         // 曲目列表：点击即以专辑全部曲目为队列，从该曲开始播放；
         // 展示列表携带原始下标，起播仍按原始队列位置定位
-        if (displaySongs.isEmpty()) {
+        if (loadingSongs) {
+            // 曲目加载中：转圈只占曲目区，头部大封面不受影响
+            item(key = "album_loading") {
+                Box(
+                    modifier = Modifier.fillMaxWidth().padding(top = 32.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    CircularProgressIndicator()
+                }
+            }
+        } else if (displaySongs.isEmpty()) {
             item(key = "album_no_match") {
                 Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
                     Text(
@@ -3969,6 +3977,35 @@ internal object CoverArtCache {
 
     /** 写入缓存 */
     fun put(url: String, bitmap: Bitmap) = cache.put(url, bitmap)
+
+    /**
+     * App 里实际会请求的封面尺寸变体（px），大的在前：播放页大封面 600 / 默认 300 / 列表行 150。
+     * 新增 coverUrlAtSize 的尺寸时需同步加到这里，否则该尺寸不能当过渡图
+     */
+    private val SIZE_VARIANTS = listOf("600", "300", "150")
+
+    /**
+     * 查同一封面的其它尺寸变体（仅 web key，格式见 [stableCoverKey]），精确尺寸未命中时当过渡图用。
+     *
+     * 为什么需要：列表行用 150px、专辑详情大封面用 300px、播放页 morph 大封面用 600px，
+     * 缓存 key 含 size，三者互不命中 —— 打开详情/点歌展开播放页时大封面内存必然未命中，
+     * 会先闪占位图再读盘/下载、淡入（"明明缓存了还要缓冲一下"）。有了过渡图，首帧直接
+     * 显示列表里已解码的小图，精确尺寸后台加载完成后无缝替换。
+     * 优先返回更大的变体（放大显示时更清晰）。
+     *
+     * @return 任一已缓存的其它尺寸位图；本地/非本客户端 key 或都未缓存时返回 null
+     */
+    fun getAnyVariant(key: String): Bitmap? {
+        if (!key.startsWith("web:")) return null
+        // key = "web:<服务器>|<令牌>|<size>"：最后一段是尺寸，前面是同一封面的公共部分
+        val base = key.substringBeforeLast('|')
+        val exactSize = key.substringAfterLast('|')
+        for (size in SIZE_VARIANTS) {
+            if (size == exactSize) continue
+            cache.get("$base|$size")?.let { return it }
+        }
+        return null
+    }
 }
 
 /**
@@ -4243,18 +4280,27 @@ private fun CoverArt(
     // 不能用 produceState —— 它内部的 remember 不带 key，换 key 后旧位图原样保留，再叠加
     // "为空才加载"的守卫，新封面根本不会去加载：即"切歌后迷你条还是上一首封面/搜索结果封面错位"
     var bitmap by remember(cacheKey) { mutableStateOf(cacheKey?.let { CoverArtCache.get(it) }) }
-    // 淡入进度（同样按 key 重建）：内存同步命中 → 直接 1，无多余动画；
-    // 需要异步加载 → 从 0 起，图到手后淡入
-    val fadeIn = remember(cacheKey) { androidx.compose.animation.core.Animatable(if (bitmap != null) 1f else 0f) }
+    // 过渡图：精确尺寸内存未命中时，取同一封面已解码的其它尺寸（列表 150px → 详情 300px /
+    // 播放页 600px），首帧直接有图 —— 否则打开专辑详情、点歌展开播放页时大封面必然先闪占位图
+    val fallback = remember(cacheKey) {
+        if (bitmap == null && cacheKey != null) CoverArtCache.getAnyVariant(cacheKey) else null
+    }
+    // 淡入进度（同样按 key 重建）：首帧已有图（精确命中或过渡图）→ 直接 1，无多余动画；
+    // 真正从零加载 → 从 0 起，图到手后淡入
+    val fadeIn = remember(cacheKey) {
+        androidx.compose.animation.core.Animatable(if (bitmap != null || fallback != null) 1f else 0f)
+    }
     // 淡入期间占位图是否继续垫在封面下面（占位 → 封面交叉过渡）；淡入结束即撤掉，常态只画一层。
     // 单独用状态位而非在组合里读 fadeIn.value，避免淡入的每一帧都触发重组
-    var placeholderUnder by remember(cacheKey) { mutableStateOf(bitmap == null) }
+    var placeholderUnder by remember(cacheKey) { mutableStateOf(bitmap == null && fallback == null) }
     LaunchedEffect(cacheKey) {
         if (bitmap != null || cacheKey == null) return@LaunchedEffect
         val loaded = withContext(Dispatchers.IO) {
             loadCoverBitmapCached(context, coverUrl, albumArtUri)
         } ?: return@LaunchedEffect
         bitmap = loaded
+        // 已显示过渡图：同一张封面换成高清版，直接替换（淡入反而会闪一下）
+        if (fallback != null) return@LaunchedEffect
         // 150ms FastOutSlowIn：前段快速显形、尾段柔和收住，替代硬切的"弹出感"
         fadeIn.animateTo(1f, tween(150, easing = FastOutSlowInEasing))
         placeholderUnder = false
@@ -4264,8 +4310,8 @@ private fun CoverArt(
         modifier = modifier.clip(RoundedCornerShape(cornerRadius)),
         contentAlignment = Alignment.Center,
     ) {
-        // 委托属性无法智能转换非空，先落到局部 val 再判空使用
-        val loaded = bitmap
+        // 委托属性无法智能转换非空，先落到局部 val 再判空使用；精确尺寸未到时先画过渡图
+        val loaded = bitmap ?: fallback
         if (loaded == null || placeholderUnder) {
             // 占位：中性色专辑图标
             Box(

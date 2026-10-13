@@ -62,7 +62,8 @@ private fun backdropKey(track: PlayableTrack?): String? =
 internal fun peekBackdrop(track: PlayableTrack?): PlayerBackdropColors? {
     val key = backdropKey(track) ?: return null
     backdropCache.get(key)?.let { return it }
-    val bitmap = CoverArtCache.get(key) ?: return null
+    // 精确尺寸（300px）常未解码过：被点的列表行/迷你条显示的是 150px 变体，取色用它即可
+    val bitmap = CoverArtCache.get(key) ?: CoverArtCache.getAnyVariant(key) ?: return null
     return extractBackdrop(bitmap).also { backdropCache.put(key, it) }
 }
 
