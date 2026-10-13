@@ -876,13 +876,10 @@ class MusicViewModel(
                 val raw = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
                 raw?.let { client.parsePlaylistsResponse(JSONObject(it)) }
             }.getOrNull()?.takeIf { playlists.isEmpty() }?.let { cached ->
-                // 映射 + 可见性过滤与网络路径完全一致（他人公开歌单同样被滤掉）
+                // 映射 + 可见性过滤与网络路径完全一致（他人公开歌单同样被滤掉）；
+                // 封面 URL 已由 parsePlaylist 按服务端 coverArt 令牌拼好
                 playlists = filterOwnPlaylists(
-                    cached.map { p ->
-                        p.toLibraryPlaylist().let { lib ->
-                            lib.copy(coverArtUrl = client.coverArtUrl("pl-${lib.id}"))
-                        }
-                    },
+                    cached.map { p -> p.toLibraryPlaylist() },
                     currentServerUsername(),
                 )
             }
@@ -893,11 +890,7 @@ class MusicViewModel(
                         SubsonicJsonCache.write(app, cacheKey, raw.toString())
                     }
                     val fresh = filterOwnPlaylists(
-                        client.parsePlaylistsResponse(raw).map { p ->
-                            p.toLibraryPlaylist().let { lib ->
-                                lib.copy(coverArtUrl = client.coverArtUrl("pl-${lib.id}"))
-                            }
-                        },
+                        client.parsePlaylistsResponse(raw).map { p -> p.toLibraryPlaylist() },
                         currentServerUsername(),
                     )
                     // SWR 判等：内容没变不赋值，列表纹丝不动
@@ -960,8 +953,10 @@ class MusicViewModel(
         playlistError = null
         viewModelScope.launch {
             // ① 磁盘缓存先显（打开过一次的歌单秒开，含完整曲目）；命中即上屏，
-            //    加载态结束 —— 列表页带过来的元信息先被缓存的完整元信息替换
-            val cacheKey = "playlist:$id"
+            //    加载态结束 —— 列表页带过来的元信息先被缓存的完整元信息替换。
+            //    键必须带 cacheNs() 前缀，与 prefetchPlaylist 写入、增删曲目后的精确失效
+            //    用同一个键 —— 否则预取白做，失效也删不到这里读的旧列表（编辑后先闪旧曲目/旧首曲封面）
+            val cacheKey = "${cacheNs()}playlist:$id"
             runCatching {
                 val raw = withContext(Dispatchers.IO) { SubsonicJsonCache.read(app, cacheKey) }
                 raw?.let { client.parsePlaylistResponse(JSONObject(it)) }

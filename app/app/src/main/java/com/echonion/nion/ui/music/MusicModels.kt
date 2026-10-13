@@ -208,6 +208,8 @@ fun SubsonicAlbum.toLibraryAlbum(): LibraryAlbum = LibraryAlbum(
  *   用于记录歌单的创作背景/说明文案
  * @property public 是否对其他用户公开（Navidrome 多用户场景）
  * @property owner 歌单归属的用户名；部分服务端可能缺省为空串
+ * @property coverArtUrl 封面完整 URL（客户端已拼好认证参数）：由服务端下发的 coverArt
+ *   令牌拼成（Navidrome 为 `pl-<id>_<内容哈希>`，歌单内容变化令牌即变）；服务端无封面时为 null
  */
 data class SubsonicPlaylist(
     val id: String,
@@ -217,6 +219,7 @@ data class SubsonicPlaylist(
     val comment: String = "",
     val public: Boolean = false,
     val owner: String = "",
+    val coverArtUrl: String? = null,
 )
 
 /**
@@ -239,8 +242,8 @@ data class LibraryPlaylist(
     val songCount: Int,
     val durationSeconds: Int,
     val isLocal: Boolean,
-    // 歌单封面：服务器歌单 = getCoverArt?pl-<id>（Navidrome 服务端拼贴）；
-    // 本地歌单无服务端封面 → null，UI 用与专辑行同款占位块
+    // 歌单封面：服务器歌单 = 服务端下发的 coverArt 令牌拼成的 URL（Navidrome 服务端拼贴，
+    // 令牌含内容哈希、歌单内容变化即变）；服务端无封面或本地歌单 → null，UI 用与专辑行同款占位块
     val coverArtUrl: String? = null,
     // 归属用户名：服务器歌单 = Subsonic owner 字段（空串归一化为 null）；
     // 本地歌单恒为 null。可见性过滤与未来的公共歌单分组都以它为依据
@@ -261,6 +264,7 @@ fun SubsonicPlaylist.toLibraryPlaylist(): LibraryPlaylist = LibraryPlaylist(
     songCount = songCount,
     durationSeconds = durationSeconds,
     isLocal = false,
+    coverArtUrl = coverArtUrl,
 )
 
 /**

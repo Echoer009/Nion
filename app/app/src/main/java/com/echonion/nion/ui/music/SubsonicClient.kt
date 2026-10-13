@@ -408,6 +408,11 @@ class SubsonicClient(
      * 解析单个歌单 JSON 对象（getPlaylists / getPlaylist / createPlaylist 共用）。
      * duration 为歌单总时长（秒）；comment/owner/public 为 Subsonic 1.14+ 字段，
      * Navidrome 必回，其他兼容服务端可能缺省 —— 全部用 opt* 宽松解析兜底。
+     *
+     * 封面必须用服务端下发的 coverArt 令牌，不能自己拼 "pl-<id>"：Navidrome 的令牌是
+     * `pl-<id>_<内容哈希>`，歌单增删曲目后拼贴图变了令牌就变，封面缓存 key 随之更新；
+     * 歌单无图（如空歌单）时令牌为空串 → 不请求，UI 显示占位块。自己拼的 "pl-<id>"
+     * 永远不变，第一次拿到的图（常常是空歌单时服务端回的占位图）会被永久缓存。
      */
     private fun parsePlaylist(json: JSONObject): SubsonicPlaylist = SubsonicPlaylist(
         id = json.getString("id"),
@@ -417,6 +422,7 @@ class SubsonicClient(
         comment = json.optString("comment", ""),
         public = json.optBoolean("public", false),
         owner = json.optString("owner", ""),
+        coverArtUrl = json.optString("coverArt", "").ifBlank { null }?.let { coverArtUrl(it) },
     )
 
     companion object {

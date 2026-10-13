@@ -119,7 +119,6 @@ import androidx.compose.runtime.LaunchedEffect
 import kotlinx.coroutines.flow.first
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -145,10 +144,12 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.echonion.nion.MainActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.File
 import java.security.MessageDigest
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
+import kotlin.concurrent.thread
 import com.echonion.nion.ui.icons.LucideIcons
 
 // ── 播放条 ↔ 播放页 morph 的统一时钟（毫秒）──
@@ -234,13 +235,6 @@ fun MusicScreen(
 ) {
     val vm = musicViewModel()
 
-    // 封面取色预热：开始播放/切歌时立即提取入缓存（不等点开播放页），
-    // 保证铺开动画一起步就是歌曲色（详见 prewarmBackdrop 注释）
-    val prewarmContext = LocalContext.current
-    LaunchedEffect(vm.currentTrack?.id) {
-        prewarmBackdrop(prewarmContext, vm.currentTrack)
-    }
-
     // ── 消费注册深链（nion://musicauth?u=..&p=..）──
     // MainActivity 已把账密落库并暂存在 pendingMusicAuthXxx（照通知 Intent 的模式），
     // 音乐界面组合时同步 ViewModel 内存状态并自动触发连接；消费完立即清除防重复执行
@@ -269,7 +263,7 @@ fun MusicScreen(
     // 完整播放页打开时拦截系统返回：先收起播放页而不是退出音乐页
     BackHandler(enabled = showFullPlayer) { showFullPlayer = false }
 
-    // 本页常驻取色（prewarmBackdrop 已在开始播放时预热缓存，此处即时命中）：
+    // 本页常驻取色（切歌即在后台按稳定 key 取封面、提取入缓存，不等点开播放页）：
     // 一个色源三处消费 —— 迷你条常态一体色 / morph 两侧的底锚定整屏渐变 /
     // NionApp 导航栏染色。展开瞬间即为歌曲色，不会先落米色兜底再慢半拍变色
     val backdrop = rememberPlayerBackdrop(vm.currentTrack, animateChanges = vm.isFullPlayerOpen)
@@ -3895,20 +3889,36 @@ private fun EmptyHint(
 /**
  * 封面缓存的稳定 key —— 同一封面跨启动保持不变，三级缓存（内存/磁盘/取色）共用：
  * - 本地封面：`local:<uri>`（content URI 本身稳定）
- * - 服务器封面：从 URL 提取 `id` + `size` 两个查询参数拼 key。不能直接拿整条
- *   URL 当 key —— Subsonic 认证的 t(令牌)/s(盐) 每次启动随机生成，URL 每次都
+ * - 服务器封面：`web:<服务器>|<id>|<size>`。不能直接拿整条 URL 当 key ——
+ *   Subsonic 认证的 t(令牌)/s(盐) 随 SubsonicClient 实例随机生成，URL 每次都
  *   不同，拿 URL 当 key 缓存永远命不中（这正是"封面好像从不缓存"的根因）
- * - 参数提取失败（非本客户端拼出的 URL）：兜底原始 URL
+ *   · 服务器段 = host[:port] + path（如 `echonion.org/music/rest/getCoverArt.view`）：
+ *     不同服务器的封面 id 可能撞串（gonic/Airsonic 一类服务端用自增整数 id），
+ *     与 JSON 缓存的 cacheNs() 同理按服务器隔离；不含用户名 —— 同一服务器上
+ *     不同账号看到的同一封面本就是同一张图
+ *   · id = 服务端下发的 coverArt 令牌。Navidrome 的令牌自带内容哈希
+ *     （`al-<id>_<hash>`），图一变令牌就变，所以磁盘缓存可以永不过期而不陈旧 ——
+ *     前提是客户端原样使用服务端令牌、不自己拼（见 SubsonicClient.parsePlaylist）
+ * - 参数提取失败（非本客户端拼出的 URL）：兜底原始 URL（只进内存缓存）
  */
 internal fun stableCoverKey(coverUrl: String?, albumArtUri: String?): String? {
     if (albumArtUri != null) return "local:$albumArtUri"
     if (coverUrl == null) return null
     val uri = runCatching { Uri.parse(coverUrl) }.getOrNull()
     val id = uri?.let { runCatching { it.getQueryParameter("id") }.getOrNull() }
-    if (id == null) return "url:$coverUrl"
-    val size = runCatching { uri!!.getQueryParameter("size") }.getOrNull() ?: "300"
-    return "web:$id:$size"
+    if (uri == null || id == null) return "url:$coverUrl"
+    val size = runCatching { uri.getQueryParameter("size") }.getOrNull() ?: "300"
+    // 端口仅在显式指定时拼入（默认端口 Uri.port = -1）
+    val port = if (uri.port != -1) ":${uri.port}" else ""
+    return "web:${uri.host}$port${uri.path}|$id|$size"
 }
+
+/**
+ * 封面 URL 的 `size` 参数（目标边长 px），解码时据此降采样；缺省 300，
+ * 与 SubsonicClient.coverArtUrl 的默认值一致。0 表示原图（不降采样）
+ */
+private fun coverTargetPx(coverUrl: String): Int =
+    runCatching { Uri.parse(coverUrl).getQueryParameter("size")?.toIntOrNull() }.getOrNull() ?: 300
 
 /**
  * 把服务器封面 URL 的 `size` 查询参数改写成指定值 —— 按显示位要尺寸：
@@ -3963,23 +3973,60 @@ internal object CoverArtCache {
 
 /**
  * 封面磁盘缓存 —— 仅服务 web 封面（`web:` key）：按稳定 key 的 md5 落文件
- * （cacheDir/covers/），跨启动有效，二次进入列表零网络请求。本地封面不走
+ * （cacheDir/covers-v2/），跨启动有效，二次进入列表零网络请求。本地封面不走
  * 磁盘（本身就是本地数据，再存一份只浪费空间，靠扩容后的内存缓存即可）。
  *
- * 总量上限 256MB（约八千至一万余张 300px JPEG，重度曲库也够用），写入后超限按
- * lastModified 从旧到新淘汰；目录用 cacheDir
+ * - 存服务器返回的**原始字节**（JPEG/PNG/WebP 原样），读时再按目标尺寸解码：
+ *   不做有损重压缩（旧实现 JPEG 88 二次压缩既掉画质，又会把 PNG 透明底压成黑底）
+ * - **原子写入**：先写同目录临时文件再 rename 覆盖。直接写目标文件的话，进程被杀/
+ *   磁盘写满会留下半截文件 —— BitmapFactory 对截断的 JPEG 照样返回"下半截灰"的
+ *   位图而不是 null，坏图从此被当成正常缓存；并发读也可能读到写了一半的文件
+ * - **LRU**：读命中刷新 lastModified，超限按 lastModified 从旧到新淘汰
+ *   （旧实现读不刷新，实际是按写入时间的 FIFO，常听的封面照样被挤掉）
+ * - 总量在内存里增量记账（首次访问扫描一次目录），超限才整目录扫描并一次裁到 90%：
+ *   旧实现每写一张都 listFiles + 逐个 stat，缓存上万张后每次写入都是一次全目录扫描
+ *
+ * 总量上限 256MB（约八千至一万余张 300px JPEG，重度曲库也够用）；目录用 cacheDir
  * （系统磁盘紧张时可整体回收，无需权限，也不进应用备份）。
  */
 private object CoverDiskCache {
     private const val MAX_BYTES = 256L * 1024 * 1024
-    private const val DIR_NAME = "covers"
+    // 超限后一次裁到上限的 90%：留出余量，避免此后每写一张都触发整目录扫描
+    private const val TRIM_TO_BYTES = MAX_BYTES / 10 * 9
+    // v2：key 加了服务器命名空间、文件改存原始字节，与旧目录互不兼容，换目录整体切换
+    private const val DIR_NAME = "covers-v2"
+    // 旧版目录：旧 key 已全部失效，且混有被永久缓存的服务器占位图，初始化时后台删除
+    private const val LEGACY_DIR_NAME = "covers"
+    private const val TMP_SUFFIX = ".tmp"
 
-    /** 目录懒初始化（首次使用时创建），进程内复用 */
+    /** 目录初始化、总量记账、淘汰共用一把锁（只在写入/删除时持有，读不加锁） */
+    private val lock = Any()
+
+    /** 缓存目录：首次使用时创建并统计总量，进程内复用 */
+    @Volatile
     private var dir: File? = null
 
-    private fun dirOf(context: Context): File =
-        dir ?: File(context.applicationContext.cacheDir, DIR_NAME).apply { mkdirs() }
-            .also { dir = it }
+    /** 目录内缓存文件总字节数：初始化扫描一次，之后随写入/删除/淘汰增量维护（受 [lock] 保护） */
+    private var totalBytes = 0L
+
+    private fun dirOf(context: Context): File = dir ?: synchronized(lock) {
+        dir ?: run {
+            val root = context.applicationContext.cacheDir
+            val legacy = File(root, LEGACY_DIR_NAME)
+            if (legacy.exists()) {
+                // 后台线程删：旧目录可能有上万个文件，不能卡住首张封面的加载
+                thread(isDaemon = true, name = "cover-cache-legacy-purge") { legacy.deleteRecursively() }
+            }
+            val created = File(root, DIR_NAME).apply { mkdirs() }
+            var total = 0L
+            created.listFiles()?.forEach { f ->
+                // 上次进程在写入中途被杀留下的临时文件：直接清掉，不计入总量
+                if (f.name.endsWith(TMP_SUFFIX)) f.delete() else total += f.length()
+            }
+            totalBytes = total
+            created.also { dir = it }
+        }
+    }
 
     /** 稳定 key → 文件名：md5 hex，避免 key 里的非法字符进入文件系统 */
     private fun fileName(key: String): String {
@@ -3987,89 +4034,196 @@ private object CoverDiskCache {
         return digest.joinToString("") { "%02x".format(it) } + ".img"
     }
 
-    /** 读磁盘缓存；文件不存在/损坏返回 null（损坏时顺手删除） */
-    fun read(context: Context, key: String): Bitmap? {
+    /**
+     * 读磁盘缓存并按 [targetPx] 解码；文件不存在返回 null，解不出图（损坏）时删除并返回 null。
+     * 命中即刷新 lastModified，让淘汰保活常用封面
+     */
+    fun read(context: Context, key: String, targetPx: Int): Bitmap? {
         val file = File(dirOf(context), fileName(key))
         if (!file.isFile) return null
-        val bitmap = runCatching { BitmapFactory.decodeFile(file.absolutePath) }.getOrNull()
-        if (bitmap == null) file.delete() // 半截文件：清掉，下次走网络重取
+        val bitmap = runCatching { file.readBytes() }.getOrNull()?.let { decodeCoverBytes(it, targetPx) }
+        if (bitmap == null) {
+            remove(file)
+            return null
+        }
+        file.setLastModified(System.currentTimeMillis())
         return bitmap
     }
 
-    /** 写磁盘缓存（JPEG 88 重压缩）+ 超限淘汰 */
-    fun write(context: Context, key: String, bitmap: Bitmap) {
+    /** 原子写入原始图片字节（临时文件 → rename 覆盖）+ 超限淘汰；IO 失败静默放弃（只是少一份缓存） */
+    fun write(context: Context, key: String, bytes: ByteArray) {
         runCatching {
-            val file = File(dirOf(context), fileName(key))
-            file.outputStream().use { out ->
-                bitmap.compress(Bitmap.CompressFormat.JPEG, 88, out)
+            val d = dirOf(context)
+            val target = File(d, fileName(key))
+            val tmp = File.createTempFile("cover-", TMP_SUFFIX, d)
+            try {
+                tmp.writeBytes(bytes)
+                synchronized(lock) {
+                    // 覆盖已有文件时扣掉旧长度，记账与磁盘保持一致
+                    val replaced = if (target.isFile) target.length() else 0L
+                    if (tmp.renameTo(target)) {
+                        totalBytes += bytes.size - replaced
+                        if (totalBytes > MAX_BYTES) trimLocked(d)
+                    }
+                }
+            } finally {
+                // rename 成功后临时文件已不存在（delete 无副作用）；失败时清掉残留
+                tmp.delete()
             }
-            trim(context)
         }
     }
 
-    /** 总量超限时按 lastModified 从旧到新删除，直到回到上限内 */
-    private fun trim(context: Context) {
-        val files = dirOf(context).listFiles()?.filter { it.isFile } ?: return
-        var total = files.sumOf { it.length() }
-        if (total <= MAX_BYTES) return
-        for (f in files.sortedBy { it.lastModified() }) {
-            if (total <= MAX_BYTES) break
-            val len = f.length()
-            if (f.delete()) total -= len
+    /** 删除单个缓存文件并同步扣减记账 */
+    private fun remove(file: File) {
+        synchronized(lock) {
+            val len = file.length()
+            if (file.delete()) totalBytes -= len
         }
+    }
+
+    /**
+     * 淘汰（须持有 [lock]）：按 lastModified 从旧到新删除，直到降到 [TRIM_TO_BYTES]；
+     * 顺带用实际扫描结果校正记账，抵消系统回收 cacheDir 等外部变动造成的偏差
+     */
+    private fun trimLocked(d: File) {
+        // (文件, 长度, 修改时间) 一次取齐：排序比较器里反复 stat 会放大成 O(n log n) 次系统调用
+        val entries = d.listFiles()
+            ?.filter { it.isFile && !it.name.endsWith(TMP_SUFFIX) }
+            ?.map { Triple(it, it.length(), it.lastModified()) }
+            ?: return
+        var total = entries.sumOf { it.second }
+        for ((file, len, _) in entries.sortedBy { it.third }) {
+            if (total <= TRIM_TO_BYTES) break
+            if (file.delete()) total -= len
+        }
+        totalBytes = total
     }
 }
 
 /**
- * 封面统一取载漏斗（IO 线程调用）：内存 → 磁盘（仅 web）→ 原始加载，逐级回填。
- * CoverArt 列表/大封面与 PlayerBackdrop 取色共用此入口，保证三级缓存 key 一致。
+ * 在途加载表：同一稳定 key 同时只做一次"磁盘 → 网络/本地"加载，后到者阻塞等待领头者的结果。
+ * 同一封面常被多处同时请求（列表行 + 歌单/专辑预取 + 播放页取色 + 大封面预热），
+ * 不去重就会并发下载同一张图、并发写同一个缓存文件
+ */
+private val coverLoadsInFlight = ConcurrentHashMap<String, CompletableFuture<Bitmap?>>()
+
+/**
+ * 封面统一取载漏斗（IO 线程调用，阻塞）：内存 → 磁盘（仅 web）→ 原始加载，逐级回填。
+ * CoverArt 列表/大封面、PlayerBackdrop 取色、ViewModel 预热共用此入口，保证三级缓存 key 一致。
  *
  * @return 解码成功返回 Bitmap（已回填沿途各级缓存），失败返回 null
  */
 internal fun loadCoverBitmapCached(context: Context, coverUrl: String?, albumArtUri: String?): Bitmap? {
     val key = stableCoverKey(coverUrl, albumArtUri) ?: return null
-    // ① 内存
+    // ① 内存：同步命中直接返回，不进在途表
     CoverArtCache.get(key)?.let { return it }
-    // ② 磁盘（仅 web 封面；命中回填内存）
-    if (key.startsWith("web:")) {
-        CoverDiskCache.read(context, key)?.also {
-            CoverArtCache.put(key, it)
-            return it
-        }
+    // 抢领头：已有同 key 的在途加载 → 等它的结果（领头者在 finally 里必定 complete，不会永久阻塞）
+    val mine = CompletableFuture<Bitmap?>()
+    coverLoadsInFlight.putIfAbsent(key, mine)?.let { leader ->
+        return runCatching { leader.get() }.getOrNull()
     }
-    // ③ 原始加载（本地 loadThumbnail / 网络 OkHttp），成功后回填内存与磁盘
-    val loaded = loadCoverBitmap(context, coverUrl, albumArtUri) ?: return null
-    if (key.startsWith("web:")) CoverDiskCache.write(context, key, loaded)
-    CoverArtCache.put(key, loaded)
-    return loaded
+    var result: Bitmap? = null
+    try {
+        // 领头者再查一次内存：上一个领头者可能恰好在"查内存"与"抢领头"之间完成并出表
+        result = CoverArtCache.get(key) ?: loadCoverUncached(context, key, coverUrl, albumArtUri)
+    } finally {
+        // 先交付再出表：出表前到达的等待者直接拿到结果，不会再发起一次重复加载
+        mine.complete(result)
+        coverLoadsInFlight.remove(key, mine)
+    }
+    return result
 }
 
 /**
- * 封面 HTTP 加载器 —— OkHttp 同步 GET + BitmapFactory 解码。
- * 专为封面 URL 设计（不含 Subsonic 业务解析逻辑）。
+ * 漏斗的未命中路径（仅由 [loadCoverBitmapCached] 的领头者调用），成功后回填内存缓存：
+ * - 本地封面：loadThumbnail（不落盘）
+ * - web 封面：② 磁盘命中直接解码；否则 ③ 下载原始字节 → 按 size 解码 → 服务器允许时原样落盘
+ * - 非本客户端 URL（`url:` key）：下载解码，只进内存
+ */
+private fun loadCoverUncached(
+    context: Context,
+    key: String,
+    coverUrl: String?,
+    albumArtUri: String?,
+): Bitmap? {
+    val bitmap = when {
+        albumArtUri != null -> loadLocalCoverThumbnail(context, albumArtUri)
+        coverUrl == null -> null
+        else -> {
+            val targetPx = coverTargetPx(coverUrl)
+            val persistable = key.startsWith("web:")
+            (if (persistable) CoverDiskCache.read(context, key, targetPx) else null)
+                ?: CoverArtLoader.fetch(coverUrl)?.let { fetched ->
+                    // 先解码成功再落盘：Subsonic 出错时常以 HTTP 200 回 JSON 错误体，不能当图存
+                    decodeCoverBytes(fetched.bytes, targetPx)?.also {
+                        // 服务器声明 no-store 的响应（Navidrome 的占位图：封面缺失/尚未解析出来时
+                        // 的临时替身）只进内存不落盘 —— 落盘会把占位图永久钉在这个 key 上，
+                        // 服务端后来补上封面也再看不到
+                        if (persistable && fetched.storable) CoverDiskCache.write(context, key, fetched.bytes)
+                    }
+                }
+        }
+    } ?: return null
+    CoverArtCache.put(key, bitmap)
+    return bitmap
+}
+
+/**
+ * 按目标边长解码封面字节：先只读尺寸，再取 2 的幂 inSampleSize，保证解码后短边仍 ≥ [targetPx]。
+ * 服务器按 size 缩好图时 inSampleSize=1 原样解码；防的是服务器不缩图的情况 ——
+ * Navidrome 的占位图恒为 1024px 原图（不按 size 缩），全尺寸解码一张就是 4MB，
+ * 几张就能把按字节限容的内存缓存挤空。[targetPx] ≤ 0 表示要原图。
+ *
+ * @return 解不出图（非图片字节/数据损坏）返回 null
+ */
+private fun decodeCoverBytes(bytes: ByteArray, targetPx: Int): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+    if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return null
+    var sample = 1
+    if (targetPx > 0) {
+        val shortSide = minOf(bounds.outWidth, bounds.outHeight)
+        while (shortSide / (sample * 2) >= targetPx) sample *= 2
+    }
+    val options = BitmapFactory.Options().apply { inSampleSize = sample }
+    return runCatching { BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options) }.getOrNull()
+}
+
+/**
+ * 封面 HTTP 加载器 —— OkHttp 同步 GET，只负责取回原始字节与缓存许可；
+ * 解码与是否落盘由漏斗决定。专为封面 URL 设计（不含 Subsonic 业务解析逻辑）。
  */
 private object CoverArtLoader {
     // 与 Subsonic API 共享同一 OkHttp 单例：封面与接口同主机，keep-alive 连接复用
     private val client = SubsonicClient.sharedHttpClient
 
-    /** 下载并解码封面；失败返回 null */
-    fun load(url: String): Bitmap? = runCatching {
+    /**
+     * 一次下载的结果。
+     *
+     * @property bytes 响应体原始字节（JPEG/PNG/WebP），原样落盘
+     * @property storable 服务器是否允许缓存：响应头带 `Cache-Control: no-store` 时为 false
+     */
+    class Fetched(val bytes: ByteArray, val storable: Boolean)
+
+    /** 下载封面；HTTP 非 2xx / 网络失败返回 null */
+    fun fetch(url: String): Fetched? = runCatching {
         client.newCall(Request.Builder().url(url).build()).execute().use { response ->
             if (!response.isSuccessful) return@runCatching null
             val bytes = response.body?.bytes() ?: return@runCatching null
-            BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            Fetched(bytes, storable = !response.cacheControl.noStore)
         }
     }.getOrNull()
 }
 
 
 /**
- * 封面图 Composable —— 优先内存缓存 → 异步下载 → 占位图标。
+ * 封面图 Composable —— 同步取内存缓存 → 未命中异步走统一漏斗 → 占位图标。
  *
  * @param coverUrl 封面完整 URL（含认证参数）；空/null 显示占位图标
  * @param modifier 尺寸约束
  * @param placeHolderSize 占位图标大小（大封面用大图标）
  * @param cornerRadius 圆角半径（默认 8dp）
+ * @param albumArtUri 本地专辑封面 URI；非空时优先于 coverUrl
  */
 @Composable
 private fun CoverArt(
@@ -4082,20 +4236,28 @@ private fun CoverArt(
     albumArtUri: String? = null,
 ) {
     val context = LocalContext.current
-    // 缓存 key：与取色/磁盘缓存共用的稳定 key（剥掉 URL 里每次启动随机的认证参数）
+    // 缓存 key：与取色/磁盘缓存共用的稳定 key（剥掉 URL 里随实例随机的认证参数）
     val cacheKey = stableCoverKey(coverUrl, albumArtUri)
-    // produceState：初值取内存缓存（同步命中无闪烁）；未命中则异步走统一漏斗
-    // （内存 → 磁盘 → 网络/本地）。key 绑定 cacheKey，封面来源变化（切歌/换专辑）
-    // 时自动重新加载
-    val bitmap by produceState<Bitmap?>(
-        initialValue = cacheKey?.let { CoverArtCache.get(it) },
-        key1 = cacheKey,
-    ) {
-        if (value == null && cacheKey != null) {
-            value = withContext(Dispatchers.IO) {
-                loadCoverBitmapCached(context, coverUrl, albumArtUri)
-            }
-        }
+    // 当前封面位图。remember(cacheKey)：同一个 CoverArt 实例换了封面来源时（迷你条切歌、
+    // 无 key 的搜索结果行被复用、歌单头部首曲变化），当帧丢掉上一张图、改取新 key 的内存缓存。
+    // 不能用 produceState —— 它内部的 remember 不带 key，换 key 后旧位图原样保留，再叠加
+    // "为空才加载"的守卫，新封面根本不会去加载：即"切歌后迷你条还是上一首封面/搜索结果封面错位"
+    var bitmap by remember(cacheKey) { mutableStateOf(cacheKey?.let { CoverArtCache.get(it) }) }
+    // 淡入进度（同样按 key 重建）：内存同步命中 → 直接 1，无多余动画；
+    // 需要异步加载 → 从 0 起，图到手后淡入
+    val fadeIn = remember(cacheKey) { androidx.compose.animation.core.Animatable(if (bitmap != null) 1f else 0f) }
+    // 淡入期间占位图是否继续垫在封面下面（占位 → 封面交叉过渡）；淡入结束即撤掉，常态只画一层。
+    // 单独用状态位而非在组合里读 fadeIn.value，避免淡入的每一帧都触发重组
+    var placeholderUnder by remember(cacheKey) { mutableStateOf(bitmap == null) }
+    LaunchedEffect(cacheKey) {
+        if (bitmap != null || cacheKey == null) return@LaunchedEffect
+        val loaded = withContext(Dispatchers.IO) {
+            loadCoverBitmapCached(context, coverUrl, albumArtUri)
+        } ?: return@LaunchedEffect
+        bitmap = loaded
+        // 150ms FastOutSlowIn：前段快速显形、尾段柔和收住，替代硬切的"弹出感"
+        fadeIn.animateTo(1f, tween(150, easing = FastOutSlowInEasing))
+        placeholderUnder = false
     }
 
     Box(
@@ -4104,21 +4266,7 @@ private fun CoverArt(
     ) {
         // 委托属性无法智能转换非空，先落到局部 val 再判空使用
         val loaded = bitmap
-        if (loaded != null) {
-            // 首次异步加载成功后 150ms 淡入：占位图 → 封面平滑过渡（丝滑感）。
-            // 内存缓存命中的场景 produceState 初值即非空，alpha 直接从 1 起，
-            // 不会有多余动画
-            val fadeIn = remember { androidx.compose.animation.core.Animatable(if (loaded != null) 1f else 0f) }
-            LaunchedEffect(Unit) { fadeIn.animateTo(1f, tween(150, easing = FastOutSlowInEasing)) }
-            Image(
-                bitmap = loaded.asImageBitmap(),
-                contentDescription = "封面",
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = fadeIn.value },
-                contentScale = ContentScale.Crop,
-            )
-        } else {
+        if (loaded == null || placeholderUnder) {
             // 占位：中性色专辑图标
             Box(
                 modifier = Modifier
@@ -4134,27 +4282,29 @@ private fun CoverArt(
                 )
             }
         }
+        if (loaded != null) {
+            // ImageBitmap 包装按位图记住：重组时不重复包装，Image 内部的 painter 也随之复用
+            val image = remember(loaded) { loaded.asImageBitmap() }
+            Image(
+                bitmap = image,
+                contentDescription = "封面",
+                modifier = Modifier
+                    .fillMaxSize()
+                    // alpha 只在绘制阶段读取：淡入动画逐帧重绘，不逐帧重组
+                    .graphicsLayer { alpha = fadeIn.value },
+                contentScale = ContentScale.Crop,
+            )
+        }
     }
 }
 
 /**
- * 封面位图加载（IO 线程调用）—— 按来源分派：
- * - 本地 albumArtUri（API 29+）：ContentResolver.loadThumbnail 让系统 MediaProvider
- *   解析音频文件的内嵌封面（FLAC/MP3 等），无内嵌图时返回 null
- * - 服务器 coverUrl：OkHttp 下载 + BitmapFactory 解码
- *
- * @param context 用于获取 ContentResolver
- * @param coverUrl 服务器封面完整 URL；null=不加载网络封面
- * @param albumArtUri 本地专辑封面 URI；null=不加载本地封面
- * @return 解码成功返回 Bitmap，任何失败返回 null（UI 显示占位图标）
+ * 本地封面（IO 线程调用）：ContentResolver.loadThumbnail（API 29+）让系统 MediaProvider
+ * 解析音频文件的内嵌封面（FLAC/MP3 等）；无内嵌图或低于 API 29 时返回 null（UI 显示占位图标）
  */
-internal fun loadCoverBitmap(
-    context: Context,
-    coverUrl: String?,
-    albumArtUri: String?,
-): Bitmap? = when {
-    // 本地封面优先：低于 API 29 无 loadThumbnail，直接落到占位图标
-    albumArtUri != null && Build.VERSION.SDK_INT >= 29 -> runCatching {
+private fun loadLocalCoverThumbnail(context: Context, albumArtUri: String): Bitmap? {
+    if (Build.VERSION.SDK_INT < 29) return null
+    return runCatching {
         context.contentResolver.loadThumbnail(
             Uri.parse(albumArtUri),
             // 512px 兼顾列表缩略图与播放页大封面的清晰度
@@ -4162,8 +4312,6 @@ internal fun loadCoverBitmap(
             null,
         )
     }.getOrNull()
-    coverUrl != null -> CoverArtLoader.load(coverUrl)
-    else -> null
 }
 
 
