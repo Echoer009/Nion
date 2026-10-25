@@ -160,6 +160,13 @@ class ToolExecutor(
 
         // Pydantic 风格校验
         val schema = tool.parametersSchema()
+        // 参数规范化（原地修改）：修正 LLM 常见偏差后再校验——
+        // 1. 字段别名映射（title→name、due_date→reminder 等高置信度别名）
+        // 2. 枚举值归一（大小写折叠 + 中英对照 + 单复数折叠）
+        // 3. 剔除 schema 未定义的编造字段
+        // 不做这一步时，LLM 传常见别名字段会被直接判为校验失败，
+        // 反复重试仍失败，用户侧表现为"AI 无法顺畅建任务"。
+        ToolParamNormalizer.normalize(params, schema)
         val validation = ToolValidator.validate(params, schema)
         if (!validation.isValid) {
             return ToolResult(

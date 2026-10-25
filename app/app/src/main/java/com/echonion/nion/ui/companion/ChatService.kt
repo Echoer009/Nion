@@ -1099,65 +1099,183 @@ object ChatService {
     // ═══════════════════════════════════════════════════════════════════
 
     /**
-     * 将消息列表中的 OpenAI 多模态格式转换为 Anthropic 原生格式。
+     * 将消息列表中的 OpenAI 格式消息转换为 Anthropic 原生格式。
      *
-     * OpenAI 使用 `image_url` + data URI，Anthropic 使用 `image` + `source.base64`。
-     * 此方法遍历所有消息，将 content 中的 image_url 块转换为 Anthropic 的 image 块。
-     * 纯文本消息（content 为 String）保持不变。
+     * 转换覆盖三类内容：
+     * 1. **多模态图片**：OpenAI 的 `image_url` + data URI → Anthropic 的 `image` + source.base64
+     * 2. **工具调用请求**：assistant 消息上的 OpenAI `tool_calls` 数组
+     *    → Anthropic content 数组中的 `tool_use` 块
+     * 3. **工具执行结果**：`role:"tool"` 消息 → Anthropic 的 `role:"user"` +
+     *    `tool_result` 内容块
      *
-     * 转换规则：
-     * - content 为 String → 不变
-     * - content 为 JSONArray → 遍历每个元素：
-     *   - type == "image_url" → 提取 data URI 中的 base64 和 MIME，转为 Anthropic 的 image 块
-     *   - type == "text" → 保持不变
-     *   - 其他类型 → 保持不变
+     * 历史问题：此前只转换了图片格式，工具消息原样透传。Anthropic Messages API
+     * 不接受 `role:"tool"`（只允许 user/assistant），也不认识顶层的 `tool_calls`
+     * 字段——工具实际执行成功后，回传结果的后续请求全部被服务端以 400 拒绝，
+     * 表现为"任务建了但对话立刻报错、之后每条消息都失败"。
      *
      * @param messages 原始消息列表
      * @return 转换后的消息列表（新对象，不修改原始消息）
      */
     private fun convertToAnthropicFormat(messages: List<JSONObject>): List<JSONObject> {
-        return messages.map { msg ->
-            val content = msg.opt("content")
-            // content 为 JSONArray 时，可能包含多模态内容，需要转换
-            if (content is JSONArray) {
-                val converted = JSONArray()
-                for (i in 0 until content.length()) {
-                    val part = content.getJSONObject(i)
-                    val type = part.optString("type", "")
-                    if (type == "image_url") {
-                        // 从 OpenAI 的 image_url 格式提取 data URI
-                        val imageUrlObj = part.getJSONObject("image_url")
-                        val dataUri = imageUrlObj.getString("url")
-                        // 解析 data URI：data:image/jpeg;base64,xxxxx
-                        val mimeAndData = dataUri.removePrefix("data:")
-                        val semiIdx = mimeAndData.indexOf(";base64,")
-                        if (semiIdx >= 0) {
-                            val mimeType = mimeAndData.substring(0, semiIdx)
-                            val base64Data = mimeAndData.substring(semiIdx + ";base64,".length)
-                            // 转为 Anthropic 原生格式
-                            converted.put(JSONObject().apply {
-                                put("type", "image")
-                                put("source", JSONObject().apply {
-                                    put("type", "base64")
-                                    put("media_type", mimeType)
-                                    put("data", base64Data)
-                                })
-                            })
-                        }
-                    } else {
-                        // 文本块和其他类型块保持不变
-                        converted.put(part)
-                    }
+        // 第一步：逐条消息转换（图片格式 + 两类工具消息格式）
+        val converted = messages.map { convertSingleToAnthropic(it) }
+        // 第二步：合并连续的工具结果消息。
+        // Anthropic 要求消息角色在 user/assistant 间交替；一次 assistant 回复
+        // 可能携带多个工具调用，对应多条 tool_result。依赖服务端自动合并连续
+        // user 消息不可靠，这里显式合并为一条 user 消息的多个 tool_result 块。
+        return mergeConsecutiveToolResults(converted)
+    }
+
+    /**
+     * 转换单条消息为 Anthropic 原生格式。
+     *
+     * 按优先级分三种情况处理：
+     * - assistant 消息携带 OpenAI 格式 `tool_calls` → 转为 content 数组中的
+     *   `tool_use` 块（arguments 是 JSON 字符串，须解析为对象放入 input）
+     * - `role:"tool"` 的工具结果消息 → 转为 `role:"user"` + `tool_result` 块
+     * - 普通消息（纯文本 content 或多模态数组）→ 仅转换其中的 image_url 块
+     *
+     * @param msg 原始消息对象
+     * @return 转换后的新消息对象；普通纯文本消息原样返回（不复制）
+     */
+    private fun convertSingleToAnthropic(msg: JSONObject): JSONObject {
+        val role = msg.optString("role", "")
+
+        // ── 情况 1：assistant 消息携带 OpenAI 格式 tool_calls ──
+        if (role == "assistant" && msg.has("tool_calls")) {
+            val content = JSONArray()
+            // 保留 assistant 已有的文本内容（OpenAI 允许 tool_calls 与文本共存）
+            val text = msg.optString("content", "")
+            if (text.isNotEmpty() && text != "null") {
+                content.put(JSONObject().apply {
+                    put("type", "text")
+                    put("text", text)
+                })
+            }
+            // 每个工具调用转成一个 tool_use 块
+            val toolCalls = msg.optJSONArray("tool_calls") ?: JSONArray()
+            for (i in 0 until toolCalls.length()) {
+                val tc = toolCalls.getJSONObject(i)
+                val function = tc.optJSONObject("function") ?: continue
+                // arguments 为 JSON 字符串，Anthropic 要求 input 是对象；
+                // 解析失败时退化为空对象，避免整条消息序列化失败
+                val input = try {
+                    JSONObject(function.optString("arguments", "{}"))
+                } catch (_: Exception) {
+                    JSONObject()
                 }
-                // 返回新 JSONObject，content 已转换
-                JSONObject(msg.toString()).apply {
-                    put("content", converted)
-                }
-            } else {
-                // 纯文本消息，不需要转换
-                msg
+                content.put(JSONObject().apply {
+                    put("type", "tool_use")
+                    put("id", tc.optString("id", ""))
+                    put("name", function.optString("name", ""))
+                    put("input", input)
+                })
+            }
+            // 构造全新的 assistant 消息（丢弃 tool_calls 等 OpenAI 专有字段）
+            return JSONObject().apply {
+                put("role", "assistant")
+                put("content", content)
             }
         }
+
+        // ── 情况 2：role="tool" 的工具结果消息 ──
+        // Anthropic 要求工具结果以 user 消息 + tool_result 块回传，
+        // tool_use_id 关联对应的工具调用；content 用字符串形式（API 允许）
+        if (role == "tool") {
+            return JSONObject().apply {
+                put("role", "user")
+                put("content", JSONArray().put(JSONObject().apply {
+                    put("type", "tool_result")
+                    put("tool_use_id", msg.optString("tool_call_id", ""))
+                    put("content", msg.optString("content", ""))
+                }))
+            }
+        }
+
+        // ── 情况 3：普通消息（文本或多模态数组）── 仅转换 image_url 块
+        val content = msg.opt("content")
+        if (content is JSONArray) {
+            val convertedContent = JSONArray()
+            for (i in 0 until content.length()) {
+                val part = content.getJSONObject(i)
+                val type = part.optString("type", "")
+                if (type == "image_url") {
+                    // 从 OpenAI 的 image_url 格式提取 data URI
+                    val imageUrlObj = part.getJSONObject("image_url")
+                    val dataUri = imageUrlObj.getString("url")
+                    // 解析 data URI：data:image/jpeg;base64,xxxxx
+                    val mimeAndData = dataUri.removePrefix("data:")
+                    val semiIdx = mimeAndData.indexOf(";base64,")
+                    if (semiIdx >= 0) {
+                        val mimeType = mimeAndData.substring(0, semiIdx)
+                        val base64Data = mimeAndData.substring(semiIdx + ";base64,".length)
+                        // 转为 Anthropic 原生格式
+                        convertedContent.put(JSONObject().apply {
+                            put("type", "image")
+                            put("source", JSONObject().apply {
+                                put("type", "base64")
+                                put("media_type", mimeType)
+                                put("data", base64Data)
+                            })
+                        })
+                    }
+                } else {
+                    // 文本块和其他类型块保持不变
+                    convertedContent.put(part)
+                }
+            }
+            // 返回新 JSONObject，content 已转换
+            return JSONObject(msg.toString()).apply {
+                put("content", convertedContent)
+            }
+        }
+        // 纯文本消息，不需要转换
+        return msg
+    }
+
+    /**
+     * 合并消息列表中连续的"纯 tool_result user 消息"。
+     *
+     * 判断标准：role=user 且 content 数组非空且全部为 tool_result 块。
+     * 合并方式：把当前消息的 content 块追加到前一条同类消息的 content 数组末尾。
+     *
+     * @param messages 转换后的消息列表
+     * @return 合并后的新列表（原列表中作为合并目标的消息对象会被原地修改 content）
+     */
+    private fun mergeConsecutiveToolResults(messages: List<JSONObject>): List<JSONObject> {
+        val result = mutableListOf<JSONObject>()
+        for (msg in messages) {
+            val last = result.lastOrNull()
+            // 上一条和当前条都是纯 tool_result 消息时，合并 content 数组
+            if (last != null && isPureToolResultMessage(last) && isPureToolResultMessage(msg)) {
+                val merged = JSONArray()
+                val lastContent = last.getJSONArray("content")
+                for (i in 0 until lastContent.length()) merged.put(lastContent.get(i))
+                val curContent = msg.getJSONArray("content")
+                for (i in 0 until curContent.length()) merged.put(curContent.get(i))
+                last.put("content", merged)
+            } else {
+                result.add(msg)
+            }
+        }
+        return result
+    }
+
+    /**
+     * 判断消息是否为"纯 tool_result 的 user 消息"（[mergeConsecutiveToolResults]
+     * 的合并判定条件）。
+     *
+     * @param msg 待判定的消息对象
+     * @return true 表示该消息只承载工具结果，可参与合并
+     */
+    private fun isPureToolResultMessage(msg: JSONObject): Boolean {
+        if (msg.optString("role") != "user") return false
+        val content = msg.optJSONArray("content") ?: return false
+        if (content.length() == 0) return false
+        for (i in 0 until content.length()) {
+            if (content.optJSONObject(i)?.optString("type") != "tool_result") return false
+        }
+        return true
     }
 
     // ═══════════════════════════════════════════════════════════════════
