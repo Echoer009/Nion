@@ -2241,7 +2241,7 @@ class CompanionViewModel(
      * OpenAI 格式要求 assistant 消息包含 tool_calls 数组，
      * 格式为：{"role":"assistant", "tool_calls": [{id, type, function:{name, arguments}}]}
      *
-     * Anthropic 也接受同样的格式（在 messages 数组中）。
+     * Anthropic 不认识 tool_calls，发送前由 ChatService.convertToAnthropicFormat 转为 tool_use 块。
      *
      * @param toolCalls        LLM 请求的工具调用列表
      * @param reasoningContent DeepSeek 推理模型的思考内容，必须回传到后续请求
@@ -2275,7 +2275,8 @@ class CompanionViewModel(
      * 将工具执行结果追加到 API 对话历史。
      *
      * OpenAI 格式：{"role":"tool", "tool_call_id":"...", "content":"..."}
-     * 此格式同时兼容 Anthropic（Anthropic 在 messages 中也接受 role=tool）。
+     * Anthropic 只接受 user/assistant 角色，发送前由 ChatService.convertToAnthropicFormat
+     * 转为 role=user + tool_result 块。
      *
      * @param toolCallId 对应的 tool call ID，用于关联请求和结果
      * @param result     工具执行的 JSON 结果字符串
