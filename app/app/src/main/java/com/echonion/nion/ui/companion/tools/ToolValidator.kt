@@ -1,5 +1,6 @@
 package com.echonion.nion.ui.companion.tools
 
+import android.util.Log
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -41,16 +42,22 @@ object ToolValidator {
         val properties = schema.optJSONObject("properties") ?: JSONObject()
         val required = schema.optJSONArray("required")
 
-        // 第一步：检查 params 中是否存在 schema 未定义的额外字段
-        // 防止 AI 编造不存在的参数名（如 new_checklist），导致静默忽略
+        // 第一步：剔除 schema 未定义的额外字段（不报错）
+        // 历史问题：此处曾把未知字段判为校验失败。LLM 传 title / due_date 等
+        // 常见别名字段时整次调用失败，收到报错后重试往往仍带错误字段，陷入
+        // 循环——用户侧表现为"AI 无法顺畅建任务"。
+        // 现在：常见别名已由 [ToolParamNormalizer] 在校验前映射为 schema 字段；
+        // 仍无法映射的编造字段（如 tags、id）在此静默剔除并打日志，不再阻断执行。
         val knownFields = (0 until properties.length())
             .map { properties.names().getString(it) }
             .toSet()
-        val paramKeys = params.keys()
-        while (paramKeys.hasNext()) {
-            val key = paramKeys.next()
+        // 快照键集合再遍历：循环体内会 remove 修改 JSONObject，
+        // 直接迭代其 keys() 迭代器会触发 ConcurrentModificationException
+        val paramKeys = params.keys().asSequence().toList()
+        for (key in paramKeys) {
             if (!knownFields.contains(key)) {
-                errors.add("$key: 未知参数，schema 中未定义。可用参数: ${knownFields.sorted().joinToString(", ")}")
+                val removed = params.remove(key)
+                Log.w("ToolValidator", "剔除未知参数: $key = $removed（schema 未定义，已忽略而非报错）")
             }
         }
 
