@@ -4,14 +4,13 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import java.io.File
-import java.io.FileInputStream
-import java.io.FileOutputStream
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.ExperimentalSharedTransitionApi
@@ -564,8 +563,10 @@ private fun BatteryPermissionCard(context: Context) {
 /**
  * 数据管理卡片 —— 提供导出和导入功能。
  *
- * 导出：将 app 数据（nion.db + stickers/ + avatar/）打包成 zip 保存到用户选择的目录。
- * 导入：从用户选择的 zip 文件中恢复数据到 app 数据目录。
+ * 导出：把内部数据库快照（zip 根条目 `nion.db`）以及外置数据目录里的
+ * 表情包（`stickers/`）、头像（`avatar/`）、内部附件（`attachments/`）打包成 zip。
+ * 导入：从 zip 恢复数据 —— 数据库先落到暂存文件，下次启动时由 NionApp 替换正式库
+ * （见 [exportData] / [importData]）。
  *
  * 使用 SAF (Storage Access Framework) 选择目标位置/文件，兼容 Android 11+ 的分区存储限制。
  *
@@ -579,6 +580,9 @@ private fun DataManagementCard(context: Context) {
     var isExporting by remember { mutableStateOf(false) }
     var isImporting by remember { mutableStateOf(false) }
 
+    // 主线程 Handler：导出/导入都在后台线程执行，结果需要回到主线程刷新状态和弹 Toast
+    val mainHandler = remember { Handler(Looper.getMainLooper()) }
+
     // 导出：用户选择保存位置后触发
     val exportLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.CreateDocument("application/zip"),
@@ -588,15 +592,15 @@ private fun DataManagementCard(context: Context) {
             Thread {
                 try {
                     exportData(context, uri)
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    mainHandler.post {
                         Toast.makeText(context, "导出成功", Toast.LENGTH_SHORT).show()
                     }
                 } catch (e: Exception) {
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    mainHandler.post {
                         Toast.makeText(context, "导出失败: ${e.message}", Toast.LENGTH_LONG).show()
                     }
                 } finally {
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                    mainHandler.post {
                         isExporting = false
                     }
                 }
@@ -709,7 +713,7 @@ private fun DataManagementCard(context: Context) {
                 Text("确认导入", fontWeight = FontWeight.Bold)
             },
             text = {
-                Text("导入将覆盖当前所有数据（任务、表情包、头像等），此操作不可撤销。建议先导出备份。")
+                Text("导入将覆盖当前所有数据（任务、表情包、头像等），此操作不可撤销。建议先导出备份。导入完成后应用会自动重启。")
             },
             confirmButton = {
                 TextButton(
@@ -719,15 +723,17 @@ private fun DataManagementCard(context: Context) {
                         Thread {
                             try {
                                 importData(context, uri)
-                                android.os.Handler(android.os.Looper.getMainLooper()).post {
-                                    Toast.makeText(context, "导入成功，请重启应用", Toast.LENGTH_LONG).show()
+                                // 数据库此时只是暂存文件，必须重启进程让 NionApp 在打开
+                                // Rust 连接前完成替换（直接覆盖正在使用的库会损坏数据）
+                                mainHandler.post {
+                                    restartAppAfterImport(context)
                                 }
                             } catch (e: Exception) {
-                                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                mainHandler.post {
                                     Toast.makeText(context, "导入失败: ${e.message}", Toast.LENGTH_LONG).show()
                                 }
                             } finally {
-                                android.os.Handler(android.os.Looper.getMainLooper()).post {
+                                mainHandler.post {
                                     isImporting = false
                                 }
                             }
@@ -747,111 +753,29 @@ private fun DataManagementCard(context: Context) {
 }
 
 /**
- * 导出数据到指定 URI（zip 格式）。
+ * 导入完成后的冷重启 —— 让暂存数据库真正生效。
  *
- * 将 app 数据目录下的所有文件（nion.db、stickers/、avatar/）打包为 zip。
+ * 导入只把备份里的数据库写进 `databases/nion.db.import`，正式库仍被 Rust 端连接持有，
+ * 直接覆盖会破坏数据；必须结束进程，由 [com.echonion.nion.NionApp] 在下次启动、
+ * 打开连接之前完成替换。
  *
- * @param context Application Context
- * @param destUri SAF 返回的目标文件 URI
+ * 先弹 Toast 再延迟 800ms 重启，让用户看到结果；用 makeRestartActivityTask 重建任务栈，
+ * 用户重开后不会回到旧的 Activity 状态。
+ *
+ * @param context 用于取包名和启动入口
  */
-private fun exportData(context: Context, destUri: Uri) {
-    val dataDir = context.getExternalFilesDir(null) ?: context.getDir("nion_data", Context.MODE_PRIVATE)
-    val zipOut = java.util.zip.ZipOutputStream(context.contentResolver.openOutputStream(destUri))
-
-    // 先把 WAL 日志合并到主 db 文件，确保 nion.db 处于一致状态
-    val dbFile = File(dataDir, "nion.db")
-    if (dbFile.exists()) {
-        try {
-            val db = android.database.sqlite.SQLiteDatabase.openDatabase(
-                dbFile.absolutePath, null,
-                android.database.sqlite.SQLiteDatabase.OPEN_READWRITE,
-            )
-            db.execSQL("PRAGMA wal_checkpoint(TRUNCATE)")
-            db.close()
-        } catch (_: Exception) {}
-    }
-
-    fun addFileToZip(file: File, entryPath: String) {
-        if (file.isDirectory) {
-            file.listFiles()?.forEach { child ->
-                addFileToZip(child, "$entryPath/${child.name}")
-            }
-        } else if (file.exists()) {
-            zipOut.putNextEntry(java.util.zip.ZipEntry(entryPath))
-            FileInputStream(file).use { input ->
-                val buffer = ByteArray(8192)
-                var len: Int
-                while (input.read(buffer).also { len = it } > 0) {
-                    zipOut.write(buffer, 0, len)
-                }
-            }
-            zipOut.closeEntry()
+private fun restartAppAfterImport(context: Context) {
+    Toast.makeText(context, "导入成功，正在重启…", Toast.LENGTH_SHORT).show()
+    Handler(Looper.getMainLooper()).postDelayed({
+        val component = context.packageManager
+            .getLaunchIntentForPackage(context.packageName)
+            ?.component
+        if (component != null) {
+            context.startActivity(Intent.makeRestartActivityTask(component))
         }
-    }
-
-    // 遍历数据目录下所有文件，排除 WAL 临时文件
-    dataDir.listFiles()?.filter { it.name != "nion.db-wal" && it.name != "nion.db-shm" }?.forEach {
-        addFileToZip(it, it.name)
-    }
-    zipOut.close()
-}
-
-/**
- * 从 zip URI 导入数据，覆盖 app 数据目录。
- *
- * @param context Application Context
- * @param srcUri SAF 返回的源文件 URI
- */
-private fun importData(context: Context, srcUri: Uri) {
-    val dataDir = context.getExternalFilesDir(null) ?: context.getDir("nion_data", Context.MODE_PRIVATE)
-    val zipIn = java.util.zip.ZipInputStream(context.contentResolver.openInputStream(srcUri))
-
-    var entry = zipIn.nextEntry
-    while (entry != null) {
-        val outFile = File(dataDir, entry.name)
-        // 安全检查：防止 zip 路径遍历攻击
-        if (!outFile.canonicalPath.startsWith(dataDir.canonicalPath)) {
-            zipIn.closeEntry()
-            entry = zipIn.nextEntry
-            continue
-        }
-
-        if (entry.isDirectory) {
-            outFile.mkdirs()
-        } else {
-            outFile.parentFile?.mkdirs()
-            FileOutputStream(outFile).use { output ->
-                val buffer = ByteArray(8192)
-                var len: Int
-                while (zipIn.read(buffer).also { len = it } > 0) {
-                    output.write(buffer, 0, len)
-                }
-            }
-        }
-        zipIn.closeEntry()
-        entry = zipIn.nextEntry
-    }
-    zipIn.close()
-
-    // 修复数据库中 sticker/attachment 的绝对路径，使其指向当前数据目录
-    val dbFile = File(dataDir, "nion.db")
-    if (dbFile.exists()) {
-        try {
-            val db = android.database.sqlite.SQLiteDatabase.openDatabase(
-                dbFile.absolutePath, null,
-                android.database.sqlite.SQLiteDatabase.OPEN_READWRITE,
-            )
-            val newPath = dataDir.absolutePath
-            // 将任何旧绝对路径的 stickers/ 子目录替换为当前路径
-            db.execSQL(
-                "UPDATE stickers SET file_path = REPLACE(file_path, SUBSTR(file_path, 1, INSTR(file_path, '/stickers/')), '$newPath/') WHERE file_path LIKE '%/stickers/%'"
-            )
-            db.execSQL(
-                "UPDATE attachments SET file_path = REPLACE(file_path, SUBSTR(file_path, 1, INSTR(file_path, '/attachments/')), '$newPath/') WHERE file_path LIKE '%/attachments/%'"
-            )
-            db.close()
-        } catch (_: Exception) {}
-    }
+        // 结束旧进程：Application 会在新进程里重新初始化，Rust 连接随之释放
+        Runtime.getRuntime().exit(0)
+    }, 800)
 }
 
 /**

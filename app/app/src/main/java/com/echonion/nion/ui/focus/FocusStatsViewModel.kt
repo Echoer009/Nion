@@ -2,7 +2,6 @@ package com.echonion.nion.ui.focus
 
 import android.app.Application
 import android.database.sqlite.SQLiteDatabase
-import java.io.File
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -197,8 +196,9 @@ class FocusStatsViewModel(
     class Factory(private val app: Application) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")
         override fun <T : ViewModel> create(modelClass: Class<T>): T {
-            val dataDir = app.getExternalFilesDir(null) ?: app.getDir("nion_data", 0)
-            val dbPath = File(dataDir, "nion.db").absolutePath
+            // 主库自 0.9.0 起位于内部 databases/ 目录（外置 FUSE 存储上的 SQLite 写入不可靠），
+            // 与 NionApp.prepareDatabasePath() 使用同一个文件
+            val dbPath = app.getDatabasePath("nion.db").absolutePath
             return FocusStatsViewModel(dbPath) as T
         }
     }

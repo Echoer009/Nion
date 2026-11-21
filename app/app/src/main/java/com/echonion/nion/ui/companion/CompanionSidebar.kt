@@ -112,8 +112,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewModelScope
+import android.content.Context
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.os.Handler
+import android.os.Looper
+import java.io.File
 import kotlinx.coroutines.launch
 import androidx.compose.runtime.rememberCoroutineScope
 import uniffi.nion_core.ConversationData
@@ -125,6 +129,7 @@ import com.echonion.nion.ui.companion.tools.ToolPhrasePool
 import com.echonion.nion.ui.task.WheelSpinner
 import com.echonion.nion.ui.theme.NionAlpha
 import com.echonion.nion.ui.theme.NionColors
+import com.echonion.nion.util.AvatarStorage
 import com.echonion.nion.util.BitmapUtils
 import androidx.compose.ui.platform.LocalDensity
 import com.echonion.nion.ui.icons.LucideIcons
@@ -565,17 +570,20 @@ private fun ProfileContent(
     var expandedCard by remember { mutableStateOf<String?>(null) }
 
     // 系统图片选择器：选取头像图片
+    // 选择器返回的 content:// 授权只在本机当前安装内有效（重装、换机或清理授权后失效），
+    // 所以选中后立刻把字节复制到外置私有目录的 avatar/ 下，设置里只保存 file:// URI。
+    // 复制是磁盘 IO，放到后台线程；结果回主线程再更新 ViewModel。
     val imagePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia(),
     ) { uri ->
         if (uri != null) {
-            try {
-                context.contentResolver.takePersistableUriPermission(
-                    uri,
-                    android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION,
-                )
-            } catch (_: SecurityException) {}
-            viewModel.updateAvatarUri(uri.toString())
+            Thread {
+                savePickedAvatar(context, uri)?.let { saved ->
+                    Handler(Looper.getMainLooper()).post {
+                        viewModel.updateAvatarUri(Uri.fromFile(saved).toString())
+                    }
+                }
+            }.start()
         }
     }
 
@@ -742,6 +750,34 @@ private fun ProfileContent(
     }
     } // SharedTransitionLayout end
 } // ProfileContent end
+
+/**
+ * 把系统选择器选中的头像图片复制到本地 avatar/ 目录。
+ *
+ * 复制成功后会删除旧的 `custom_avatar*` 文件，避免每次换头像都在外置目录堆积；
+ * 预置头像（`avatar.png`）和其它文件不受影响。文件名带时间戳，既不会覆盖正在
+ * 显示的图片，也保证 CompanionAvatar 的 `remember(avatarUri)` 能感知变化并重新解码。
+ *
+ * 该函数包含磁盘 IO，调用方需在后台线程执行。
+ *
+ * @param context 用于 contentResolver
+ * @param uri 系统图片选择器返回的 content:// URI
+ * @return 复制成功后的本地文件；读取或写入失败时返回 null（保留原头像）
+ */
+private fun savePickedAvatar(context: Context, uri: Uri): File? {
+    val avatarDir = AvatarStorage.avatarDir(context)
+    val dest = File(
+        avatarDir,
+        "custom_avatar_${System.currentTimeMillis()}.${AvatarStorage.imageExtension(context, uri)}",
+    )
+    if (!AvatarStorage.copyToFile(context, uri, dest)) return null
+    // 复制成功后才清理旧的 custom_avatar*：先删后拷一旦复制失败，
+    // 当前正在使用的头像文件就已经没了
+    avatarDir.listFiles()?.forEach { file ->
+        if (file.name.startsWith("custom_avatar") && file != dest) file.delete()
+    }
+    return dest
+}
 
 /**
  * 分组标题。

@@ -15,6 +15,7 @@ import com.echonion.nion.reminder.WeatherAlertEvent
 import com.echonion.nion.reminder.WeatherAlertScheduler
 import com.echonion.nion.ui.companion.tools.DataType
 import com.echonion.nion.ui.focus.CompletionEvent
+import com.echonion.nion.ui.settings.STAGING_DB_NAME
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
@@ -207,14 +208,17 @@ class NionApp : Application() {
     /**
      * 计算数据库路径，并在首次运行时把旧外置存储的库迁移到内部存储。
      *
-     * 迁移规则：内部库不存在 && 旧外置库存在 → 整文件拷贝到内部 databases/ 目录，
-     * 成功后将旧库改名 nion.db.migrated 留档（不再使用），失败则回退用全新内部库。
+     * 执行顺序（都在 [NionCore] 打开连接之前完成，因此可以安全替换文件）：
+     * 1. 若存在导入暂存库 `nion.db.import`，先把它安装为正式库；
+     * 2. 内部库不存在 && 旧外置库存在 → 整文件拷贝到内部 databases/ 目录，
+     *    成功后将旧库改名 nion.db.migrated 留档（不再使用），失败则回退用全新内部库。
      *
      * @return 内部存储数据库文件绝对路径
      */
     private fun prepareDatabasePath(): String {
         val target = getDatabasePath("nion.db") // → /data/user/0/<包名>/databases/nion.db
         target.parentFile?.mkdirs()
+        installImportedDatabase(target)
         val legacy = getExternalFilesDir(null)?.resolve("nion.db")
         if (!target.exists() && legacy != null && legacy.exists()) {
             try {
@@ -231,6 +235,39 @@ class NionApp : Application() {
         return target.absolutePath
     }
 
+    /**
+     * 安装数据导入留下的暂存库 —— 把 `databases/nion.db.import` 换成正式库 `nion.db`。
+     *
+     * 为什么必须在这里做：进程运行期间 Rust 端一直持有正式库的连接，运行中覆盖文件会
+     * 直接破坏数据。导入（[com.echonion.nion.ui.settings.importData]）只写暂存文件并
+     * 冷重启应用，本方法在 [NionCore] 打开连接之前完成替换。
+     *
+     * @param target 正式数据库文件
+     */
+    private fun installImportedDatabase(target: File) {
+        val staging = getDatabasePath(STAGING_DB_NAME)
+        if (!staging.exists()) return
+        try {
+            // 旧库及其日志一并清掉：残留的 -wal 会被 SQLite 回放，污染新库
+            listOf("", "-wal", "-shm", "-journal").forEach { suffix ->
+                File(target.path + suffix).delete()
+            }
+            // 同目录 rename 基本不会失败；真失败时退化为拷贝，避免暂存库被丢掉
+            if (!staging.renameTo(target)) {
+                staging.inputStream().use { input ->
+                    target.outputStream().use { input.copyTo(it) }
+                }
+                staging.delete()
+            }
+            // 暂存库的伴随文件在改名后会变成孤儿，一并清理
+            listOf("-wal", "-shm", "-journal").forEach { suffix ->
+                File(staging.path + suffix).delete()
+            }
+            Log.i("NionApp", "已安装导入的数据库: ${target.absolutePath}")
+        } catch (e: Exception) {
+            Log.e("NionApp", "安装导入的数据库失败", e)
+        }
+    }
 
     companion object {
         /** 全局 Application 实例引用，供 QueryTool 天气查询等需要 Context 的组件使用 */
